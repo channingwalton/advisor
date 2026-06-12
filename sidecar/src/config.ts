@@ -13,6 +13,9 @@ export interface AdvisorConfig {
   classifierModel: string;
   /// "" = SDK default
   researchModel: string;
+  /// Allow MCP connector tools that take actions (send/create/update/...).
+  /// Read/search connector tools are always allowed.
+  allowMcpActions: boolean;
 }
 
 const DEFAULTS: AdvisorConfig = {
@@ -22,6 +25,7 @@ const DEFAULTS: AdvisorConfig = {
   maxTriggersPerPass: 2,
   classifierModel: "haiku",
   researchModel: "",
+  allowMcpActions: false,
 };
 
 const CONFIG_PATH = `${homedir()}/Library/Application Support/Advisor/config.json`;

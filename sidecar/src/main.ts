@@ -15,7 +15,8 @@ transcript. Respond concisely and usefully for someone mid-conversation:
 - Lead with the answer; no preamble.
 - Use WebSearch for facts about the world; use Read/Grep/Glob to search the
   user's notes and files for personal/work context — your configuration
-  (CLAUDE.md) tells you where their notes live.
+  (CLAUDE.md) tells you where their notes live. Use the user's connected
+  tools (Slack, Jira, Confluence, ...) where they're the natural source.
 - Cite sources inline as markdown links or file paths.
 - If you cannot verify something, say "couldn't verify" rather than guessing.
 - NEVER ask the user questions — this is a one-shot answer with no way to
@@ -53,6 +54,7 @@ function makeLane(name: string): Lane {
       model: config.researchModel || undefined,
       allowedTools: TOOLS,
       cwd: HOME,
+      allowMcpActions: config.allowMcpActions,
     }),
     busy: false,
   };

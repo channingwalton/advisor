@@ -15,6 +15,7 @@ struct AdvisorConfig: Codable, Equatable {
     var maxTriggersPerPass = 2
     var classifierModel = "haiku"
     var researchModel = ""
+    var allowMcpActions = false
     /// App-side only: STT locale identifier (e.g. en_GB).
     var sttLocale = "en_GB"
 
@@ -42,6 +43,9 @@ struct AdvisorConfig: Codable, Equatable {
 
 struct PreferencesView: View {
     @State private var config = AdvisorConfig.load()
+    @AppStorage("sttEngine") private var sttEngine = STTEngine.apple.rawValue
+    @AppStorage("agentLanes") private var agentLanes = 3
+    @AppStorage("captureSystem") private var captureSystem = true
 
     var body: some View {
         Form {
@@ -51,6 +55,11 @@ struct PreferencesView: View {
                     Text("Haiku — fast/cheap").tag("haiku")
                     Text("Opus — deepest").tag("opus")
                 }
+                Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
+                Toggle("Allow connector actions", isOn: $config.allowMcpActions)
+                Text("Off: connectors (Slack, Jira, …) are read/search only. On: agents may also send, create, and update — use with care.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Extra instructions")
                     TextEditor(text: $config.extraInstructions)
@@ -83,9 +92,14 @@ struct PreferencesView: View {
             }
 
             Section("Transcription") {
+                Picker("Engine", selection: $sttEngine) {
+                    Text("Apple speech (recommended)").tag(STTEngine.apple.rawValue)
+                    Text("Whisper").tag(STTEngine.whisper.rawValue)
+                }
+                Toggle("Capture system audio", isOn: $captureSystem)
                 TextField("Locale", text: $config.sttLocale)
                     .frame(maxWidth: 160)
-                Text("Apple speech locale, e.g. en_GB. Applies on next Listen.")
+                Text("Apple speech locale, e.g. en_GB. Engine and locale apply on next Listen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -76,7 +76,14 @@ export interface AgentSessionOptions {
   model?: string;
   allowedTools: string[];
   cwd?: string;
+  /// Allow MCP connector tools that take actions (send/create/...). Read/search
+  /// connector tools are always allowed.
+  allowMcpActions?: boolean;
 }
+
+/// MCP tool names that mutate external state.
+const MCP_ACTION_PATTERN =
+  /(send|post|create|update|delete|remove|write|upload|schedule|transition|invite|archive|publish|edit|move|rename|merge|close|assign|set[_A-Z])/i;
 
 /**
  * A long-lived Agent SDK session fed via streaming input. Avoids the ~5–10 s
@@ -146,6 +153,21 @@ export class AgentSession {
     input: Record<string, unknown>
   ): Promise<PermissionResult> => {
     const allow: PermissionResult = { behavior: "allow", updatedInput: input };
+    // User-configured MCP connectors (Slack, Jira, ...): reads/searches allowed;
+    // action tools only when enabled in preferences.
+    if (toolName.startsWith("mcp__") || toolName === "ListMcpResources"
+        || toolName === "ReadMcpResource") {
+      if (MCP_ACTION_PATTERN.test(toolName) && !this.opts.allowMcpActions) {
+        log(`${this.opts.name}: denied MCP action ${toolName}`);
+        return {
+          behavior: "deny",
+          message:
+            `${toolName} looks like an action (it can change external state). ` +
+            `Advisor allows read/search connector tools only, unless "Allow connector actions" is enabled in Preferences.`,
+        };
+      }
+      return allow;
+    }
     switch (toolName) {
       case "WebSearch":
       case "WebFetch":

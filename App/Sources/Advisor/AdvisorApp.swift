@@ -111,8 +111,9 @@ struct TranscriptView: View {
     @State private var fatalError: String?
     @State private var devices: [InputDevice] = []
     @State private var selectedDevice: InputDevice?
-    @State private var captureSystem = true
+    @AppStorage("captureSystem") private var captureSystem = true
     @State private var sidecar: SidecarManager?
+    @State private var builtEngine = ""
     @State private var queryText = ""
     @State private var autoCards = true
     @State private var pinned = false
@@ -140,23 +141,9 @@ struct TranscriptView: View {
                 .onChange(of: selectedDevice) { _, d in
                     if let d { micDeviceName = d.name }
                 }
-                Picker("STT", selection: $sttEngine) {
-                    Text("Apple").tag(STTEngine.apple.rawValue)
-                    Text("Whisper").tag(STTEngine.whisper.rawValue)
-                }
-                .frame(maxWidth: 140)
-                .disabled(store.listening)
-                .onChange(of: sttEngine) { _, _ in rebuildRecorder() }
-                Toggle("System audio", isOn: $captureSystem)
-                    .toggleStyle(.checkbox)
-                    .disabled(store.listening)
                 Toggle("Auto cards", isOn: $autoCards)
                     .toggleStyle(.checkbox)
                     .onChange(of: autoCards) { _, on in sidecar?.sendAuto(on) }
-                Stepper("Agents: \(agentLanes)", value: $agentLanes, in: 1...8)
-                    .font(.caption)
-                    .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }
-                    .help("How many research agents run in parallel")
                 Toggle("Pin", isOn: $pinned)
                     .toggleStyle(.checkbox)
                     .onChange(of: pinned) { _, on in
@@ -209,6 +196,10 @@ struct TranscriptView: View {
         .task { setup() }
         .onChange(of: store.utterances) { _, _ in writer?.noteChanged() }
         .onChange(of: store.cards) { _, _ in writer?.noteChanged() }
+        .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }
+        .onChange(of: sttEngine) { _, _ in
+            if !store.listening { rebuildRecorder() }
+        }
     }
 
     private enum FeedItem: Identifiable {
@@ -346,6 +337,7 @@ struct TranscriptView: View {
             store.status =
                 engine == .apple
                 ? "ready — Apple speech" : "ready — \((modelPath as NSString).lastPathComponent)"
+            builtEngine = engine.rawValue
             fatalError = nil
         } catch {
             fatalError = "\(error)"
@@ -365,6 +357,8 @@ struct TranscriptView: View {
             recorder.stop()
             sidecar?.sendSessionEnd()
             writer?.end()
+            // Engine changed in preferences mid-session: apply now.
+            if builtEngine != sttEngine { rebuildRecorder() }
         } else {
             store.utterances = []
             store.cards = []
