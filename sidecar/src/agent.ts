@@ -1,5 +1,10 @@
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import path from "node:path";
 import { log } from "./protocol.js";
+
+type PermissionResult =
+  | { behavior: "allow"; updatedInput: Record<string, unknown> }
+  | { behavior: "deny"; message: string };
 
 /** Unbounded async queue usable as the SDK's streaming prompt input. */
 export class AsyncQueue<T> implements AsyncIterable<T> {
@@ -51,6 +56,8 @@ export interface AgentSessionOptions {
   model?: string;
   allowedTools: string[];
   cwd?: string;
+  /// Directories Read/Grep/Glob may touch. Everything else is denied.
+  readRoots?: string[];
 }
 
 /**
@@ -114,6 +121,43 @@ export class AgentSession {
     return Promise.race([answer, timeout]);
   }
 
+  /// Sandbox policy: web tools allowed; Read/Grep/Glob only inside readRoots;
+  /// everything else (Bash, Write, Edit, ...) denied.
+  private canUseTool = async (
+    toolName: string,
+    input: Record<string, unknown>
+  ): Promise<PermissionResult> => {
+    const allow: PermissionResult = { behavior: "allow", updatedInput: input };
+    switch (toolName) {
+      case "WebSearch":
+      case "WebFetch":
+        return allow;
+      case "Read":
+        return this.pathAllowed(input.file_path) ? allow : this.denyPath(toolName, input.file_path);
+      case "Grep":
+      case "Glob":
+        return this.pathAllowed(input.path) ? allow : this.denyPath(toolName, input.path);
+      default:
+        return { behavior: "deny", message: `${toolName} is not permitted in Advisor` };
+    }
+  };
+
+  private pathAllowed(p: unknown): boolean {
+    const roots = this.opts.readRoots ?? [];
+    if (p === undefined || p === null || p === "") return true; // tool defaults to cwd (a root)
+    if (typeof p !== "string") return false;
+    const resolved = path.resolve(this.opts.cwd ?? "/", p);
+    return roots.some((root) => resolved === root || resolved.startsWith(root + path.sep));
+  }
+
+  private denyPath(tool: string, p: unknown): PermissionResult {
+    log(`${this.opts.name}: denied ${tool} on ${String(p)}`);
+    return {
+      behavior: "deny",
+      message: `Access denied: ${tool} may only access ${this.opts.readRoots?.join(", ")}`,
+    };
+  }
+
   private ensure(): void {
     if (this.input) return;
     const q = new AsyncQueue<SDKUserMessage>();
@@ -124,9 +168,12 @@ export class AgentSession {
         // (stream kept for interrupt())
         systemPrompt: this.opts.systemPrompt,
         model: this.opts.model,
-        allowedTools: this.opts.allowedTools,
+        // Auto-allowed tools (no permission check) — web only.
+        allowedTools: this.opts.allowedTools.filter((t) => t.startsWith("Web")),
+        disallowedTools: ["Bash", "Write", "Edit", "NotebookEdit", "Task", "KillShell"],
         cwd: this.opts.cwd,
-        permissionMode: "bypassPermissions",
+        permissionMode: "default",
+        canUseTool: this.canUseTool,
         maxTurns: 1000,
       },
     });

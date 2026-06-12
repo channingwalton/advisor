@@ -47,6 +47,7 @@ function ensureLanes(): void {
         systemPrompt: SYSTEM,
         allowedTools: TOOLS,
         cwd: VAULT,
+        readRoots: [VAULT],
       }),
       busy: false,
     });
@@ -61,6 +62,7 @@ const queryLane: Lane = {
     systemPrompt: SYSTEM,
     allowedTools: TOOLS,
     cwd: VAULT,
+    readRoots: [VAULT],
   }),
   busy: false,
 };
