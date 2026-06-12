@@ -11,8 +11,7 @@ let repoRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()   // App/
     .deletingLastPathComponent()   // repo root
 
-let defaultModelPath =
-    repoRoot.appendingPathComponent("vendor/whisper.cpp/models/ggml-large-v3-turbo.bin").path
+let defaultModelPath = AppResources.defaultModelPath
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var shared: AppDelegate?

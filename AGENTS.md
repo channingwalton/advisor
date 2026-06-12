@@ -30,7 +30,11 @@ cd App && swift build                  # app
 .build/debug/Advisor --smoke ../vendor/whisper.cpp/samples/jfk.wav
 cd sidecar && npm run build            # tsc (npm install --include=dev first)
 sh test/replay.sh                      # replay fragments through the pipeline
+cd App && sh package.sh                # → dist/Advisor.app (self-contained, ad-hoc signed)
 ```
+
+Resource paths resolve via `AppResources` (bundle when packaged, `repoRoot`
+in a dev checkout) — keep new runtime-resource lookups going through it.
 
 There is no CI. Always build both sides before committing; run the smoke test
 after touching whisper/audio code.

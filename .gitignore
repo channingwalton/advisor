@@ -4,6 +4,9 @@ vendor/
 # Swift
 App/.build/
 
+# Packaged app
+App/dist/
+
 # Node
 sidecar/node_modules/
 sidecar/dist/

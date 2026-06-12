@@ -15,7 +15,7 @@ final class SidecarManager {
     private var stdinHandle: FileHandle?
     private var buffer = Data()
     private let store: TranscriptStore
-    private let sidecarDir = repoRoot.appendingPathComponent("sidecar").path
+    private let sidecarDir = AppResources.sidecarDir
 
     init(store: TranscriptStore) {
         self.store = store
@@ -23,8 +23,20 @@ final class SidecarManager {
 
     func start() {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-lc", "exec node dist/main.js"] // login shell for PATH
+        if let node = AppResources.bundledNode {
+            // Packaged app: run the bundled Node directly; no system Node needed.
+            // Child processes the Agent SDK spawns reuse this via process.execPath.
+            p.executableURL = URL(fileURLWithPath: node)
+            p.arguments = ["dist/main.js"]
+            var env = ProcessInfo.processInfo.environment
+            let nodeDir = URL(fileURLWithPath: node).deletingLastPathComponent().path
+            env["PATH"] = nodeDir + ":" + (env["PATH"] ?? "/usr/bin:/bin")
+            p.environment = env
+        } else {
+            // Dev checkout: resolve `node` from the login shell PATH.
+            p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            p.arguments = ["-lc", "exec node dist/main.js"]
+        }
         p.currentDirectoryURL = URL(fileURLWithPath: sidecarDir)
         let inPipe = Pipe()
         let outPipe = Pipe()

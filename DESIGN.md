@@ -149,6 +149,14 @@ Selection capture needs the real highlighted span, which SwiftUI's `Text` + `.te
 
 **Dedup considered and dropped.** A first cut had a manual action supersede the equivalent in-flight auto card (cancel by matching anchor+kind, `card_remove` to hide it; register the subject in `covered`). Reverted after testing: auto-triggers anchor to the *last* line of the classifier window and subjects are fuzzy, so anchor/subject matching missed most real duplicates while adding protocol and state surface — a dedup that only sometimes fires invites false confidence. Manual and auto now run independently; the occasional duplicate is accepted (the user waits, then asks manually if nothing appears). Reliable dedup would need semantic subject matching — out of scope.
 
+## Packaging as a distributable .app (2026-06-13)
+
+The dev build is a bare SwiftPM executable that locates the sidecar and whisper model by `#filePath`-derived `repoRoot`, and links the whisper dylibs by absolute rpath into `vendor/whisper.cpp/build`. None of that survives leaving the checkout. `App/package.sh` now assembles a self-contained `Advisor.app`; `AppResources` resolves resources from `Bundle.main` when packaged and falls back to `repoRoot` in a dev checkout, so one binary runs either way.
+
+Decisions (single-user, few-machine distribution — not the App Store): **bundle the Node runtime** (the ~127 MB arm64 `node` binary, copied into `Contents/Resources`) so the target needs no Node install; the Agent SDK's own child processes reuse it via `process.execPath`. **Ad-hoc signed, not notarised** (`codesign -s -`) — first launch needs right-click ▸ Open. **Whisper model not bundled** — the shipped app defaults to Apple SpeechAnalyzer (no model), with whisper optional via Application Support or `ADVISOR_WHISPER_MODEL`; bundling 1.5 GB for the non-default engine wasn't worth it.
+
+The whisper dylibs (whisper + 5 ggml variants incl. Metal, whose shaders are embedded so no runtime `.metallib` is needed) are flattened into `Contents/Frameworks`; `@loader_path` resolves their inter-dependencies and `@executable_path/../Frameworks` resolves the main link. The script strips the absolute build-tree rpaths so the bundle is self-contained on any Mac. Verified: smoke test loads whisper from a copy in `/tmp` with dev rpaths gone; the bundled Node boots the bundled sidecar with no system Node on `PATH`. The sidecar still needs the user's Claude Code login on the target.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

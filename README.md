@@ -55,6 +55,24 @@ Requires: macOS 26+ (Apple Silicon), Xcode toolchain, Node 22+, a logged-in
 Claude Code CLI. First run prompts for Microphone and Screen & System Audio
 Recording permissions (attributed to the launching terminal).
 
+## Build a release
+
+`App/package.sh` assembles a self-contained `Advisor.app` (release build + the
+whisper dylibs, the Node runtime, and the built sidecar — Node 22+ is *not*
+required on the target Mac):
+
+```sh
+cd App && sh package.sh        # → App/dist/Advisor.app
+```
+
+The app is ad-hoc-signed, not notarised, so the first launch on another Mac
+needs right-click ▸ Open (or `xattr -dr com.apple.quarantine Advisor.app`).
+The whisper model is **not** bundled — the shipped app defaults to Apple
+SpeechAnalyzer (no model needed). To use whisper, drop a `ggml-*.bin` at
+`~/Library/Application Support/Advisor/models/ggml-large-v3-turbo.bin` or set
+`ADVISOR_WHISPER_MODEL`. The target Mac still needs a logged-in Claude Code CLI
+for the sidecar's agents.
+
 ## Use
 
 Click **Listen**. Words appear live in grey as they're spoken, replaced by
