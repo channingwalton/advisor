@@ -68,11 +68,13 @@ only — Apple has no vocabulary hook). `Agents` sets research parallelism.
 
 ## Preferences
 
-⌘, opens settings: extra instructions for the research agents, trigger
-sensitivity (conservative/balanced/eager) and per-kind toggles, classifier and
-research model choice, and STT locale. Stored in
-`~/Library/Application Support/Advisor/config.json`; agent settings apply at
-the next session start.
+⌘, opens settings: extra instructions for the research agents, parallel agent
+count, connector action permissions, trigger sensitivity
+(conservative/balanced/eager) and per-kind toggles, classifier and research
+model choice, STT engine (Apple/whisper), system-audio capture, and STT
+locale. Stored in `~/Library/Application Support/Advisor/config.json`; agent
+settings apply at the next session start. The toolbar keeps only in-session
+controls: Listen, mic, Auto cards, Pin.
 
 Advisor itself knows nothing about your notes: the research agents load your
 own Claude configuration (`~/.claude/CLAUDE.md`), which is where vault
@@ -80,9 +82,11 @@ locations and personal context belong.
 
 ## Safety
 
-Research agents are sandboxed by tool policy: web search plus read-only access
-to non-sensitive files in your home directory — no shell, no writes, and
-credential paths (~/.ssh, ~/.aws, ~/.claude, keychains, …) are denied.
+Research agents are sandboxed by tool policy: web search, the user's MCP
+connectors (Slack, Jira, … — read/search only unless "Allow connector actions"
+is enabled), and read-only access to non-sensitive files in the home directory.
+No shell, no writes; credential paths (~/.ssh, ~/.aws, ~/.claude, keychains, …)
+are denied.
 
 ## Documents
 
