@@ -1,4 +1,4 @@
-// swift-tools-version:5.10
+// swift-tools-version:6.2
 import PackageDescription
 
 // Adjust if the repo moves.
@@ -6,7 +6,7 @@ let whisperRoot = "/Users/channing/dev/advisor/Advisor/vendor/whisper.cpp"
 
 let package = Package(
     name: "Advisor",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v26)],
     targets: [
         // C shim exposing whisper.h to Swift. Headers are symlinks into vendor/whisper.cpp
         // (created by setup.sh) so the clang importer resolves everything from one flat dir.
@@ -14,6 +14,7 @@ let package = Package(
         .executableTarget(
             name: "Advisor",
             dependencies: ["CWhisper"],
+            swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .unsafeFlags([
                     "-L\(whisperRoot)/build/src",

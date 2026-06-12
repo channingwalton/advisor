@@ -1,0 +1,136 @@
+import AVFAudio
+import Foundation
+import Speech
+
+/// Apple's on-device SpeechAnalyzer/SpeechTranscriber (macOS 26+) as an STT
+/// engine. Streaming with built-in endpointing — no hand-rolled VAD — and far
+/// less prone than whisper to hallucinating sentences from noise.
+final class AppleSpeechEngine {
+    private var analyzer: SpeechAnalyzer?
+    private var transcriber: SpeechTranscriber?
+    private var input: AsyncStream<AnalyzerInput>.Continuation?
+    private var converter: AVAudioConverter?
+    private var analyzerFormat: AVAudioFormat?
+    private var resultsTask: Task<Void, Never>?
+    private let name: String
+
+    private let sourceFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+
+    /// Finalised utterance text.
+    var onFinal: ((String) -> Void)?
+
+    init(name: String) {
+        self.name = name
+    }
+
+    func start() async throws {
+        guard SpeechTranscriber.isAvailable else {
+            throw AdvisorError.audioSetup("SpeechTranscriber unavailable on this OS")
+        }
+        guard
+            let locale = await SpeechTranscriber.supportedLocale(
+                equivalentTo: Locale(identifier: "en_GB"))
+        else {
+            throw AdvisorError.audioSetup("no supported transcription locale")
+        }
+        // Final results only — volatile results would duplicate utterances.
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [],
+            attributeOptions: [])
+
+        switch await AssetInventory.status(forModules: [transcriber]) {
+        case .installed:
+            break
+        case .supported, .downloading:
+            log("downloading speech model assets…")
+            if let request = try await AssetInventory.assetInstallationRequest(
+                supporting: [transcriber]) {
+                try await request.downloadAndInstall()
+            }
+        default:
+            throw AdvisorError.audioSetup("speech model assets unsupported")
+        }
+
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(
+            compatibleWith: [transcriber])
+        if let fmt = analyzerFormat, fmt != sourceFormat {
+            converter = AVAudioConverter(from: sourceFormat, to: fmt)
+        }
+
+        let (sequence, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        input = continuation
+        try await analyzer.start(inputSequence: sequence)
+        self.analyzer = analyzer
+        self.transcriber = transcriber
+
+        resultsTask = Task { [weak self, name] in
+            guard let results = self?.transcriber?.results else { return }
+            do {
+                for try await result in results {
+                    let text = String(result.text.characters)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { continue }
+                    self?.onFinal?(text)
+                }
+            } catch {
+                FileHandle.standardError.write(
+                    Data("[advisor] apple-stt(\(name)) results ended: \(error)\n".utf8))
+            }
+        }
+        log("ready (locale \(locale.identifier))")
+    }
+
+    /// Feed 16 kHz mono samples (any thread).
+    func append(_ samples: [Float]) {
+        guard let input else { return }
+        guard
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: sourceFormat, frameCapacity: AVAudioFrameCount(samples.count))
+        else { return }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { src in
+            buffer.floatChannelData![0].update(from: src.baseAddress!, count: samples.count)
+        }
+
+        if let converter, let analyzerFormat {
+            let ratio = analyzerFormat.sampleRate / sourceFormat.sampleRate
+            let capacity = AVAudioFrameCount(Double(samples.count) * ratio) + 16
+            guard let out = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity)
+            else { return }
+            var consumed = false
+            var convError: NSError?
+            converter.convert(to: out, error: &convError) { _, status in
+                if consumed {
+                    status.pointee = .noDataNow
+                    return nil
+                }
+                consumed = true
+                status.pointee = .haveData
+                return buffer
+            }
+            guard convError == nil, out.frameLength > 0 else { return }
+            input.yield(AnalyzerInput(buffer: out))
+        } else {
+            input.yield(AnalyzerInput(buffer: buffer))
+        }
+    }
+
+    func stop() async {
+        input?.finish()
+        input = nil
+        try? await analyzer?.finalizeAndFinishThroughEndOfInput()
+        resultsTask?.cancel()
+        resultsTask = nil
+        analyzer = nil
+        transcriber = nil
+        converter = nil
+    }
+
+    private func log(_ message: String) {
+        FileHandle.standardError.write(Data("[advisor] apple-stt(\(name)): \(message)\n".utf8))
+    }
+}

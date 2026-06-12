@@ -101,8 +101,9 @@ final class Recorder {
         FileHandle.standardError.write(
             Data("[advisor] segment(\(source)): \(Float(segment.count) / 16_000)s queue=\(queueDepth)\n".utf8))
         // `me` is delayed so the matching `them` segment (same speech via the
-        // speakers) is transcribed first and can be matched by the echo check.
-        let delay: TimeInterval = source == .me && systemActive ? 1.0 : 0
+        // speakers) is transcribed first and can be matched by the echo check
+        // (system segments cap at 5 s, so 4 s covers most boundary skew).
+        let delay: TimeInterval = source == .me && systemActive ? 4.0 : 0
         whisperQueue.asyncAfter(deadline: .now() + delay) {
             // Back-pressure: if we're lagging badly, drop rather than replay a backlog.
             if Date().timeIntervalSince(spokenEnd) > 20 {
@@ -135,7 +136,18 @@ final class Recorder {
             }
 
             let latency = Int(Date().timeIntervalSince(spokenEnd) * 1000)
+            let distinctiveSet = Set(Self.distinctive(tokens))
             Task { @MainActor in
+                // Retroactive echo cleanup: a system-audio utterance supersedes any
+                // recent mic utterance that was its (degraded) room echo.
+                if source == .them, !distinctiveSet.isEmpty {
+                    self.store.utterances.removeAll { u in
+                        u.source == .me
+                            && spokenEnd.timeIntervalSince(u.time) < 12
+                            && Self.pairMatch(
+                                Set(Self.distinctive(Self.tokens(u.text))), distinctiveSet)
+                    }
+                }
                 let utterance = Utterance(
                     time: spokenEnd, source: source, text: text, latencyMs: latency)
                 self.store.utterances.append(utterance)
@@ -167,23 +179,23 @@ final class Recorder {
         tokens.filter { $0.count > 3 }
     }
 
-    /// True when the utterance substantially overlaps a single recent `them`
-    /// utterance (compared pairwise on distinctive words, min-length basis, so
-    /// differing segment boundaries between mic and system audio still match).
+    /// Substantial pairwise overlap of distinctive words, min-length basis —
+    /// tolerant of differing segment boundaries between mic and system audio.
+    nonisolated static func pairMatch(_ a: Set<String>, _ b: Set<String>) -> Bool {
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        let shared = a.intersection(b).count
+        return Float(shared) / Float(min(a.count, b.count)) >= 0.7
+    }
+
+    /// True when the utterance substantially overlaps a recent `them` utterance.
     private func isEcho(_ tokens: [String]) -> Bool {
         let mine = Set(Self.distinctive(tokens))
         guard !mine.isEmpty else { return true } // nothing distinctive — junk
         let now = Date()
         recentThem.removeAll { now.timeIntervalSince($0.time) > 15 }
-
-        for entry in recentThem {
-            let theirs = Set(Self.distinctive(entry.tokens))
-            guard !theirs.isEmpty else { continue }
-            let shared = mine.intersection(theirs).count
-            let ratio = Float(shared) / Float(min(mine.count, theirs.count))
-            if ratio >= 0.7 { return true }
+        return recentThem.contains { entry in
+            Self.pairMatch(mine, Set(Self.distinctive(entry.tokens)))
         }
-        return false
     }
 
     func start(device: InputDevice?, captureSystem: Bool) async {
