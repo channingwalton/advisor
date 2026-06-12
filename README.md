@@ -57,12 +57,19 @@ Recording permissions (attributed to the launching terminal).
 
 ## Use
 
-Click **Listen**. Sentences appear as they're spoken; cards appear when the
-assistant decides something is worth answering, checking, or explaining — or
-when you ask via the query box. Click words to add them to the STT dictionary
-(`Dictionary` button manages it). `Agents` sets research parallelism. `Pin`
-floats the window. Sessions are saved as markdown under
+Click **Listen**. Words appear live in grey as they're spoken, replaced by
+finalised sentences; cards appear inline when the assistant decides something
+is worth answering, checking, or explaining — or when you ask via the query
+box. The `STT` picker switches between Apple speech (default, macOS 26) and
+whisper.cpp; clicking words adds them to the STT dictionary (whisper engine
+only — Apple has no vocabulary hook). `Agents` sets research parallelism.
+`Pin` floats the window. Sessions are saved as markdown under
 `~/Library/Application Support/Advisor/sessions/` (`Sessions` button).
+
+## Safety
+
+Research agents are sandboxed by tool policy: they can search the web and read
+the vault, nothing else — no shell, no writes, no files outside the vault.
 
 ## Documents
 
