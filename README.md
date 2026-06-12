@@ -60,10 +60,9 @@ Recording permissions (attributed to the launching terminal).
 Click **Listen**. Words appear live in grey as they're spoken, replaced by
 finalised sentences; cards appear inline when the assistant decides something
 is worth answering, checking, or explaining — or when you ask via the query
-box. The `STT` picker switches between Apple speech (default, macOS 26) and
-whisper.cpp; clicking words adds them to the STT dictionary (whisper engine
-only — Apple has no vocabulary hook). `Agents` sets research parallelism.
-`Pin` floats the window. Sessions are saved as markdown under
+box. Transcript text is selectable; right-click a sentence to copy it or add
+words to the STT dictionary (whisper engine only — Apple has no vocabulary
+hook). `Pin` floats the window. Sessions are saved as markdown under
 `~/Library/Application Support/Advisor/sessions/` (`Sessions` button).
 
 ## Preferences
