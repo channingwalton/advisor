@@ -5,7 +5,16 @@ export type Source = "me" | "them";
 export type Inbound =
   | { type: "session_start"; sessionId: string; ts: number }
   | { type: "utterance"; id: string; source: Source; text: string; ts: number }
-  | { type: "query"; id: string; text: string }
+  // Manual user action. action+triggerId are set by the right-click menu:
+  // action picks the prompt/card kind, triggerId anchors the card under the
+  // clicked utterance. Both absent for the free-text Ask box (legacy query).
+  | {
+      type: "query";
+      id: string;
+      text: string;
+      action?: "answer" | "context" | "factcheck";
+      triggerId?: string;
+    }
   | { type: "config"; auto?: boolean; lanes?: number }
   | { type: "cancel"; cardId: string }
   | { type: "session_end" };

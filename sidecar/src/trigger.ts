@@ -2,14 +2,36 @@ import { AgentSession } from "./agent.js";
 import { AdvisorConfig } from "./config.js";
 import { log } from "./protocol.js";
 
+export type ResearchKind = "question" | "context" | "factcheck";
+
 export interface Trigger {
-  kind: "question" | "context" | "factcheck";
+  kind: ResearchKind;
   subject: string;
   query: string;
   // Utterance id of the line that completed this trigger; set by the caller
   // (the classifier LLM never sees ids). Carried through to the card so the
   // app can anchor it under that sentence.
   anchorId?: string;
+}
+
+/// Card kind shown to the user for a research kind. "question" surfaces as
+/// "answer"; the rest are unchanged.
+export function cardKind(kind: ResearchKind): "answer" | "context" | "factcheck" {
+  return kind === "question" ? "answer" : kind;
+}
+
+/// The research instruction sent to a lane. Single source of truth shared by
+/// the auto-trigger pipeline and manual (right-click / Ask box) actions, so
+/// both phrase each kind identically.
+export function researchTask(kind: ResearchKind, subject: string, query: string): string {
+  switch (kind) {
+    case "question":
+      return `Answer this question from the conversation: ${query}`;
+    case "factcheck":
+      return `Fact-check this claim from the conversation: "${query}". Give a verdict first (true / false / mixed / couldn't verify), then the evidence with sources.`;
+    case "context":
+      return `Give brief, useful background on "${subject}" as it relates to the conversation: ${query}`;
+  }
 }
 
 const SENSITIVITY: Record<string, string> = {

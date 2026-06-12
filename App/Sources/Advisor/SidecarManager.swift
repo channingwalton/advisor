@@ -87,6 +87,19 @@ final class SidecarManager {
         send(["type": "query", "id": UUID().uuidString, "text": text])
     }
 
+    /// Manual right-click action on selected transcript text. `action` is the
+    /// card kind ("answer" | "context" | "factcheck"); `triggerId` anchors the
+    /// resulting card under the utterance the selection came from.
+    func sendAction(_ action: String, text: String, triggerId: String) {
+        send([
+            "type": "query",
+            "id": UUID().uuidString,
+            "text": text,
+            "action": action,
+            "triggerId": triggerId,
+        ])
+    }
+
     func sendAuto(_ enabled: Bool) {
         send(["type": "config", "auto": enabled])
     }

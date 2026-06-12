@@ -123,6 +123,7 @@ struct TranscriptView: View {
     @State private var sidecar: SidecarManager?
     @State private var builtEngine = ""
     @State private var queryText = ""
+    @State private var triggers = AdvisorConfig.Triggers()
     @State private var autoCards = true
     @State private var pinned = false
     @State private var writer: SessionWriter?
@@ -268,21 +269,18 @@ struct TranscriptView: View {
                     ForEach(feed) { item in
                         switch item {
                         case .utterance(let u):
-                            Text(u.text)
-                                .textSelection(.enabled)
-                                .help(u.time.formatted(date: .omitted, time: .standard))
-                                .contextMenu {
-                                    Menu("Add to dictionary") {
-                                        ForEach(dictionaryCandidates(u.text), id: \.self) { word in
-                                            Button(word) { vocabulary.add(word) }
-                                        }
-                                    }
-                                    Button("Copy sentence") {
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(u.text, forType: .string)
-                                    }
-                                }
-                                .id(item.id)
+                            SelectableTranscriptText(
+                                text: u.text,
+                                toolTip: u.time.formatted(date: .omitted, time: .standard),
+                                actions: transcriptActions,
+                                onAction: { kind, selection in
+                                    sidecar?.sendAction(
+                                        kind, text: selection, triggerId: u.id.uuidString)
+                                },
+                                dictionaryCandidates: { dictionaryCandidates(u.text) },
+                                onAddWord: { vocabulary.add($0) }
+                            )
+                            .id(item.id)
                         case .card(let card):
                             cardView(card)
                                 .id(item.id)
@@ -339,6 +337,20 @@ struct TranscriptView: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 
+    /// Right-click AI actions offered on selected transcript text — the same
+    /// trigger kinds the auto-classifier uses, gated by the same config toggles
+    /// (so a kind disabled in Preferences never appears here either). The kind
+    /// string is the card kind the sidecar emits.
+    private var transcriptActions: [TranscriptAction] {
+        var actions: [TranscriptAction] = []
+        if triggers.question { actions.append(TranscriptAction(title: "Answer", kind: "answer")) }
+        if triggers.context { actions.append(TranscriptAction(title: "Context", kind: "context")) }
+        if triggers.factcheck {
+            actions.append(TranscriptAction(title: "Fact check", kind: "factcheck"))
+        }
+        return actions
+    }
+
     /// Distinct words worth adding to the STT dictionary, in sentence order.
     private func dictionaryCandidates(_ text: String) -> [String] {
         var seen = Set<String>()
@@ -357,6 +369,7 @@ struct TranscriptView: View {
     }
 
     private func setup() {
+        triggers = AdvisorConfig.load().triggers
         devices = AudioDevices.inputs()
         // Sticky mic: restore the previously chosen device by name.
         selectedDevice =
@@ -412,8 +425,10 @@ struct TranscriptView: View {
         spaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard event.keyCode == 49, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
             else { return event }
-            // Don't steal space from a focused text field.
-            if event.window?.firstResponder is NSTextView { return event }
+            // Don't steal space from a focused *editable* text field (the Ask
+            // box). The selectable transcript is a non-editable NSTextView and
+            // must still toggle play/pause when it holds focus.
+            if let tv = event.window?.firstResponder as? NSTextView, tv.isEditable { return event }
             if !store.listening {
                 Task { await toggle() }
             } else if store.paused {
@@ -448,5 +463,133 @@ struct TranscriptView: View {
             writer?.start()
             await recorder.start(device: selectedDevice, captureSystem: captureSystem)
         }
+    }
+}
+
+/// One right-click AI action: a menu title and the card kind it requests.
+struct TranscriptAction {
+    let title: String
+    let kind: String
+}
+
+/// Selectable transcript line backed by an NSTextView, so the right-click menu
+/// can act on the exact highlighted span (SwiftUI's `Text` selection is opaque
+/// to a `.contextMenu`). Falls back to the whole line when nothing is selected.
+struct SelectableTranscriptText: NSViewRepresentable {
+    let text: String
+    let toolTip: String
+    let actions: [TranscriptAction]
+    /// (card kind, selected text) — fired when an AI action is chosen.
+    let onAction: (String, String) -> Void
+    /// Words from this line worth adding to the STT dictionary (vocabulary-filtered).
+    let dictionaryCandidates: () -> [String]
+    let onAddWord: (String) -> Void
+
+    func makeNSView(context: Context) -> ActionTextView {
+        // Convenience init builds a TextKit stack the view *owns* (storage
+        // included) — a hand-built stack would leave storage/layoutManager
+        // unretained and they'd deallocate. Touching `layoutManager` forces the
+        // TextKit 1 fallback so it's available for height measurement (TextKit 2
+        // leaves it nil).
+        let tv = ActionTextView(frame: .zero)
+        _ = tv.layoutManager
+        tv.textContainer?.widthTracksTextView = true
+        tv.textContainer?.lineFragmentPadding = 0
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isRichText = false
+        tv.drawsBackground = false
+        tv.backgroundColor = NSColor.clear
+        tv.textContainerInset = NSSize.zero
+        return tv
+    }
+
+    func updateNSView(_ tv: ActionTextView, context: Context) {
+        if tv.string != text { tv.string = text }
+        tv.font = .preferredFont(forTextStyle: .body)
+        tv.textColor = .labelColor
+        tv.toolTip = toolTip
+        tv.menuActions = actions
+        tv.onAction = onAction
+        tv.dictionaryCandidates = dictionaryCandidates
+        tv.onAddWord = onAddWord
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize, nsView tv: ActionTextView, context: Context
+    ) -> CGSize? {
+        guard let container = tv.textContainer, let lm = tv.layoutManager,
+            let width = proposal.width, width.isFinite, width > 0
+        else { return nil }
+        tv.frame.size.width = width
+        lm.ensureLayout(for: container)
+        return CGSize(width: width, height: ceil(lm.usedRect(for: container).height))
+    }
+}
+
+/// NSTextView that swaps the default editing context menu for transcript AI
+/// actions, the dictionary submenu, and copy — all operating on the current
+/// selection (or the whole line when nothing is highlighted).
+final class ActionTextView: NSTextView {
+    var menuActions: [TranscriptAction] = []
+    var onAction: ((String, String) -> Void)?
+    var dictionaryCandidates: (() -> [String])?
+    var onAddWord: ((String) -> Void)?
+
+    /// Highlighted substring, or the whole line when the selection is empty.
+    private var effectiveSelection: String {
+        let range = selectedRange()
+        let ns = string as NSString
+        return range.length > 0 ? ns.substring(with: range) : string
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        let selection = effectiveSelection
+        let label = selection.count > 40 ? String(selection.prefix(40)) + "…" : selection
+        for action in menuActions {
+            let item = NSMenuItem(
+                title: "\(action.title): “\(label)”",
+                action: #selector(performAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = action.kind
+            menu.addItem(item)
+        }
+        if !menuActions.isEmpty { menu.addItem(.separator()) }
+
+        let words = dictionaryCandidates?() ?? []
+        if !words.isEmpty {
+            let parent = NSMenuItem(title: "Add to dictionary", action: nil, keyEquivalent: "")
+            let submenu = NSMenu()
+            for word in words {
+                let item = NSMenuItem(
+                    title: word, action: #selector(addWord(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = word
+                submenu.addItem(item)
+            }
+            parent.submenu = submenu
+            menu.addItem(parent)
+        }
+        let copy = NSMenuItem(title: "Copy", action: #selector(copyText(_:)), keyEquivalent: "")
+        copy.target = self
+        menu.addItem(copy)
+        return menu
+    }
+
+    @objc private func performAction(_ sender: NSMenuItem) {
+        guard let kind = sender.representedObject as? String else { return }
+        let selection = effectiveSelection.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selection.isEmpty else { return }
+        onAction?(kind, selection)
+    }
+
+    @objc private func addWord(_ sender: NSMenuItem) {
+        if let word = sender.representedObject as? String { onAddWord?(word) }
+    }
+
+    @objc private func copyText(_ sender: NSMenuItem) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(effectiveSelection, forType: .string)
     }
 }

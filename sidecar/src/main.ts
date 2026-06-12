@@ -3,7 +3,14 @@ import { homedir } from "node:os";
 import { AgentSession } from "./agent.js";
 import { AdvisorConfig, loadConfig } from "./config.js";
 import { Inbound, log, send, Source } from "./protocol.js";
-import { classify, configureClassifier, resetClassifier, Trigger } from "./trigger.js";
+import {
+  cardKind,
+  classify,
+  configureClassifier,
+  researchTask,
+  resetClassifier,
+  Trigger,
+} from "./trigger.js";
 
 const HOME = homedir();
 let config: AdvisorConfig = loadConfig();
@@ -233,15 +240,8 @@ function drainResearch(): void {
     const lane = researchLanes.slice(0, maxLanes).find((l) => !l.busy);
     if (!lane) return; // a lane finishing will call drainResearch again
     const t = researchQueue.shift()!;
-    const kind = t.kind === "question" ? "answer" : t.kind;
-    const task =
-      t.kind === "question"
-        ? `Answer this question from the conversation: ${t.query}`
-        : t.kind === "factcheck"
-          ? `Fact-check this claim from the conversation: "${t.query}". Give a verdict first (true / false / mixed / couldn't verify), then the evidence with sources.`
-          : `Give brief, useful background on "${t.subject}" as it relates to the conversation: ${t.query}`;
     lane.busy = true;
-    void runCard(lane, kind, t.subject, task, t.anchorId).finally(() => {
+    void runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId).finally(() => {
       lane.busy = false;
       drainResearch();
     });
@@ -280,9 +280,24 @@ function handle(msg: Inbound): void {
         return;
       }
       busy = true;
-      void runCard(queryLane, "query", msg.text, `Question: ${msg.text}`).finally(() => {
-        busy = false;
-      });
+      if (msg.action) {
+        // Right-click action on selected text: route to the same kind/template
+        // as the auto-pipeline, anchored under the clicked utterance.
+        const kind = msg.action === "answer" ? "question" : msg.action;
+        void runCard(
+          queryLane,
+          msg.action,
+          msg.text,
+          researchTask(kind, msg.text, msg.text),
+          msg.triggerId
+        ).finally(() => {
+          busy = false;
+        });
+      } else {
+        void runCard(queryLane, "query", msg.text, `Question: ${msg.text}`).finally(() => {
+          busy = false;
+        });
+      }
       break;
     case "config":
       if (typeof msg.auto === "boolean") {
