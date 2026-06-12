@@ -15,7 +15,8 @@ check them before re-litigating a decision.
 - `App/` — Swift/SwiftUI macOS app (SwiftPM, macOS 26, Swift language mode v5).
   Audio capture (mic + ScreenCaptureKit system audio), two STT engines
   (Apple SpeechAnalyzer default; whisper.cpp via `Sources/CWhisper` shim),
-  echo dedup, chronological feed UI, session markdown writer, preferences.
+  echo dedup, chronological feed UI (selectable transcript lines with a
+  right-click action menu), session markdown writer, preferences.
 - `sidecar/` — Node 22 + TypeScript + Claude Agent SDK. Trigger classifier
   (persistent Haiku session, delta-fed), parallel research lanes, query lane,
   `canUseTool` sandbox. NDJSON over stdio to the app (protocol in

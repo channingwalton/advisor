@@ -58,7 +58,7 @@ Swift → sidecar:
 ```json
 {"type":"session_start","sessionId":"...","ts":...}
 {"type":"utterance","id":"u123","source":"them","text":"...","t0":...,"t1":...}
-{"type":"query","id":"q7","text":"..."}
+{"type":"query","id":"q7","text":"...","action":"answer|context|factcheck","triggerId":"u123"}
 {"type":"session_end"}
 ```
 
@@ -140,6 +140,14 @@ User-configured MCP connectors (loaded via the user's Claude settings) pass the 
 ## Preferences & de-vaulting (2026-06-13)
 
 Advisor no longer knows about the vault: agents load the user's own Claude config (`settingSources: ["user"]` → `~/.claude/CLAUDE.md`), which carries personal context like note locations. Verified: Patchwork vault query answered with no vault path in Advisor. Preferences (⌘,) write `Application Support/Advisor/config.json`, re-read by the sidecar at each session_start (sessions rebuilt so prompt/model changes apply): extra research instructions, trigger sensitivity + per-kind toggles + max per pass, classifier/research models, STT locale.
+
+## Right-click transcript actions (2026-06-12)
+
+Selected transcript text can be acted on directly: right-click → **Answer / Context / Fact check**. These are exactly the auto-classifier's kinds (`question`→answer, `context`, `factcheck`), gated by the same `config.triggers` toggles, so the manual menu and the automatic pipeline never diverge. The prompt templates live once in `trigger.ts` (`researchTask`/`cardKind`), shared by `drainResearch` and the manual path. The action rides the existing `query` lane (now carrying optional `action` + `triggerId`); `triggerId` anchors the resulting card under the clicked line, the same way auto cards anchor via the classifier's `anchorId`. The free-text Ask box still sends a bare `query` (kind `query`, no anchor) — unchanged.
+
+Selection capture needs the real highlighted span, which SwiftUI's `Text` + `.textSelection` hides from a `.contextMenu`; the transcript line is therefore an `NSTextView` (`SelectableTranscriptText`) whose `menu(for:)` builds the action items over `selectedRange` (falling back to the whole line). Building it via the convenience `NSTextView(frame:)` (not a hand-assembled TextKit stack) so the view owns its text storage — a manual stack leaves storage/layoutManager unretained and they deallocate, blanking the line. The space-to-pause monitor now ignores only *editable* text views, so a focused (non-editable) transcript line still toggles playback.
+
+**Dedup considered and dropped.** A first cut had a manual action supersede the equivalent in-flight auto card (cancel by matching anchor+kind, `card_remove` to hide it; register the subject in `covered`). Reverted after testing: auto-triggers anchor to the *last* line of the classifier window and subjects are fuzzy, so anchor/subject matching missed most real duplicates while adding protocol and state surface — a dedup that only sometimes fires invites false confidence. Manual and auto now run independently; the occasional duplicate is accepted (the user waits, then asks manually if nothing appears). Reliable dedup would need semantic subject matching — out of scope.
 
 ## Revisit as it grows
 

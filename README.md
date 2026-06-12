@@ -60,9 +60,13 @@ Recording permissions (attributed to the launching terminal).
 Click **Listen**. Words appear live in grey as they're spoken, replaced by
 finalised sentences; cards appear inline when the assistant decides something
 is worth answering, checking, or explaining — or when you ask via the query
-box. Transcript text is selectable; right-click a sentence to copy it or add
-words to the STT dictionary (whisper engine only — Apple has no vocabulary
-hook). `Float` keeps the window on top. Sessions are saved as markdown under
+box. Transcript text is selectable; **right-click** a selection (or the whole
+sentence) to run **Answer / Context / Fact check** on it directly — the same
+actions the assistant triggers automatically, gated by the same preference
+toggles, with the resulting card anchored under that line. The menu also lets
+you copy the text or add words to the STT dictionary (whisper engine only —
+Apple has no vocabulary hook). `Float` keeps the window on top. Sessions are
+saved as markdown under
 `~/Library/Application Support/Advisor/sessions/` (`Sessions` button).
 
 ## Preferences

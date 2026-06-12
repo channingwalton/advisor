@@ -33,6 +33,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 ### Interface
 - F13. Live sidebar/overlay: floating, always-on-top, compact; updates as conversation flows; never steals focus.
 - F14. On-demand query: a text box to ask about the current conversation or anything else, with conversation transcript as context.
+- F14a. In-situ actions: right-click selected transcript text to run an action (Answer / Context / Fact check) on it — the same kinds the auto-classifier detects, gated by the same per-kind toggles; the resulting card is anchored under the originating line.
 - F15. Show live transcript (collapsible).
 - F16. Session history: transcripts and surfaced items reviewable afterwards, stored as app-managed local markdown files. No writing to the Obsidian Vault (read-only source).
 
