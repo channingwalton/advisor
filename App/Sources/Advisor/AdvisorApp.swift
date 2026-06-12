@@ -15,9 +15,30 @@ let defaultModelPath =
     repoRoot.appendingPathComponent("vendor/whisper.cpp/models/ggml-large-v3-turbo.bin").path
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var shared: AppDelegate?
+
+    /// Orderly teardown registered by the view (stop sidecar child + audio,
+    /// flush the session). Re-registered whenever the recorder is rebuilt.
+    var onTerminate: (() -> Void)?
+
+    override init() {
+        super.init()
+        AppDelegate.shared = self
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// On Cmd-Q, AppKit calls `exit()`, which runs C++ static destructors.
+    /// ggml-metal registers a global Metal-device vector whose destructor
+    /// hits `ggml_abort` at process-exit (the same teardown hazard the smoke
+    /// test sidesteps with deinit-before-exit ordering). Do our own orderly
+    /// cleanup, then `_exit` to bypass those finalisers entirely.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        onTerminate?()
+        _exit(0)
     }
 }
 
@@ -376,6 +397,16 @@ struct TranscriptView: View {
         rebuildRecorder()
     }
 
+    /// Capture the live sidecar/recorder/writer so `applicationShouldTerminate`
+    /// can shut them down cleanly before `_exit`. Re-run whenever any is rebuilt.
+    private func registerTerminationCleanup() {
+        AppDelegate.shared?.onTerminate = { [sidecar, recorder, writer] in
+            recorder?.stop() // stops audio engine + ScreenCaptureKit stream
+            sidecar?.stop() // closes stdin so the node child exits
+            writer?.end() // synchronous final flush
+        }
+    }
+
     private func rebuildRecorder() {
         guard let manager = sidecar else { return }
         let engine = STTEngine(rawValue: sttEngine) ?? .apple
@@ -398,6 +429,7 @@ struct TranscriptView: View {
         } catch {
             fatalError = "\(error)"
         }
+        registerTerminationCleanup()
     }
 
     /// Space toggles play/pause/resume globally, except while editing a text
