@@ -59,6 +59,7 @@ final class SidecarManager {
     func stop() {
         try? stdinHandle?.close() // sidecar exits on stdin close
         stdinHandle = nil
+        if let process, process.isRunning { process.terminate() } // backstop: no orphan
         process = nil
     }
 
