@@ -57,21 +57,45 @@ Recording permissions (attributed to the launching terminal).
 
 ## Build a release
 
-`App/package.sh` assembles a self-contained `Advisor.app` (release build + the
-whisper dylibs, the Node runtime, and the built sidecar — Node 22+ is *not*
-required on the target Mac):
+`App/package.sh` assembles a self-contained, ad-hoc-signed `Advisor.app` —
+release build plus the whisper dylibs (in `Frameworks/`, rpath-fixed), the Node
+runtime, and the built sidecar. Node is **not** required on the target Mac.
+
+**On the build machine** (Apple Silicon), you need:
+
+- the dev setup above completed once — in particular whisper.cpp built at
+  `vendor/whisper.cpp/build` (the script aborts if it's missing);
+- the Xcode toolchain (`swift`, `codesign`, `install_name_tool`);
+- an arm64 `node` on `PATH` — its binary is copied into the bundle.
+
+**Build:**
 
 ```sh
 cd App && sh package.sh        # → App/dist/Advisor.app
 ```
 
-The app is ad-hoc-signed, not notarised, so the first launch on another Mac
-needs right-click ▸ Open (or `xattr -dr com.apple.quarantine Advisor.app`).
+The script runs a release `swift build`, builds the sidecar (`npm install` +
+`tsc`), assembles the `.app`, strips the dev build-tree rpaths, and ad-hoc
+signs it. Re-run it any time; it rebuilds `dist/Advisor.app` from scratch.
+
+**Install on another Mac** (macOS 26+, Apple Silicon):
+
+1. Copy `Advisor.app` across (e.g. to `/Applications`).
+2. Clear the quarantine flag, since the app is ad-hoc-signed, not notarised:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Advisor.app   # or right-click ▸ Open
+   ```
+
+3. Ensure a logged-in Claude Code CLI is present — the sidecar's agents use it.
+4. Launch. First run prompts for Microphone and Screen & System Audio
+   Recording permissions.
+
 The whisper model is **not** bundled — the shipped app defaults to Apple
-SpeechAnalyzer (no model needed). To use whisper, drop a `ggml-*.bin` at
-`~/Library/Application Support/Advisor/models/ggml-large-v3-turbo.bin` or set
-`ADVISOR_WHISPER_MODEL`. The target Mac still needs a logged-in Claude Code CLI
-for the sidecar's agents.
+SpeechAnalyzer, which needs no model. To use whisper instead, drop a
+`ggml-*.bin` at
+`~/Library/Application Support/Advisor/models/ggml-large-v3-turbo.bin` or point
+`ADVISOR_WHISPER_MODEL` at one, then pick whisper in Preferences.
 
 ## Use
 
