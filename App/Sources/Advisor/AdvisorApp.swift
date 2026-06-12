@@ -116,6 +116,7 @@ struct TranscriptView: View {
     @State private var writer: SessionWriter?
     @StateObject private var vocabulary = VocabularyStore()
     @State private var showDictionary = false
+    @AppStorage("agentLanes") private var agentLanes = 3
 
     var body: some View {
         VStack(spacing: 0) {
@@ -137,6 +138,10 @@ struct TranscriptView: View {
                 Toggle("Auto cards", isOn: $autoCards)
                     .toggleStyle(.checkbox)
                     .onChange(of: autoCards) { _, on in sidecar?.sendAuto(on) }
+                Stepper("Agents: \(agentLanes)", value: $agentLanes, in: 1...8)
+                    .font(.caption)
+                    .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }
+                    .help("How many research agents run in parallel")
                 Toggle("Pin", isOn: $pinned)
                     .toggleStyle(.checkbox)
                     .onChange(of: pinned) { _, on in
@@ -175,10 +180,7 @@ struct TranscriptView: View {
             }
             .padding(10)
             Divider()
-            VSplitView {
-                cardsPane
-                transcriptPane
-            }
+            feedPane
             Divider()
             HStack {
                 TextField("Ask about the conversation…", text: $queryText)
@@ -194,84 +196,91 @@ struct TranscriptView: View {
         .onChange(of: store.cards) { _, _ in writer?.noteChanged() }
     }
 
-    private var cardsPane: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                if store.cards.isEmpty {
-                    Text("Answers appear here — ask below.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(store.cards) { card in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(card.kind)
-                                .font(.caption2.bold())
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(kindColour(card.kind).opacity(0.2), in: Capsule())
-                            Text(card.title).font(.headline)
-                            Spacer()
-                            if card.state == "pending" || card.state == "streaming" {
-                                ProgressView().controlSize(.small)
-                                Button {
-                                    sidecar?.sendCancel(card.id)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.secondary)
-                                .help("Skip this card")
-                            } else if card.state == "failed" {
-                                Text("failed").font(.caption2).foregroundStyle(.red)
-                            }
-                        }
-                        Text(LocalizedStringKey(card.body))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(10)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                }
+    private enum FeedItem: Identifiable {
+        case utterance(Utterance)
+        case card(Card)
+
+        var id: String {
+            switch self {
+            case .utterance(let u): "u-\(u.id.uuidString)"
+            case .card(let c): "c-\(c.id)"
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(minHeight: 150)
+
+        var time: Date {
+            switch self {
+            case .utterance(let u): u.time
+            case .card(let c): c.created
+            }
+        }
     }
 
-    private var transcriptPane: some View {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(store.utterances) { u in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(u.source.rawValue)
-                                        .font(.caption2.bold())
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 1)
-                                        .background(
-                                            u.source == .me ? Color.blue.opacity(0.2) : Color.green.opacity(0.2),
-                                            in: Capsule())
-                                    Text(u.time, style: .time)
-                                    Text("\(u.latencyMs) ms")
-                                }
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                TappableWords(text: u.text, vocabulary: vocabulary)
-                            }
-                            .id(u.id)
+    /// Transcript and cards merged chronologically, so answers appear in context.
+    private var feed: [FeedItem] {
+        (store.utterances.map(FeedItem.utterance) + store.cards.map(FeedItem.card))
+            .sorted { $0.time < $1.time }
+    }
+
+    private var feedPane: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if feed.isEmpty {
+                        Text("Click Listen — the conversation and answer cards appear here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(feed) { item in
+                        switch item {
+                        case .utterance(let u):
+                            TappableWords(text: u.text, vocabulary: vocabulary)
+                                .help(u.time.formatted(date: .omitted, time: .standard))
+                                .id(item.id)
+                        case .card(let card):
+                            cardView(card)
+                                .id(item.id)
                         }
                     }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: store.utterances) { _, new in
-                    if let last = new.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: feed.count) { _, _ in
+                if let last = feed.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
+        }
+    }
+
+    private func cardView(_ card: Card) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(card.kind)
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(kindColour(card.kind).opacity(0.2), in: Capsule())
+                Text(card.title).font(.headline)
+                Spacer()
+                if card.state == "pending" || card.state == "streaming" {
+                    ProgressView().controlSize(.small)
+                    Button {
+                        sidecar?.sendCancel(card.id)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Skip this card")
+                } else if card.state == "failed" {
+                    Text("failed").font(.caption2).foregroundStyle(.red)
                 }
             }
-            .frame(minHeight: 120)
+            Text(LocalizedStringKey(card.body))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func kindColour(_ kind: String) -> Color {
@@ -288,6 +297,7 @@ struct TranscriptView: View {
         selectedDevice = AudioDevices.preferred(devices)
         let manager = SidecarManager(store: store)
         manager.start()
+        manager.sendLanes(agentLanes)
         sidecar = manager
         writer = SessionWriter(store: store)
         let modelPath =

@@ -69,7 +69,15 @@ final class WhisperTranscriber {
 
     /// Transcribe 16 kHz mono samples. Returns trimmed text ("" for non-speech).
     func transcribe(_ samples: [Float]) -> String {
-        var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
+        // Beam search (whisper-cli's default) — markedly better than greedy on
+        // fast/overlapping speech; turbo on the M4 Max has the headroom.
+        var params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH)
+        // beam 2: most of the quality gain over greedy at a fraction of the
+        // cost — beam 5 couldn't keep up with two continuous streams.
+        params.beam_search.beam_size = 2
+        // No multi-temperature retries: on noisy crosstalk the default fallback
+        // re-decodes a segment up to 5×, which is what froze the pipeline.
+        params.temperature_inc = 0
         params.print_progress = false
         params.print_realtime = false
         params.print_special = false

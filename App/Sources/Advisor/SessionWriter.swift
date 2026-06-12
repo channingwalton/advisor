@@ -55,10 +55,10 @@ final class SessionWriter {
         md += String(format: "cost_usd: %.4f\n", store.costUsd)
         md += "---\n\n# Transcript\n\n"
         for u in store.utterances {
-            md += "- \(time.string(from: u.time)) **\(u.source.rawValue)**: \(u.text)\n"
+            md += "- \(time.string(from: u.time)) \(u.text)\n"
         }
         md += "\n# Cards\n\n"
-        for card in store.cards.reversed() where card.state == "done" || card.state == "failed" {
+        for card in store.cards where card.state == "done" || card.state == "failed" {
             md += "## [\(card.kind)] \(card.title)\n\n\(card.body)\n\n"
         }
         try? md.write(to: fileURL, atomically: true, encoding: .utf8)

@@ -115,6 +115,14 @@ Sidecar crash → supervisor restarts, replays window, UI shows transient "recon
 - Research parallelised: 3 persistent lanes + dedicated query lane, per-lane transcript cursors.
 - Replay harness: `sidecar/test/replay.sh` + `fragments.txt` for tuning against real transcripts.
 
+## STT tuning findings (2026-06-12/13)
+
+- `large-v3-turbo` default (proper nouns), beam search size 2, **temperature fallback disabled** — the default 5× re-decode on noisy segments froze the pipeline. Decode now ~300 ms per 5 s segment (≈15× realtime, M4 Max).
+- Vocabulary bias via whisper initial_prompt (~224-token cap): manual dictionary (clickable words in UI + Dictionary popover) merged with macOS spelling LocalDictionary. Vault-derived vocab deliberately NOT in the app — user-specific sources belong in the sidecar.
+- Echo dedup: pairwise distinctive-word (>3 chars) overlap ≥0.7 on min-length basis; pool-based common-word matching suppressed genuine speech.
+- Segment cap 5 s; segments older than 20 s skipped (back-pressure).
+- Known limit: overlapping simultaneous speakers on a mixed mono feed are unrecoverable by any single-stream STT — don't engineer against shouty-debate YouTube videos.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

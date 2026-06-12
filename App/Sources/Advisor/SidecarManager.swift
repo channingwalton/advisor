@@ -2,6 +2,7 @@ import Foundation
 
 struct Card: Identifiable, Equatable {
     let id: String
+    let created: Date
     var kind: String
     var title: String
     var body: String
@@ -93,6 +94,10 @@ final class SidecarManager {
         send(["type": "cancel", "cardId": cardId])
     }
 
+    func sendLanes(_ count: Int) {
+        send(["type": "config", "lanes": count])
+    }
+
     private func send(_ message: [String: Any]) {
         guard let stdinHandle,
             var data = try? JSONSerialization.data(withJSONObject: message)
@@ -123,14 +128,14 @@ final class SidecarManager {
             store.status = "sidecar ready"
         case "card":
             guard let id = obj["id"] as? String else { return }
-            store.cards.insert(
+            store.cards.append(
                 Card(
                     id: id,
+                    created: Date(),
                     kind: obj["kind"] as? String ?? "query",
                     title: obj["title"] as? String ?? "",
                     body: obj["body"] as? String ?? "",
-                    state: obj["state"] as? String ?? "pending"),
-                at: 0)
+                    state: obj["state"] as? String ?? "pending"))
         case "card_update":
             guard let id = obj["id"] as? String,
                 let idx = store.cards.firstIndex(where: { $0.id == id })

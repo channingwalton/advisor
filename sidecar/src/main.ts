@@ -23,7 +23,8 @@ transcript. Respond concisely and usefully for someone mid-conversation:
 const TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
 
 /// Parallel research lanes: triggers fan out across persistent sessions.
-const RESEARCH_LANES = 3;
+/// Pool grows lazily up to maxLanes (settable from the app).
+let maxLanes = 3;
 
 interface Lane {
   name: string;
@@ -34,16 +35,24 @@ interface Lane {
 
 const cancelledCards = new Set<string>();
 
-const researchLanes: Lane[] = Array.from({ length: RESEARCH_LANES }, (_, i) => ({
-  name: `research${i}`,
-  session: new AgentSession({
-    name: `research${i}`,
-    systemPrompt: SYSTEM,
-    allowedTools: TOOLS,
-    cwd: VAULT,
-  }),
-  busy: false,
-}));
+const researchLanes: Lane[] = [];
+
+function ensureLanes(): void {
+  while (researchLanes.length < maxLanes) {
+    const name = `research${researchLanes.length}`;
+    researchLanes.push({
+      name,
+      session: new AgentSession({
+        name,
+        systemPrompt: SYSTEM,
+        allowedTools: TOOLS,
+        cwd: VAULT,
+      }),
+      busy: false,
+    });
+  }
+}
+ensureLanes();
 
 const queryLane: Lane = {
   name: "query",
@@ -206,8 +215,10 @@ async function runClassify(): Promise<void> {
 }
 
 function drainResearch(): void {
+  ensureLanes();
   while (researchQueue.length > 0) {
-    const lane = researchLanes.find((l) => !l.busy);
+    // Only dispatch to the first maxLanes lanes (shrinking takes effect as lanes finish).
+    const lane = researchLanes.slice(0, maxLanes).find((l) => !l.busy);
     if (!lane) return; // a lane finishing will call drainResearch again
     const t = researchQueue.shift()!;
     const kind = t.kind === "question" ? "answer" : t.kind;
@@ -256,8 +267,15 @@ function handle(msg: Inbound): void {
       });
       break;
     case "config":
-      auto = msg.auto;
-      log(`auto triggers: ${auto}`);
+      if (typeof msg.auto === "boolean") {
+        auto = msg.auto;
+        log(`auto triggers: ${auto}`);
+      }
+      if (typeof msg.lanes === "number") {
+        maxLanes = Math.max(1, Math.min(8, Math.floor(msg.lanes)));
+        log(`research lanes: ${maxLanes}`);
+        drainResearch();
+      }
       break;
     case "cancel": {
       cancelledCards.add(msg.cardId);

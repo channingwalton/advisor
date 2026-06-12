@@ -93,18 +93,34 @@ final class Recorder {
         }
     }
 
+    private var queueDepth = 0 // approximate; updated on whisperQueue
+
     private func handleSegment(_ segment: [Float], from source: Source) {
         let spokenEnd = Date()
+        queueDepth += 1
         FileHandle.standardError.write(
-            Data("[advisor] segment(\(source)): \(Float(segment.count) / 16_000)s\n".utf8))
+            Data("[advisor] segment(\(source)): \(Float(segment.count) / 16_000)s queue=\(queueDepth)\n".utf8))
         // `me` is delayed so the matching `them` segment (same speech via the
         // speakers) is transcribed first and can be matched by the echo check.
         let delay: TimeInterval = source == .me && systemActive ? 1.0 : 0
         whisperQueue.asyncAfter(deadline: .now() + delay) {
+            // Back-pressure: if we're lagging badly, drop rather than replay a backlog.
+            if Date().timeIntervalSince(spokenEnd) > 20 {
+                self.queueDepth -= 1
+                FileHandle.standardError.write(
+                    Data("[advisor] skipped stale segment(\(source)) — lagging\n".utf8))
+                return
+            }
+            let decodeStart = Date()
             let text = self.transcriber.transcribe(segment)
+            self.queueDepth -= 1
+            let decodeMs = Int(Date().timeIntervalSince(decodeStart) * 1000)
+            let audioMs = segment.count / 16
+            FileHandle.standardError.write(
+                Data("[advisor] decode(\(source)): \(decodeMs)ms for \(audioMs)ms audio\n".utf8))
             FileHandle.standardError.write(
                 Data("[advisor] whisper(\(source)): \"\(text)\"\n".utf8))
-            guard !text.isEmpty else { return }
+            guard !text.isEmpty, !Self.isJunk(text) else { return }
 
             let tokens = Self.tokens(text)
             switch source {
@@ -134,25 +150,40 @@ final class Recorder {
             .filter { !$0.isEmpty }
     }
 
-    /// True when most of the words also occur in `them` speech from the last 15 s.
+    /// Whisper non-speech artefacts: "[BLANK_AUDIO]", "*Bell rings*", "(claps)", lone punctuation.
+    private static func isJunk(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        if t.rangeOfCharacter(from: .alphanumerics) == nil { return true }
+        if let first = t.first, let last = t.last,
+            "([*".contains(first), ")]*".contains(last) {
+            return true
+        }
+        return false
+    }
+
+    /// Distinctive tokens only — stopword-length words inflate echo matches
+    /// and caused genuine speech to be suppressed.
+    private static func distinctive(_ tokens: [String]) -> [String] {
+        tokens.filter { $0.count > 3 }
+    }
+
+    /// True when the utterance substantially overlaps a single recent `them`
+    /// utterance (compared pairwise on distinctive words, min-length basis, so
+    /// differing segment boundaries between mic and system audio still match).
     private func isEcho(_ tokens: [String]) -> Bool {
-        guard !tokens.isEmpty else { return true }
+        let mine = Set(Self.distinctive(tokens))
+        guard !mine.isEmpty else { return true } // nothing distinctive — junk
         let now = Date()
         recentThem.removeAll { now.timeIntervalSince($0.time) > 15 }
-        guard !recentThem.isEmpty else { return false }
 
-        var pool: [String: Int] = [:]
         for entry in recentThem {
-            for t in entry.tokens { pool[t, default: 0] += 1 }
+            let theirs = Set(Self.distinctive(entry.tokens))
+            guard !theirs.isEmpty else { continue }
+            let shared = mine.intersection(theirs).count
+            let ratio = Float(shared) / Float(min(mine.count, theirs.count))
+            if ratio >= 0.7 { return true }
         }
-        var matched = 0
-        for t in tokens where (pool[t] ?? 0) > 0 {
-            matched += 1
-            pool[t]! -= 1
-        }
-        let ratio = Float(matched) / Float(tokens.count)
-        // Short utterances ("yes", "okay") legitimately repeat; require exact.
-        return tokens.count >= 4 ? ratio >= 0.6 : ratio >= 0.99
+        return false
     }
 
     func start(device: InputDevice?, captureSystem: Bool) async {

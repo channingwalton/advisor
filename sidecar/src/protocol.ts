@@ -6,7 +6,7 @@ export type Inbound =
   | { type: "session_start"; sessionId: string; ts: number }
   | { type: "utterance"; id: string; source: Source; text: string; ts: number }
   | { type: "query"; id: string; text: string }
-  | { type: "config"; auto: boolean }
+  | { type: "config"; auto?: boolean; lanes?: number }
   | { type: "cancel"; cardId: string }
   | { type: "session_end" };
 

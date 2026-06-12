@@ -7,7 +7,7 @@ final class Segmenter {
     private let frameSize = 480 // 30 ms
     private let silenceFramesToEnd = 24 // ~720 ms
     private let speechFramesToStart = 3 // ~90 ms
-    private let maxSegmentSamples = 16_000 * 8
+    private let maxSegmentSamples = 16_000 * 5
     private let preRollFrames = 10 // ~300 ms kept before detected speech
 
     private var pending: [Float] = []
