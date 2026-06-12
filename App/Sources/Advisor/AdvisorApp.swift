@@ -118,6 +118,7 @@ struct TranscriptView: View {
     @State private var autoCards = true
     @State private var pinned = false
     @State private var writer: SessionWriter?
+    @State private var spaceMonitor: Any?
     @ObservedObject private var vocabulary = VocabularyStore.shared
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("sttEngine") private var sttEngine = STTEngine.apple.rawValue
@@ -126,10 +127,28 @@ struct TranscriptView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button(store.listening ? "Stop" : "Listen") {
-                    Task { await toggle() }
+                if store.listening {
+                    Button {
+                        if store.paused { recorder?.resume() } else { recorder?.pause() }
+                    } label: {
+                        Image(systemName: store.paused ? "play.fill" : "pause.fill")
+                    }
+                    .help(store.paused ? "Resume (Space)" : "Pause (Space)")
+                    Button {
+                        Task { await toggle() }
+                    } label: {
+                        Image(systemName: "stop.fill")
+                    }
+                    .help("Stop (Esc)")
+                    .keyboardShortcut(.escape, modifiers: [])
+                } else {
+                    Button {
+                        Task { await toggle() }
+                    } label: {
+                        Image(systemName: "play.fill")
+                    }
+                    .help("Listen (Space)")
                 }
-                .keyboardShortcut(.space, modifiers: [])
                 Picker("Mic", selection: $selectedDevice) {
                     ForEach(devices) { d in
                         Text(d.label).tag(Optional(d))
@@ -152,7 +171,7 @@ struct TranscriptView: View {
                             on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
                     }
                 Circle()
-                    .fill(store.listening ? .red : .gray)
+                    .fill(store.listening ? (store.paused ? .orange : .red) : .gray)
                     .frame(width: 10, height: 10)
                 Text(fatalError ?? store.status)
                     .font(.caption)
@@ -188,6 +207,11 @@ struct TranscriptView: View {
             .padding(10)
         }
         .task { setup() }
+        .onAppear(perform: installSpaceMonitor)
+        .onDisappear {
+            if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
+            spaceMonitor = nil
+        }
         .onChange(of: store.utterances) { _, _ in writer?.noteChanged() }
         .onChange(of: store.cards) { _, _ in writer?.noteChanged() }
         .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }
@@ -355,6 +379,27 @@ struct TranscriptView: View {
             fatalError = nil
         } catch {
             fatalError = "\(error)"
+        }
+    }
+
+    /// Space toggles play/pause/resume globally, except while editing a text
+    /// field (where space must type a space). SwiftUI's `.keyboardShortcut`
+    /// can't express that exception, so use a local key monitor instead.
+    private func installSpaceMonitor() {
+        guard spaceMonitor == nil else { return }
+        spaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 49, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+            else { return event }
+            // Don't steal space from a focused text field.
+            if event.window?.firstResponder is NSTextView { return event }
+            if !store.listening {
+                Task { await toggle() }
+            } else if store.paused {
+                recorder?.resume()
+            } else {
+                recorder?.pause()
+            }
+            return nil
         }
     }
 

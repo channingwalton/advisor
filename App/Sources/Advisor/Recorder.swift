@@ -17,6 +17,8 @@ struct Utterance: Identifiable, Equatable {
 final class TranscriptStore: ObservableObject {
     @Published var utterances: [Utterance] = []
     @Published var listening = false
+    /// True while listening but audio is paused (engines idle, no new input).
+    @Published var paused = false
     @Published var status = "idle"
     /// Smoothed input RMS, 0...~0.3 typical speech. 0 ⇒ mic delivering silence.
     @Published var inputLevel: Float = 0
@@ -48,6 +50,8 @@ final class Recorder {
     private let store: TranscriptStore
     private let whisperQueue = DispatchQueue(label: "advisor.whisper")
     private var systemActive = false
+    /// When true, capture callbacks drop audio so no new transcription occurs.
+    private var paused = false
     /// Recent `them` utterances for echo dedup. Only touched on whisperQueue.
     private var recentThem: [(time: Date, tokens: [String])] = []
     /// Called on the main actor for each accepted utterance.
@@ -82,7 +86,7 @@ final class Recorder {
 
         var micCounter = 0
         capture.onSamples = { [weak self] samples in
-            guard let self else { return }
+            guard let self, !self.paused else { return }
             switch self.engine {
             case .whisper: self.micSegmenter.append(samples)
             case .apple: self.appleMic?.append(samples)
@@ -94,7 +98,7 @@ final class Recorder {
         }
         var sysCounter = 0
         systemCapture.onSamples = { [weak self] samples in
-            guard let self else { return }
+            guard let self, !self.paused else { return }
             switch self.engine {
             case .whisper: self.sysSegmenter.append(samples)
             case .apple: self.appleSys?.append(samples)
@@ -288,8 +292,10 @@ final class Recorder {
             ]
             .compactMap { $0 }.joined(separator: " ")
             let status = ([detail] + notes).joined(separator: " | ")
+            paused = false
             await MainActor.run {
                 store.listening = true
+                store.paused = false
                 store.status = status
             }
         } catch {
@@ -299,6 +305,7 @@ final class Recorder {
     }
 
     func stop() {
+        paused = false
         capture.stop()
         micSegmenter.flush()
         sysSegmenter.flush()
@@ -308,11 +315,38 @@ final class Recorder {
             await stopSystem()
             await MainActor.run {
                 store.listening = false
+                store.paused = false
                 store.status = "idle"
                 store.inputLevel = 0
                 store.systemLevel = 0
                 store.volatile = [:]
             }
+        }
+    }
+
+    /// Pause/resume input. Engines stay alive; paused simply drops incoming
+    /// audio so no new transcription is produced. Flushes pending segments on
+    /// pause so they aren't held mid-utterance.
+    func pause() {
+        guard !paused else { return }
+        paused = true
+        micSegmenter.flush()
+        sysSegmenter.flush()
+        Task { @MainActor in
+            store.paused = true
+            store.status = "paused"
+            store.inputLevel = 0
+            store.systemLevel = 0
+            store.volatile = [:]
+        }
+    }
+
+    func resume() {
+        guard paused else { return }
+        paused = false
+        Task { @MainActor in
+            store.paused = false
+            store.status = "listening"
         }
     }
 
