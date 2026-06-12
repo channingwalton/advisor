@@ -128,10 +128,17 @@ final class SidecarManager {
             store.status = "sidecar ready"
         case "card":
             guard let id = obj["id"] as? String else { return }
+            // Anchor the card to the sentence that triggered it, so it sorts
+            // into the feed under that line rather than at research-completion
+            // time (10–30s later). Fall back to now for query cards / unknown ids.
+            let created =
+                (obj["trigger"] as? String)
+                .flatMap { trigger in store.utterances.first { $0.id.uuidString == trigger } }?
+                .time ?? Date()
             store.cards.append(
                 Card(
                     id: id,
-                    created: Date(),
+                    created: created,
                     kind: obj["kind"] as? String ?? "query",
                     title: obj["title"] as? String ?? "",
                     body: obj["body"] as? String ?? "",

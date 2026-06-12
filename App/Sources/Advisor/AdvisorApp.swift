@@ -246,12 +246,21 @@ struct TranscriptView: View {
             case .card(let c): c.created
             }
         }
+
+        var isUtterance: Bool {
+            if case .utterance = self { return true }
+            return false
+        }
     }
 
     /// Transcript and cards merged chronologically, so answers appear in context.
+    /// At equal times a card sorts after the utterance, so a card anchored to its
+    /// triggering sentence renders directly beneath it.
     private var feed: [FeedItem] {
         (store.utterances.map(FeedItem.utterance) + store.cards.map(FeedItem.card))
-            .sorted { $0.time < $1.time }
+            .sorted { a, b in
+                a.time != b.time ? a.time < b.time : a.isUtterance && !b.isUtterance
+            }
     }
 
     private var feedPane: some View {

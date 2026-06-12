@@ -17,6 +17,9 @@ export type Outbound =
   | {
       type: "card";
       id: string;
+      // Utterance id this card answers, so the app anchors it under that
+      // sentence rather than at research-completion time. Absent for user queries.
+      trigger?: string;
       kind: "answer" | "context" | "factcheck" | "query";
       title: string;
       body: string;

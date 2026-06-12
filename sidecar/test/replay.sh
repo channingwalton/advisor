@@ -12,4 +12,4 @@ cd "$(dirname "$0")/.."
     sleep 0.4
   done < test/fragments.txt
   sleep 30
-} | node dist/main.js 2>&1 | grep -E "classify →|trigger\("
+} | node dist/main.js 2>&1 | grep -E "classify →|trigger\(|\"type\":\"card\""

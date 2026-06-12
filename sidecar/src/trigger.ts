@@ -6,6 +6,10 @@ export interface Trigger {
   kind: "question" | "context" | "factcheck";
   subject: string;
   query: string;
+  // Utterance id of the line that completed this trigger; set by the caller
+  // (the classifier LLM never sees ids). Carried through to the card so the
+  // app can anchor it under that sentence.
+  anchorId?: string;
 }
 
 const SENSITIVITY: Record<string, string> = {

@@ -70,6 +70,7 @@ ensureLanes();
 let queryLane: Lane = makeLane("query");
 
 interface TranscriptEntry {
+  id: string;
   source: Source;
   text: string;
   ts: number;
@@ -103,11 +104,12 @@ async function runCard(
   lane: Lane,
   kind: "answer" | "context" | "factcheck" | "query",
   title: string,
-  task: string
+  task: string,
+  triggerId?: string
 ): Promise<void> {
   const cardId = `c${++cardCounter}`;
   lane.currentCardId = cardId;
-  send({ type: "card", id: cardId, kind, title, body: "…", state: "pending" });
+  send({ type: "card", id: cardId, trigger: triggerId, kind, title, body: "…", state: "pending" });
   try {
     const { text, costUsd } = await lane.session.run(transcriptDelta(lane.name) + task, (body) => {
       if (!cancelledCards.has(cardId)) {
@@ -148,11 +150,11 @@ const COVERED_TTL_MS = 10 * 60 * 1000;
 /// merged so the classifier sees sentences, not STT fragments. The classifier
 /// session is persistent, so it has already seen everything earlier — feeding
 /// only the delta guarantees every line is judged exactly once.
-function classifierDelta(): string {
+function classifierDelta(): { text: string; anchorId?: string } {
   const seen = cursors.get("classifier") ?? 0;
   const fresh = transcript.slice(seen);
   cursors.set("classifier", transcript.length);
-  if (fresh.length === 0) return "";
+  if (fresh.length === 0) return { text: "" };
   const blocks: { source: Source; text: string }[] = [];
   for (const e of fresh) {
     const last = blocks[blocks.length - 1];
@@ -162,7 +164,13 @@ function classifierDelta(): string {
       blocks.push({ source: e.source, text: e.text });
     }
   }
-  return blocks.map((b) => `${b.source}: ${b.text}`).join("\n");
+  // Anchor every trigger from this pass to the last line of the window — the
+  // sentence that completed it. Removes research-latency drift; residual error
+  // is at most the debounce window.
+  return {
+    text: blocks.map((b) => `${b.source}: ${b.text}`).join("\n"),
+    anchorId: fresh[fresh.length - 1].id,
+  };
 }
 
 let debounceTimer: NodeJS.Timeout | undefined;
@@ -196,7 +204,7 @@ async function runClassify(): Promise<void> {
   }
   classifying = true;
   try {
-    const window = classifierDelta();
+    const { text: window, anchorId } = classifierDelta();
     if (!window) return;
     const { triggers, costUsd } = await classify(window, coveredSubjects());
     addCost(costUsd);
@@ -206,7 +214,7 @@ async function runClassify(): Promise<void> {
       if (!key || covered.has(key)) continue;
       covered.set(key, Date.now());
       log(`trigger(${t.kind}): ${t.subject}`);
-      researchQueue.push(t);
+      researchQueue.push({ ...t, anchorId });
     }
     drainResearch();
   } finally {
@@ -233,7 +241,7 @@ function drainResearch(): void {
           ? `Fact-check this claim from the conversation: "${t.query}". Give a verdict first (true / false / mixed / couldn't verify), then the evidence with sources.`
           : `Give brief, useful background on "${t.subject}" as it relates to the conversation: ${t.query}`;
     lane.busy = true;
-    void runCard(lane, kind, t.subject, task).finally(() => {
+    void runCard(lane, kind, t.subject, task, t.anchorId).finally(() => {
       lane.busy = false;
       drainResearch();
     });
@@ -262,7 +270,7 @@ function handle(msg: Inbound): void {
       log(`session ${msg.sessionId} started (sensitivity=${config.triggerSensitivity})`);
       break;
     case "utterance":
-      transcript.push({ source: msg.source, text: msg.text, ts: msg.ts });
+      transcript.push({ id: msg.id, source: msg.source, text: msg.text, ts: msg.ts });
       log(`utterance(${msg.source}): ${msg.text.slice(0, 60)}`);
       scheduleClassify();
       break;
