@@ -28,13 +28,21 @@ final class TranscriptStore: ObservableObject {
     @Published var costUsd: Double = 0
 }
 
-/// Wires capture → segmentation → transcription → store, for both sources.
+enum STTEngine: String {
+    case whisper
+    case apple
+}
+
+/// Wires capture → transcription (whisper or Apple) → dedup → store.
 final class Recorder {
     private let capture = AudioCapture()
     private let systemCapture = SystemAudioCapture()
     private let micSegmenter = Segmenter()
     private let sysSegmenter = Segmenter()
-    private let transcriber: WhisperTranscriber
+    private let engine: STTEngine
+    private let transcriber: WhisperTranscriber? // whisper engine only
+    private let appleMic: AppleSpeechEngine?
+    private let appleSys: AppleSpeechEngine?
     private let store: TranscriptStore
     private let whisperQueue = DispatchQueue(label: "advisor.whisper")
     private var systemActive = false
@@ -43,22 +51,38 @@ final class Recorder {
     /// Called on the main actor for each accepted utterance.
     var onUtterance: ((Utterance) -> Void)?
 
-    /// Update the STT vocabulary bias (safe to call any time).
+    /// Update the STT vocabulary bias (whisper engine only; Apple STT has no
+    /// equivalent hook in v1).
     func setVocabulary(_ vocab: String) {
-        whisperQueue.async { self.transcriber.setVocabulary(vocab) }
+        whisperQueue.async { self.transcriber?.setVocabulary(vocab) }
     }
 
-    init(store: TranscriptStore, modelPath: String) throws {
+    init(store: TranscriptStore, modelPath: String, engine: STTEngine) throws {
         self.store = store
-        self.transcriber = try WhisperTranscriber(modelPath: modelPath)
+        self.engine = engine
+        switch engine {
+        case .whisper:
+            transcriber = try WhisperTranscriber(modelPath: modelPath)
+            appleMic = nil
+            appleSys = nil
+        case .apple:
+            transcriber = nil
+            appleMic = AppleSpeechEngine(name: "mic")
+            appleSys = AppleSpeechEngine(name: "sys")
+        }
 
         micSegmenter.onSegment = { [weak self] in self?.handleSegment($0, from: .me) }
         sysSegmenter.onSegment = { [weak self] in self?.handleSegment($0, from: .them) }
+        appleMic?.onFinal = { [weak self] text in self?.acceptAsync(text, from: .me) }
+        appleSys?.onFinal = { [weak self] text in self?.acceptAsync(text, from: .them) }
 
         var micCounter = 0
         capture.onSamples = { [weak self] samples in
             guard let self else { return }
-            self.micSegmenter.append(samples)
+            switch self.engine {
+            case .whisper: self.micSegmenter.append(samples)
+            case .apple: self.appleMic?.append(samples)
+            }
             micCounter += 1
             if micCounter % 5 == 0 {
                 self.publishLevel(samples, system: false)
@@ -67,7 +91,10 @@ final class Recorder {
         var sysCounter = 0
         systemCapture.onSamples = { [weak self] samples in
             guard let self else { return }
-            self.sysSegmenter.append(samples)
+            switch self.engine {
+            case .whisper: self.sysSegmenter.append(samples)
+            case .apple: self.appleSys?.append(samples)
+            }
             sysCounter += 1
             if sysCounter % 5 == 0 {
                 self.publishLevel(samples, system: true)
@@ -112,8 +139,9 @@ final class Recorder {
                     Data("[advisor] skipped stale segment(\(source)) — lagging\n".utf8))
                 return
             }
+            guard let transcriber = self.transcriber else { return }
             let decodeStart = Date()
-            let text = self.transcriber.transcribe(segment)
+            let text = transcriber.transcribe(segment)
             self.queueDepth -= 1
             let decodeMs = Int(Date().timeIntervalSince(decodeStart) * 1000)
             let audioMs = segment.count / 16
@@ -121,38 +149,55 @@ final class Recorder {
                 Data("[advisor] decode(\(source)): \(decodeMs)ms for \(audioMs)ms audio\n".utf8))
             FileHandle.standardError.write(
                 Data("[advisor] whisper(\(source)): \"\(text)\"\n".utf8))
-            guard !text.isEmpty, !Self.isJunk(text) else { return }
+            self.accept(text, from: source, spokenEnd: spokenEnd)
+        }
+    }
 
-            let tokens = Self.tokens(text)
-            switch source {
-            case .them:
-                self.recentThem.append((time: Date(), tokens: tokens))
-            case .me:
-                if self.systemActive, self.isEcho(tokens) {
-                    FileHandle.standardError.write(
-                        Data("[advisor] echo suppressed: \"\(text)\"\n".utf8))
-                    return
+    /// Entry point for engines that deliver finished text (Apple STT). Applies
+    /// the same me-delay so echo dedup can see the system-audio twin first.
+    private func acceptAsync(_ text: String, from source: Source) {
+        let spokenEnd = Date()
+        FileHandle.standardError.write(
+            Data("[advisor] apple(\(source)): \"\(text)\"\n".utf8))
+        let delay: TimeInterval = source == .me && systemActive ? 4.0 : 0
+        whisperQueue.asyncAfter(deadline: .now() + delay) {
+            self.accept(text, from: source, spokenEnd: spokenEnd)
+        }
+    }
+
+    /// Common post-STT path: junk filter, echo dedup, store. Call on whisperQueue.
+    private func accept(_ text: String, from source: Source, spokenEnd: Date) {
+        guard !text.isEmpty, !Self.isJunk(text) else { return }
+
+        let tokens = Self.tokens(text)
+        switch source {
+        case .them:
+            recentThem.append((time: Date(), tokens: tokens))
+        case .me:
+            if systemActive, isEcho(tokens) {
+                FileHandle.standardError.write(
+                    Data("[advisor] echo suppressed: \"\(text)\"\n".utf8))
+                return
+            }
+        }
+
+        let latency = Int(Date().timeIntervalSince(spokenEnd) * 1000)
+        let distinctiveSet = Set(Self.distinctive(tokens))
+        Task { @MainActor in
+            // Retroactive echo cleanup: a system-audio utterance supersedes any
+            // recent mic utterance that was its (degraded) room echo.
+            if source == .them, !distinctiveSet.isEmpty {
+                self.store.utterances.removeAll { u in
+                    u.source == .me
+                        && spokenEnd.timeIntervalSince(u.time) < 12
+                        && Self.pairMatch(
+                            Set(Self.distinctive(Self.tokens(u.text))), distinctiveSet)
                 }
             }
-
-            let latency = Int(Date().timeIntervalSince(spokenEnd) * 1000)
-            let distinctiveSet = Set(Self.distinctive(tokens))
-            Task { @MainActor in
-                // Retroactive echo cleanup: a system-audio utterance supersedes any
-                // recent mic utterance that was its (degraded) room echo.
-                if source == .them, !distinctiveSet.isEmpty {
-                    self.store.utterances.removeAll { u in
-                        u.source == .me
-                            && spokenEnd.timeIntervalSince(u.time) < 12
-                            && Self.pairMatch(
-                                Set(Self.distinctive(Self.tokens(u.text))), distinctiveSet)
-                    }
-                }
-                let utterance = Utterance(
-                    time: spokenEnd, source: source, text: text, latencyMs: latency)
-                self.store.utterances.append(utterance)
-                self.onUtterance?(utterance)
-            }
+            let utterance = Utterance(
+                time: spokenEnd, source: source, text: text, latencyMs: latency)
+            self.store.utterances.append(utterance)
+            self.onUtterance?(utterance)
         }
     }
 
@@ -203,6 +248,16 @@ final class Recorder {
             await MainActor.run { store.status = "microphone permission denied" }
             return
         }
+        if engine == .apple {
+            do {
+                await MainActor.run { store.status = "starting Apple speech engine…" }
+                try await appleMic?.start()
+                try await appleSys?.start()
+            } catch {
+                await MainActor.run { store.status = "Apple STT failed: \(error)" }
+                return
+            }
+        }
         var notes: [String] = []
         if captureSystem {
             do {
@@ -238,6 +293,8 @@ final class Recorder {
         micSegmenter.flush()
         sysSegmenter.flush()
         Task {
+            await appleMic?.stop()
+            await appleSys?.stop()
             await stopSystem()
             await MainActor.run {
                 store.listening = false

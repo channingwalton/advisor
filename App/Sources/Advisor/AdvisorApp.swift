@@ -117,6 +117,8 @@ struct TranscriptView: View {
     @StateObject private var vocabulary = VocabularyStore()
     @State private var showDictionary = false
     @AppStorage("agentLanes") private var agentLanes = 3
+    @AppStorage("sttEngine") private var sttEngine = STTEngine.apple.rawValue
+    @AppStorage("micDeviceName") private var micDeviceName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -132,6 +134,16 @@ struct TranscriptView: View {
                 }
                 .frame(maxWidth: 230)
                 .disabled(store.listening)
+                .onChange(of: selectedDevice) { _, d in
+                    if let d { micDeviceName = d.name }
+                }
+                Picker("STT", selection: $sttEngine) {
+                    Text("Apple").tag(STTEngine.apple.rawValue)
+                    Text("Whisper").tag(STTEngine.whisper.rawValue)
+                }
+                .frame(maxWidth: 140)
+                .disabled(store.listening)
+                .onChange(of: sttEngine) { _, _ in rebuildRecorder() }
                 Toggle("System audio", isOn: $captureSystem)
                     .toggleStyle(.checkbox)
                     .disabled(store.listening)
@@ -294,22 +306,33 @@ struct TranscriptView: View {
 
     private func setup() {
         devices = AudioDevices.inputs()
-        selectedDevice = AudioDevices.preferred(devices)
+        // Sticky mic: restore the previously chosen device by name.
+        selectedDevice =
+            devices.first { $0.name == micDeviceName } ?? AudioDevices.preferred(devices)
         let manager = SidecarManager(store: store)
         manager.start()
         manager.sendLanes(agentLanes)
         sidecar = manager
         writer = SessionWriter(store: store)
+        rebuildRecorder()
+    }
+
+    private func rebuildRecorder() {
+        guard let manager = sidecar else { return }
+        let engine = STTEngine(rawValue: sttEngine) ?? .apple
         let modelPath =
             ProcessInfo.processInfo.environment["ADVISOR_WHISPER_MODEL"] ?? defaultModelPath
         do {
-            recorder = try Recorder(store: store, modelPath: modelPath)
+            recorder = try Recorder(store: store, modelPath: modelPath, engine: engine)
             recorder?.onUtterance = { manager.sendUtterance($0) }
             vocabulary.onChange = { [weak recorder = recorder] vocab in
                 recorder?.setVocabulary(vocab)
             }
             recorder?.setVocabulary(vocabulary.joined) // include system spelling terms
-            store.status = "ready — model: \((modelPath as NSString).lastPathComponent)"
+            store.status =
+                engine == .apple
+                ? "ready — Apple speech" : "ready — \((modelPath as NSString).lastPathComponent)"
+            fatalError = nil
         } catch {
             fatalError = "\(error)"
         }
