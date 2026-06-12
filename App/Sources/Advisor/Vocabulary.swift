@@ -62,70 +62,6 @@ final class VocabularyStore: ObservableObject {
     }
 }
 
-/// Simple wrapping layout for word chips.
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 3
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        for sub in subviews {
-            let size = sub.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > width {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-        return CGSize(width: width == .infinity ? x : width, height: y + rowHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var rowHeight: CGFloat = 0
-        for sub in subviews {
-            let size = sub.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            sub.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-    }
-}
-
-/// Utterance text as tappable words: click a word to add it to the dictionary.
-struct TappableWords: View {
-    let text: String
-    @ObservedObject var vocabulary: VocabularyStore
-
-    var body: some View {
-        FlowLayout {
-            ForEach(Array(text.split(separator: " ").enumerated()), id: \.offset) { _, raw in
-                let word = String(raw)
-                let cleaned = word.trimmingCharacters(in: .punctuationCharacters)
-                let known = !cleaned.isEmpty && vocabulary.contains(cleaned)
-                Text(word)
-                    .underline(known, color: .accentColor)
-                    .foregroundStyle(known ? Color.accentColor : .primary)
-                    .onTapGesture {
-                        guard !cleaned.isEmpty else { return }
-                        known ? vocabulary.remove(cleaned) : vocabulary.add(cleaned)
-                    }
-                    .help(known ? "Remove “\(cleaned)” from dictionary" : "Add “\(cleaned)” to dictionary")
-            }
-        }
-    }
-}
-
 /// Popover content for managing the dictionary.
 struct DictionaryView: View {
     @ObservedObject var vocabulary: VocabularyStore
@@ -134,7 +70,7 @@ struct DictionaryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("STT Dictionary").font(.headline)
-            Text("Biases transcription towards these terms. Click words in the transcript to add them.")
+            Text("Biases transcription towards these terms (whisper engine). Right-click a transcript sentence to add its words.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {

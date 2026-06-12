@@ -239,8 +239,20 @@ struct TranscriptView: View {
                     ForEach(feed) { item in
                         switch item {
                         case .utterance(let u):
-                            TappableWords(text: u.text, vocabulary: vocabulary)
+                            Text(u.text)
+                                .textSelection(.enabled)
                                 .help(u.time.formatted(date: .omitted, time: .standard))
+                                .contextMenu {
+                                    Menu("Add to dictionary") {
+                                        ForEach(dictionaryCandidates(u.text), id: \.self) { word in
+                                            Button(word) { vocabulary.add(word) }
+                                        }
+                                    }
+                                    Button("Copy sentence") {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(u.text, forType: .string)
+                                    }
+                                }
                                 .id(item.id)
                         case .card(let card):
                             cardView(card)
@@ -296,6 +308,14 @@ struct TranscriptView: View {
         }
         .padding(10)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Distinct words worth adding to the STT dictionary, in sentence order.
+    private func dictionaryCandidates(_ text: String) -> [String] {
+        var seen = Set<String>()
+        return text.split(separator: " ")
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count > 2 && !vocabulary.contains($0) && seen.insert($0.lowercased()).inserted }
     }
 
     private func kindColour(_ kind: String) -> Color {
