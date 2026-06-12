@@ -13,6 +13,7 @@ final class AppleSpeechEngine {
     private var analyzerFormat: AVAudioFormat?
     private var resultsTask: Task<Void, Never>?
     private let name: String
+    private let localeIdentifier: String
 
     private let sourceFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
@@ -22,8 +23,9 @@ final class AppleSpeechEngine {
     /// In-progress (volatile) text for the current utterance; superseded by onFinal.
     var onVolatile: ((String) -> Void)?
 
-    init(name: String) {
+    init(name: String, locale: String = "en_GB") {
         self.name = name
+        self.localeIdentifier = locale
     }
 
     func start() async throws {
@@ -32,7 +34,7 @@ final class AppleSpeechEngine {
         }
         guard
             let locale = await SpeechTranscriber.supportedLocale(
-                equivalentTo: Locale(identifier: "en_GB"))
+                equivalentTo: Locale(identifier: localeIdentifier))
         else {
             throw AdvisorError.audioSetup("no supported transcription locale")
         }

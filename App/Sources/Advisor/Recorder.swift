@@ -59,7 +59,7 @@ final class Recorder {
         whisperQueue.async { self.transcriber?.setVocabulary(vocab) }
     }
 
-    init(store: TranscriptStore, modelPath: String, engine: STTEngine) throws {
+    init(store: TranscriptStore, modelPath: String, engine: STTEngine, locale: String) throws {
         self.store = store
         self.engine = engine
         switch engine {
@@ -69,8 +69,8 @@ final class Recorder {
             appleSys = nil
         case .apple:
             transcriber = nil
-            appleMic = AppleSpeechEngine(name: "mic")
-            appleSys = AppleSpeechEngine(name: "sys")
+            appleMic = AppleSpeechEngine(name: "mic", locale: locale)
+            appleSys = AppleSpeechEngine(name: "sys", locale: locale)
         }
 
         micSegmenter.onSegment = { [weak self] in self?.handleSegment($0, from: .me) }

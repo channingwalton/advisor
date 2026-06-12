@@ -77,6 +77,9 @@ struct AdvisorApp: App {
             TranscriptView(store: store)
                 .frame(minWidth: 420, minHeight: 480)
         }
+        Settings {
+            PreferencesView()
+        }
     }
 }
 
@@ -332,7 +335,9 @@ struct TranscriptView: View {
         let modelPath =
             ProcessInfo.processInfo.environment["ADVISOR_WHISPER_MODEL"] ?? defaultModelPath
         do {
-            recorder = try Recorder(store: store, modelPath: modelPath, engine: engine)
+            recorder = try Recorder(
+                store: store, modelPath: modelPath, engine: engine,
+                locale: AdvisorConfig.load().sttLocale)
             recorder?.onUtterance = { manager.sendUtterance($0) }
             vocabulary.onChange = { [weak recorder = recorder] vocab in
                 recorder?.setVocabulary(vocab)

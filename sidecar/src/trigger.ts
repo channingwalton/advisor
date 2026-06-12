@@ -1,4 +1,5 @@
 import { AgentSession } from "./agent.js";
+import { AdvisorConfig } from "./config.js";
 import { log } from "./protocol.js";
 
 export interface Trigger {
@@ -7,7 +8,37 @@ export interface Trigger {
   query: string;
 }
 
-const CLASSIFIER_SYSTEM = `You are the trigger detector for a proactive realtime meeting
+const SENSITIVITY: Record<string, string> = {
+  conservative:
+    "Be conservative: only trigger on clear, explicit questions or obviously important topics. When unsure, stay silent.",
+  balanced:
+    "In an active, substantive conversation expect a trigger every couple of minutes. Stay silent for pleasantries and chit-chat.",
+  eager:
+    "Be eager: in substantive conversation aim for a trigger every minute or two; returning empty triggers constantly means you are failing. When a topic could plausibly benefit from research, trigger.",
+};
+
+const KIND_DESCRIPTIONS: Record<keyof AdvisorConfig["triggers"], string> = {
+  question: `- "question": a factual question asked or wondered aloud (incl. implicit/musing forms:
+  "I wonder", "not sure what", "does anyone know", "how does X work") that the transcript
+  doesn't answer. ALWAYS trigger on these. This INCLUDES personal questions about the
+  user's own notes, projects, or work history ("what did I change in X", "when did
+  I last...", "what's in my notes about...") — the research agent can search the user's
+  notes, so these are among the MOST valuable triggers.`,
+  context: `- "context": a named project, system, person, company, product, acronym, ticket, or topic
+  is being discussed where background, definitions, or recent news would help a
+  participant. Unfamiliar terms and acronyms are prime candidates. Also use this when a
+  topic is discussed at length and useful data exists (e.g. they debate costs → fetch the
+  actual numbers).`,
+  factcheck: `- "factcheck": a specific checkable claim was stated as fact (numbers, dates,
+  capabilities, "X said/does Y") and verifying it would add value.`,
+};
+
+function classifierSystem(cfg: AdvisorConfig): string {
+  const kinds = (Object.keys(KIND_DESCRIPTIONS) as (keyof AdvisorConfig["triggers"])[])
+    .filter((k) => cfg.triggers[k])
+    .map((k) => KIND_DESCRIPTIONS[k])
+    .join("\n");
+  return `You are the trigger detector for a proactive realtime meeting
 assistant. Each user message contains the lines of a LIVE SPEECH-TO-TEXT transcript that
 are NEW since your previous message. You have already seen everything before that, so
 evaluate every new line exactly once — never let one pass unjudged, and join new
@@ -20,43 +51,46 @@ Important properties of the input:
 - Punctuation and capitalisation are unreliable. A question may have no question mark.
 
 Your mission: behave like a sharp assistant sitting in the meeting who looks things up
-BEFORE being asked. In an active, substantive conversation you should produce a trigger
-every minute or two. Returning {"triggers":[]} constantly means you are failing. Only
-stay silent for pleasantries, chit-chat, or meta-talk about this app.
+BEFORE being asked. ${SENSITIVITY[cfg.triggerSensitivity] ?? SENSITIVITY.balanced}
+Never trigger on meta-talk about this app.
 
 Reply to EVERY message with STRICT JSON only, no prose, no markdown:
 {"triggers":[{"kind":"question","subject":"...","query":"..."}]}
 
 kind is one of:
-- "question": a factual question asked or wondered aloud (incl. implicit/musing forms:
-  "I wonder", "not sure what", "does anyone know", "how does X work") that the transcript
-  doesn't answer. ALWAYS trigger on these. This INCLUDES personal questions about the
-  user's own notes, vault, projects, or work history ("what did I change in X", "when did
-  I last...", "what's in my notes about...") — the research agent can search the user's
-  Obsidian vault, so these are among the MOST valuable triggers.
-- "context": a named project, system, person, company, product, acronym, ticket, or topic
-  is being discussed where background, definitions, or recent news would help a
-  participant. Unfamiliar terms and acronyms are prime candidates. Also use this when a
-  topic is discussed at length and useful data exists (e.g. they debate costs → fetch the
-  actual numbers).
-- "factcheck": a specific checkable claim was stated as fact (numbers, dates,
-  capabilities, "X said/does Y") and verifying it would add value.
+${kinds}
 
 Rules:
 - Reassembled-sentence questions count even if split across lines.
 - Skip anything whose subject is in the "already covered" list of the message.
-- Max 2 triggers per message. "subject" is a short dedup key; "query" is a
+- Max ${cfg.maxTriggersPerPass} triggers per message. "subject" is a short dedup key; "query" is a
   self-contained research instruction (include enough context to be understood alone).`;
+}
 
-const session = new AgentSession({
-  name: "classifier",
-  systemPrompt: CLASSIFIER_SYSTEM,
-  model: "haiku",
-  allowedTools: [],
-});
+let cfg: AdvisorConfig | undefined;
+let session: AgentSession | undefined;
+
+export function configureClassifier(config: AdvisorConfig): void {
+  cfg = config;
+  session?.reset();
+  session = undefined;
+}
+
+function ensureSession(): AgentSession {
+  if (!session) {
+    const config = cfg ?? ({ triggerSensitivity: "balanced", triggers: { question: true, context: true, factcheck: true }, maxTriggersPerPass: 2, classifierModel: "haiku", researchModel: "", extraInstructions: "" } as AdvisorConfig);
+    session = new AgentSession({
+      name: "classifier",
+      systemPrompt: classifierSystem(config),
+      model: config.classifierModel || "haiku",
+      allowedTools: [],
+    });
+  }
+  return session
+}
 
 export function resetClassifier(): void {
-  session.reset();
+  session?.reset();
 }
 
 export interface ClassifyResult {
@@ -71,7 +105,7 @@ Transcript window (newest last):
 ${window}
 
 JSON:`;
-  const { text, costUsd } = await session.run(prompt, undefined, 30_000);
+  const { text, costUsd } = await ensureSession().run(prompt, undefined, 30_000);
   if (!text) return { triggers: [], costUsd };
 
   const match = text.match(/\{[\s\S]*\}/);
@@ -81,9 +115,10 @@ JSON:`;
   }
   try {
     const parsed = JSON.parse(match[0]) as { triggers?: Trigger[] };
+    const enabled = cfg?.triggers ?? { question: true, context: true, factcheck: true };
     const triggers = (parsed.triggers ?? [])
-      .filter((t) => t.kind && t.subject && t.query)
-      .slice(0, 2);
+      .filter((t) => t.kind && t.subject && t.query && enabled[t.kind])
+      .slice(0, cfg?.maxTriggersPerPass ?? 2);
     return { triggers, costUsd };
   } catch (err) {
     log(`classifier JSON parse failed: ${err}`);

@@ -131,7 +131,11 @@ Volatile results are enabled: in-progress words render grey/italic at the feed t
 
 ## Agent sandboxing (2026-06-13)
 
-Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: web tools auto-allowed; Read/Grep/Glob restricted to `readRoots` (the vault); Bash/Write/Edit/etc. denied and disallowed. Verified: `/etc/passwd` read denied, vault queries unaffected. A hard OS boundary (OrbStack/Docker container with vault and `~/.claude` mounted read-only, app spawning `docker run -i`) remains a future option — note the OAuth credentials sit inside any such boundary.
+Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: web tools auto-allowed; Read/Grep/Glob restricted to non-sensitive paths under `$HOME` (denylist: .ssh, .aws, .claude, keychains, …); Bash/Write/Edit/etc. denied and disallowed. Verified: `/etc/passwd` read denied, notes queries unaffected. A hard OS boundary (OrbStack/Docker container, app spawning `docker run -i`) remains a future option — note the OAuth credentials sit inside any such boundary.
+
+## Preferences & de-vaulting (2026-06-13)
+
+Advisor no longer knows about the vault: agents load the user's own Claude config (`settingSources: ["user"]` → `~/.claude/CLAUDE.md`), which carries personal context like note locations. Verified: Patchwork vault query answered with no vault path in Advisor. Preferences (⌘,) write `Application Support/Advisor/config.json`, re-read by the sidecar at each session_start (sessions rebuilt so prompt/model changes apply): extra research instructions, trigger sensitivity + per-kind toggles + max per pass, classifier/research models, STT locale.
 
 ## Revisit as it grows
 

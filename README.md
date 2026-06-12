@@ -66,10 +66,23 @@ only — Apple has no vocabulary hook). `Agents` sets research parallelism.
 `Pin` floats the window. Sessions are saved as markdown under
 `~/Library/Application Support/Advisor/sessions/` (`Sessions` button).
 
+## Preferences
+
+⌘, opens settings: extra instructions for the research agents, trigger
+sensitivity (conservative/balanced/eager) and per-kind toggles, classifier and
+research model choice, and STT locale. Stored in
+`~/Library/Application Support/Advisor/config.json`; agent settings apply at
+the next session start.
+
+Advisor itself knows nothing about your notes: the research agents load your
+own Claude configuration (`~/.claude/CLAUDE.md`), which is where vault
+locations and personal context belong.
+
 ## Safety
 
-Research agents are sandboxed by tool policy: they can search the web and read
-the vault, nothing else — no shell, no writes, no files outside the vault.
+Research agents are sandboxed by tool policy: web search plus read-only access
+to non-sensitive files in your home directory — no shell, no writes, and
+credential paths (~/.ssh, ~/.aws, ~/.claude, keychains, …) are denied.
 
 ## Documents
 

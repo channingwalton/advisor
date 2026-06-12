@@ -1,10 +1,30 @@
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { homedir } from "node:os";
 import path from "node:path";
 import { log } from "./protocol.js";
 
 type PermissionResult =
   | { behavior: "allow"; updatedInput: Record<string, unknown> }
   | { behavior: "deny"; message: string };
+
+const HOME = homedir();
+
+/// Paths the agents may never read, even inside $HOME.
+const DENIED = [
+  ".ssh",
+  ".aws",
+  ".gnupg",
+  ".claude",
+  ".claude.json",
+  ".npmrc",
+  ".netrc",
+  ".git-credentials",
+  ".docker",
+  ".kube",
+  ".config/gh",
+  "Library/Keychains",
+  "Library/Cookies",
+].map((p) => path.join(HOME, p));
 
 /** Unbounded async queue usable as the SDK's streaming prompt input. */
 export class AsyncQueue<T> implements AsyncIterable<T> {
@@ -56,8 +76,6 @@ export interface AgentSessionOptions {
   model?: string;
   allowedTools: string[];
   cwd?: string;
-  /// Directories Read/Grep/Glob may touch. Everything else is denied.
-  readRoots?: string[];
 }
 
 /**
@@ -142,19 +160,20 @@ export class AgentSession {
     }
   };
 
+  /// Reads allowed anywhere under $HOME except sensitive paths; nothing outside.
   private pathAllowed(p: unknown): boolean {
-    const roots = this.opts.readRoots ?? [];
-    if (p === undefined || p === null || p === "") return true; // tool defaults to cwd (a root)
+    if (p === undefined || p === null || p === "") return true; // tool defaults to cwd ($HOME)
     if (typeof p !== "string") return false;
-    const resolved = path.resolve(this.opts.cwd ?? "/", p);
-    return roots.some((root) => resolved === root || resolved.startsWith(root + path.sep));
+    const resolved = path.resolve(this.opts.cwd ?? HOME, p);
+    if (resolved !== HOME && !resolved.startsWith(HOME + path.sep)) return false;
+    return !DENIED.some((d) => resolved === d || resolved.startsWith(d + path.sep));
   }
 
   private denyPath(tool: string, p: unknown): PermissionResult {
     log(`${this.opts.name}: denied ${tool} on ${String(p)}`);
     return {
       behavior: "deny",
-      message: `Access denied: ${tool} may only access ${this.opts.readRoots?.join(", ")}`,
+      message: `Access denied: ${tool} may only read non-sensitive files in the home directory`,
     };
   }
 
@@ -174,6 +193,9 @@ export class AgentSession {
         cwd: this.opts.cwd,
         permissionMode: "default",
         canUseTool: this.canUseTool,
+        // Load the user's own Claude configuration (CLAUDE.md etc.) — that is
+        // where personal context like vault locations belongs, not in Advisor.
+        settingSources: ["user"],
         maxTurns: 1000,
       },
     });

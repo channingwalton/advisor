@@ -1,24 +1,31 @@
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { AgentSession } from "./agent.js";
+import { AdvisorConfig, loadConfig } from "./config.js";
 import { Inbound, log, send, Source } from "./protocol.js";
-import { classify, resetClassifier, Trigger } from "./trigger.js";
+import { classify, configureClassifier, resetClassifier, Trigger } from "./trigger.js";
 
-const VAULT = `${homedir()}/Documents/Notes`;
+const HOME = homedir();
+let config: AdvisorConfig = loadConfig();
 
-const SYSTEM = `You are Advisor, a realtime meeting assistant running on Channing's Mac.
+function systemPrompt(): string {
+  return `You are Advisor, a realtime meeting assistant running on the user's Mac.
 Each user message is a research task, usually with a snippet of live conversation
 transcript. Respond concisely and usefully for someone mid-conversation:
 - Lead with the answer; no preamble.
 - Use WebSearch for facts about the world; use Read/Grep/Glob to search the
-  Obsidian vault at ${VAULT} for personal/work context.
-- Cite sources inline as markdown links or vault file paths.
+  user's notes and files for personal/work context — your configuration
+  (CLAUDE.md) tells you where their notes live.
+- Cite sources inline as markdown links or file paths.
 - If you cannot verify something, say "couldn't verify" rather than guessing.
 - NEVER ask the user questions — this is a one-shot answer with no way to
   reply. If the request is ambiguous, state your assumption in one line and
   answer under it. If context is missing, give the most useful answer you can
   with what you have.
-- British spelling. Keep answers under ~150 words unless asked for depth.`;
+- British spelling. Keep answers under ~150 words unless asked for depth.${
+    config.extraInstructions ? `\n\nUser preferences:\n${config.extraInstructions}` : ""
+  }`;
+}
 
 const TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
 
@@ -37,35 +44,28 @@ const cancelledCards = new Set<string>();
 
 const researchLanes: Lane[] = [];
 
+function makeLane(name: string): Lane {
+  return {
+    name,
+    session: new AgentSession({
+      name,
+      systemPrompt: systemPrompt(),
+      model: config.researchModel || undefined,
+      allowedTools: TOOLS,
+      cwd: HOME,
+    }),
+    busy: false,
+  };
+}
+
 function ensureLanes(): void {
   while (researchLanes.length < maxLanes) {
-    const name = `research${researchLanes.length}`;
-    researchLanes.push({
-      name,
-      session: new AgentSession({
-        name,
-        systemPrompt: SYSTEM,
-        allowedTools: TOOLS,
-        cwd: VAULT,
-        readRoots: [VAULT],
-      }),
-      busy: false,
-    });
+    researchLanes.push(makeLane(`research${researchLanes.length}`));
   }
 }
 ensureLanes();
 
-const queryLane: Lane = {
-  name: "query",
-  session: new AgentSession({
-    name: "query",
-    systemPrompt: SYSTEM,
-    allowedTools: TOOLS,
-    cwd: VAULT,
-    readRoots: [VAULT],
-  }),
-  busy: false,
-};
+let queryLane: Lane = makeLane("query");
 
 interface TranscriptEntry {
   source: Source;
@@ -248,10 +248,16 @@ function handle(msg: Inbound): void {
       covered.clear();
       researchQueue.length = 0;
       sessionCostUsd = 0;
+      // Re-read preferences and rebuild sessions so prompt/model changes apply.
+      config = loadConfig();
+      configureClassifier(config);
       resetClassifier();
       for (const lane of researchLanes) lane.session.reset();
+      researchLanes.length = 0;
+      ensureLanes();
       queryLane.session.reset();
-      log(`session ${msg.sessionId} started`);
+      queryLane = makeLane("query");
+      log(`session ${msg.sessionId} started (sensitivity=${config.triggerSensitivity})`);
       break;
     case "utterance":
       transcript.push({ source: msg.source, text: msg.text, ts: msg.ts });
@@ -297,7 +303,7 @@ function handle(msg: Inbound): void {
 }
 
 send({ type: "hello", version: 1 });
-log(`ready; vault=${VAULT}`);
+log(`ready; sensitivity=${config.triggerSensitivity}`);
 
 const rl = createInterface({ input: process.stdin });
 rl.on("line", (line) => {
