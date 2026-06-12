@@ -1,8 +1,14 @@
 // swift-tools-version:6.2
 import PackageDescription
+import Foundation
 
-// Adjust if the repo moves.
-let whisperRoot = "/Users/channing/dev/advisor/Advisor/vendor/whisper.cpp"
+// Derived from this file's location so the repo can move freely.
+// Package.swift lives in App/; vendor/ is its sibling at the repo root.
+let whisperRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()       // App/
+    .deletingLastPathComponent()       // repo root
+    .appendingPathComponent("vendor/whisper.cpp")
+    .path
 
 let package = Package(
     name: "Advisor",

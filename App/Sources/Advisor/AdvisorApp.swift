@@ -2,8 +2,17 @@ import AppKit
 import AVFoundation
 import SwiftUI
 
+// Repo root, derived from this source file's compile-time location so the
+// checkout can move without editing paths. Sources/Advisor/AdvisorApp.swift
+// is four levels below the repo root (…/App/Sources/Advisor/AdvisorApp.swift).
+let repoRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()   // Advisor/
+    .deletingLastPathComponent()   // Sources/
+    .deletingLastPathComponent()   // App/
+    .deletingLastPathComponent()   // repo root
+
 let defaultModelPath =
-    "/Users/channing/dev/advisor/Advisor/vendor/whisper.cpp/models/ggml-large-v3-turbo.bin"
+    repoRoot.appendingPathComponent("vendor/whisper.cpp/models/ggml-large-v3-turbo.bin").path
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {

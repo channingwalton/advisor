@@ -15,7 +15,7 @@ final class SidecarManager {
     private var stdinHandle: FileHandle?
     private var buffer = Data()
     private let store: TranscriptStore
-    private let sidecarDir = "/Users/channing/dev/advisor/Advisor/sidecar"
+    private let sidecarDir = repoRoot.appendingPathComponent("sidecar").path
 
     init(store: TranscriptStore) {
         self.store = store
