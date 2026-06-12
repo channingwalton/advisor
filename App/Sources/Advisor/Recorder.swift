@@ -20,10 +20,6 @@ final class TranscriptStore: ObservableObject {
     /// True while listening but audio is paused (engines idle, no new input).
     @Published var paused = false
     @Published var status = "idle"
-    /// Smoothed input RMS, 0...~0.3 typical speech. 0 ⇒ mic delivering silence.
-    @Published var inputLevel: Float = 0
-    /// Smoothed system-audio RMS.
-    @Published var systemLevel: Float = 0
     /// Cards from the sidecar, newest first.
     @Published var cards: [Card] = []
     /// Cumulative LLM cost for the current session (USD).
@@ -84,46 +80,24 @@ final class Recorder {
         appleMic?.onVolatile = { [weak self] text in self?.setVolatile(text, for: .me) }
         appleSys?.onVolatile = { [weak self] text in self?.setVolatile(text, for: .them) }
 
-        var micCounter = 0
         capture.onSamples = { [weak self] samples in
             guard let self, !self.paused else { return }
             switch self.engine {
             case .whisper: self.micSegmenter.append(samples)
             case .apple: self.appleMic?.append(samples)
             }
-            micCounter += 1
-            if micCounter % 5 == 0 {
-                self.publishLevel(samples, system: false)
-            }
         }
-        var sysCounter = 0
         systemCapture.onSamples = { [weak self] samples in
             guard let self, !self.paused else { return }
             switch self.engine {
             case .whisper: self.sysSegmenter.append(samples)
             case .apple: self.appleSys?.append(samples)
             }
-            sysCounter += 1
-            if sysCounter % 5 == 0 {
-                self.publishLevel(samples, system: true)
-            }
         }
         systemCapture.onStopped = { [weak self] error in
             guard let self else { return }
             Task { @MainActor in
                 self.store.status = "system audio stopped: \(error.map(String.init(describing:)) ?? "ok")"
-            }
-        }
-    }
-
-    private func publishLevel(_ samples: [Float], system: Bool) {
-        guard !samples.isEmpty else { return }
-        let rms = sqrt(samples.reduce(0) { $0 + $1 * $1 } / Float(samples.count))
-        Task { @MainActor in
-            if system {
-                self.store.systemLevel = rms
-            } else {
-                self.store.inputLevel = rms
             }
         }
     }
@@ -317,8 +291,6 @@ final class Recorder {
                 store.listening = false
                 store.paused = false
                 store.status = "idle"
-                store.inputLevel = 0
-                store.systemLevel = 0
                 store.volatile = [:]
             }
         }
@@ -335,8 +307,6 @@ final class Recorder {
         Task { @MainActor in
             store.paused = true
             store.status = "paused"
-            store.inputLevel = 0
-            store.systemLevel = 0
             store.volatile = [:]
         }
     }

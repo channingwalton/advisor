@@ -125,8 +125,6 @@ final class SidecarManager {
     @MainActor
     private func handle(type: String, _ obj: [String: Any]) {
         switch type {
-        case "hello":
-            store.status = "sidecar ready"
         case "card":
             guard let id = obj["id"] as? String else { return }
             // Anchor the card to the sentence that triggered it, so it sorts

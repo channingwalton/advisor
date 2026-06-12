@@ -113,28 +113,6 @@ struct AdvisorApp: App {
     }
 }
 
-struct LevelMeter: View {
-    let label: String
-    let level: Float
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(level < 0.0005 ? "\(label): SILENT" : String(format: "\(label): %.3f", level))
-                .font(.caption2.monospaced())
-                .foregroundStyle(level < 0.0005 ? Color.red : .secondary)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2).fill(.quaternary)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(level > 0.006 ? Color.green : Color.orange)
-                        .frame(width: geo.size.width * CGFloat(min(1, level * 8)))
-                }
-            }
-            .frame(width: 80, height: 8)
-        }
-    }
-}
-
 struct TranscriptView: View {
     @ObservedObject var store: TranscriptStore
     @State private var recorder: Recorder?
@@ -216,12 +194,6 @@ struct TranscriptView: View {
                     if let writer { NSWorkspace.shared.open(writer.sessionsDirectory) }
                 }
                 .controlSize(.small)
-                if store.listening {
-                    LevelMeter(label: "mic", level: store.inputLevel)
-                    if captureSystem {
-                        LevelMeter(label: "sys", level: store.systemLevel)
-                    }
-                }
             }
             .padding(10)
             Divider()
