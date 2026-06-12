@@ -19,6 +19,8 @@ final class AppleSpeechEngine {
 
     /// Finalised utterance text.
     var onFinal: ((String) -> Void)?
+    /// In-progress (volatile) text for the current utterance; superseded by onFinal.
+    var onVolatile: ((String) -> Void)?
 
     init(name: String) {
         self.name = name
@@ -34,11 +36,11 @@ final class AppleSpeechEngine {
         else {
             throw AdvisorError.audioSetup("no supported transcription locale")
         }
-        // Final results only — volatile results would duplicate utterances.
+        // Volatile results stream words as they're recognised; finals replace them.
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
-            reportingOptions: [],
+            reportingOptions: [.volatileResults],
             attributeOptions: [])
 
         switch await AssetInventory.status(forModules: [transcriber]) {
@@ -74,7 +76,11 @@ final class AppleSpeechEngine {
                     let text = String(result.text.characters)
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { continue }
-                    self?.onFinal?(text)
+                    if result.isFinal {
+                        self?.onFinal?(text)
+                    } else {
+                        self?.onVolatile?(text)
+                    }
                 }
             } catch {
                 FileHandle.standardError.write(

@@ -253,6 +253,15 @@ struct TranscriptView: View {
                                 .id(item.id)
                         }
                     }
+                    // Live in-progress speech, replaced by final sentences above.
+                    ForEach(Array(store.volatile.keys), id: \.self) { source in
+                        if let text = store.volatile[source], !text.isEmpty {
+                            Text(text)
+                                .italic()
+                                .foregroundStyle(.tertiary)
+                                .id("volatile-\(source.rawValue)")
+                        }
+                    }
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)

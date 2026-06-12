@@ -26,6 +26,8 @@ final class TranscriptStore: ObservableObject {
     @Published var cards: [Card] = []
     /// Cumulative LLM cost for the current session (USD).
     @Published var costUsd: Double = 0
+    /// Live in-progress speech (volatile STT results), per source.
+    @Published var volatile: [Source: String] = [:]
 }
 
 enum STTEngine: String {
@@ -75,6 +77,8 @@ final class Recorder {
         sysSegmenter.onSegment = { [weak self] in self?.handleSegment($0, from: .them) }
         appleMic?.onFinal = { [weak self] text in self?.acceptAsync(text, from: .me) }
         appleSys?.onFinal = { [weak self] text in self?.acceptAsync(text, from: .them) }
+        appleMic?.onVolatile = { [weak self] text in self?.setVolatile(text, for: .me) }
+        appleSys?.onVolatile = { [weak self] text in self?.setVolatile(text, for: .them) }
 
         var micCounter = 0
         capture.onSamples = { [weak self] samples in
@@ -153,13 +157,19 @@ final class Recorder {
         }
     }
 
+    private func setVolatile(_ text: String, for source: Source) {
+        Task { @MainActor in self.store.volatile[source] = text }
+    }
+
     /// Entry point for engines that deliver finished text (Apple STT). Applies
-    /// the same me-delay so echo dedup can see the system-audio twin first.
+    /// a short me-delay so echo dedup can see the system-audio twin first
+    /// (Apple finalises both streams near-simultaneously, unlike whisper).
     private func acceptAsync(_ text: String, from source: Source) {
         let spokenEnd = Date()
         FileHandle.standardError.write(
             Data("[advisor] apple(\(source)): \"\(text)\"\n".utf8))
-        let delay: TimeInterval = source == .me && systemActive ? 4.0 : 0
+        Task { @MainActor in self.store.volatile[source] = nil }
+        let delay: TimeInterval = source == .me && systemActive ? 1.5 : 0
         whisperQueue.asyncAfter(deadline: .now() + delay) {
             self.accept(text, from: source, spokenEnd: spokenEnd)
         }
@@ -301,6 +311,7 @@ final class Recorder {
                 store.status = "idle"
                 store.inputLevel = 0
                 store.systemLevel = 0
+                store.volatile = [:]
             }
         }
     }
