@@ -102,6 +102,7 @@ struct PreferencesView: View {
                 Text("Apple speech locale, e.g. en_GB. Engine and locale apply on next Listen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                DictionaryView(vocabulary: .shared)
             }
 
             Text("Agent settings apply at the start of the next session.")

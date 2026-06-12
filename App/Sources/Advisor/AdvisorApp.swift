@@ -118,8 +118,7 @@ struct TranscriptView: View {
     @State private var autoCards = true
     @State private var pinned = false
     @State private var writer: SessionWriter?
-    @StateObject private var vocabulary = VocabularyStore()
-    @State private var showDictionary = false
+    @ObservedObject private var vocabulary = VocabularyStore.shared
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("sttEngine") private var sttEngine = STTEngine.apple.rawValue
     @AppStorage("micDeviceName") private var micDeviceName = ""
@@ -144,7 +143,7 @@ struct TranscriptView: View {
                 Toggle("Auto cards", isOn: $autoCards)
                     .toggleStyle(.checkbox)
                     .onChange(of: autoCards) { _, on in sidecar?.sendAuto(on) }
-                Toggle("Pin", isOn: $pinned)
+                Toggle("Float", isOn: $pinned)
                     .toggleStyle(.checkbox)
                     .onChange(of: pinned) { _, on in
                         guard let window = NSApp.windows.first(where: \.isVisible) else { return }
@@ -168,11 +167,6 @@ struct TranscriptView: View {
                     if let writer { NSWorkspace.shared.open(writer.sessionsDirectory) }
                 }
                 .controlSize(.small)
-                Button("Dictionary") { showDictionary = true }
-                    .controlSize(.small)
-                    .popover(isPresented: $showDictionary) {
-                        DictionaryView(vocabulary: vocabulary)
-                    }
                 if store.listening {
                     LevelMeter(label: "mic", level: store.inputLevel)
                     if captureSystem {

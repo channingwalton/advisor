@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// User-editable STT vocabulary, persisted to Application Support/Advisor/vocabulary.txt.
+/// Shared so edits in Preferences reach the live recorder immediately.
 @MainActor
 final class VocabularyStore: ObservableObject {
+    static let shared = VocabularyStore()
     @Published private(set) var terms: [String] = []
     private let fileURL: URL
     /// Called with the joined prompt text whenever the vocabulary changes.
@@ -62,15 +64,14 @@ final class VocabularyStore: ObservableObject {
     }
 }
 
-/// Popover content for managing the dictionary.
+/// Dictionary management, embedded in Preferences → Transcription.
 struct DictionaryView: View {
     @ObservedObject var vocabulary: VocabularyStore
     @State private var newTerm = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("STT Dictionary").font(.headline)
-            Text("Biases transcription towards these terms (whisper engine). Right-click a transcript sentence to add its words.")
+            Text("Biases whisper transcription towards these terms (Apple speech has no vocabulary hook). Right-click a transcript sentence to add its words.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
@@ -97,10 +98,8 @@ struct DictionaryView: View {
                     }
                 }
             }
-            .frame(maxHeight: 240)
+            .frame(maxHeight: 180)
         }
-        .padding(12)
-        .frame(width: 280)
     }
 
     private func addTerm() {

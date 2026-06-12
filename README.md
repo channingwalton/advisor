@@ -62,7 +62,7 @@ finalised sentences; cards appear inline when the assistant decides something
 is worth answering, checking, or explaining — or when you ask via the query
 box. Transcript text is selectable; right-click a sentence to copy it or add
 words to the STT dictionary (whisper engine only — Apple has no vocabulary
-hook). `Pin` floats the window. Sessions are saved as markdown under
+hook). `Float` keeps the window on top. Sessions are saved as markdown under
 `~/Library/Application Support/Advisor/sessions/` (`Sessions` button).
 
 ## Preferences
@@ -73,7 +73,7 @@ count, connector action permissions, trigger sensitivity
 model choice, STT engine (Apple/whisper), system-audio capture, and STT
 locale. Stored in `~/Library/Application Support/Advisor/config.json`; agent
 settings apply at the next session start. The toolbar keeps only in-session
-controls: Listen, mic, Auto cards, Pin.
+controls: Listen, mic, Auto cards, Float.
 
 Advisor itself knows nothing about your notes: the research agents load your
 own Claude configuration (`~/.claude/CLAUDE.md`), which is where vault
