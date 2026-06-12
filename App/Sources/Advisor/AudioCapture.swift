@@ -1,0 +1,113 @@
+import AudioToolbox
+import AVFoundation
+import CoreAudio
+
+/// Captures microphone audio and delivers 16 kHz mono Float32 samples.
+final class AudioCapture {
+    private var engine = AVAudioEngine()
+    private var converter: AVAudioConverter?
+
+    /// Called on the audio thread with 16 kHz mono samples.
+    var onSamples: (([Float]) -> Void)?
+
+    static func requestPermission() async -> Bool {
+        await AVCaptureDevice.requestAccess(for: .audio)
+    }
+
+    /// - Parameter echoCancellation: enable Apple voice processing (AEC) so
+    ///   speaker output (e.g. call audio) is removed from the mic signal.
+    ///   Voice processing fails on some output devices (e.g. multichannel
+    ///   Studio Display speakers, error -10875), so failures fall back to
+    ///   plain capture without AEC.
+    func start(deviceID: AudioDeviceID? = nil, echoCancellation: Bool = false) throws {
+        do {
+            try doStart(deviceID: deviceID, echoCancellation: echoCancellation)
+        } catch where echoCancellation {
+            FileHandle.standardError.write(
+                Data("[advisor] AEC start failed (\(error)); retrying without AEC\n".utf8))
+            try doStart(deviceID: deviceID, echoCancellation: false)
+        }
+    }
+
+    private func doStart(deviceID: AudioDeviceID?, echoCancellation: Bool) throws {
+        // Fresh engine every attempt: a failed voice-processing init leaves
+        // the old engine's input unit delivering silence even after disabling.
+        engine.stop()
+        engine = AVAudioEngine()
+        let input = engine.inputNode
+        do {
+            try input.setVoiceProcessingEnabled(echoCancellation)
+        } catch {
+            if echoCancellation {
+                throw AdvisorError.audioSetup("voice processing unavailable: \(error)")
+            }
+        }
+        if var deviceID, let au = input.audioUnit {
+            let err = AudioUnitSetProperty(
+                au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size))
+            guard err == noErr else {
+                throw AdvisorError.audioSetup("cannot select input device \(deviceID): \(err)")
+            }
+        }
+        let inFormat = input.outputFormat(forBus: 0)
+        guard inFormat.sampleRate > 0 else {
+            throw AdvisorError.audioSetup("input device has no valid format")
+        }
+        guard let outFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
+        ), let converter = AVAudioConverter(from: inFormat, to: outFormat) else {
+            throw AdvisorError.audioSetup("cannot create 16 kHz converter from \(inFormat)")
+        }
+        self.converter = converter
+
+        input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
+            guard let self, let converter = self.converter else { return }
+            let ratio = outFormat.sampleRate / inFormat.sampleRate
+            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 16
+            guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
+
+            var consumed = false
+            var convError: NSError?
+            converter.convert(to: out, error: &convError) { _, status in
+                if consumed {
+                    status.pointee = .noDataNow
+                    return nil
+                }
+                consumed = true
+                status.pointee = .haveData
+                return buffer
+            }
+            guard convError == nil, out.frameLength > 0, let ch = out.floatChannelData else { return }
+            self.onSamples?(Array(UnsafeBufferPointer(start: ch[0], count: Int(out.frameLength))))
+        }
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            // Discard the whole engine; the retry builds a fresh one.
+            input.removeTap(onBus: 0)
+            engine.stop()
+            self.converter = nil
+            throw error
+        }
+    }
+
+    func stop() {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        converter = nil
+    }
+}
+
+enum AdvisorError: Error, CustomStringConvertible {
+    case audioSetup(String)
+    case whisper(String)
+
+    var description: String {
+        switch self {
+        case .audioSetup(let m): "audio setup failed: \(m)"
+        case .whisper(let m): "whisper failed: \(m)"
+        }
+    }
+}

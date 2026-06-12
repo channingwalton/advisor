@@ -1,0 +1,12 @@
+them|So before we commit I think we need to know how much
+them|the Deepgram streaming tier actually costs
+them|per hour because if it is more than the
+them|OpenAI realtime one we should switch
+me|yeah I think it was about
+me|forty five cents an hour but not sure
+them|also someone mentioned the new EU AI Act
+them|enforcement dates I thought that
+them|kicked in this August but Tom said next year
+me|we should check that
+them|anyway the SSO migration to Okta is blocked on the SCIM
+them|provisioning thing again

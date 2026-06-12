@@ -1,0 +1,11 @@
+# vendored builds — clone/build per App/README.md
+vendor/
+
+# Swift
+App/.build/
+
+# Node
+sidecar/node_modules/
+sidecar/dist/
+
+.DS_Store
