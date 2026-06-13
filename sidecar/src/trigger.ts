@@ -35,6 +35,29 @@ export function researchTask(kind: ResearchKind, subject: string, query: string)
   }
 }
 
+/// The instruction for a follow-up on an existing card. The sidecar is stateless
+/// about cards, so the app supplies the card's current body and a recent
+/// transcript slice; this reconstructs the context for a transient one-shot
+/// session. Mirrors researchTask: single source of truth for the reply prompt.
+export function replyTask(
+  kind: string,
+  title: string,
+  cardBody: string,
+  followUp: string,
+  transcript: string
+): string {
+  const ctx = transcript.trim()
+    ? `\n\nRecent conversation transcript (resolve references like "she"/"that" against it):\n<transcript>\n${transcript.trim()}\n</transcript>`
+    : "";
+  return (
+    `You previously produced this ${kind} card titled "${title}" during a live conversation:\n\n` +
+    `<card>\n${cardBody}\n</card>` +
+    ctx +
+    `\n\nThe user has a follow-up about that card:\n<followup>\n${followUp}\n</followup>\n\n` +
+    `Answer the follow-up concisely, leading with the answer. Use the card and transcript as context; don't repeat the card's content unless needed.`
+  );
+}
+
 const SENSITIVITY: Record<string, string> = {
   conservative:
     "Be conservative: only trigger on clear, explicit questions or obviously important topics. When unsure, stay silent.",

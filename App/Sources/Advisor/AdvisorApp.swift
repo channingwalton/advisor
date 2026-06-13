@@ -322,14 +322,16 @@ struct TranscriptView: View {
                 Spacer()
                 if card.state == "pending" || card.state == "streaming" {
                     ProgressView().controlSize(.small)
-                    Button {
-                        sidecar?.sendCancel(card.id)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
+                    if !card.replying {
+                        Button {
+                            sidecar?.sendCancel(card.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Skip this card")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Skip this card")
                 } else if card.state == "failed" {
                     Text("failed").font(.caption2).foregroundStyle(.red)
                 } else if card.state == "cancelled" {
@@ -339,9 +341,41 @@ struct TranscriptView: View {
             Markdown(card.body)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            // Threaded follow-up: a finished card takes a follow-up question,
+            // answered in place (appended below the answer). Hidden while a
+            // reply is in flight so a card can't take two at once.
+            if card.state == "done" && !card.replying {
+                CardReplyField { reply in submitReply(card, reply) }
+            }
         }
         .padding(10)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Send a follow-up about `card`. Optimistically appends the question to the
+    /// body so it shows immediately; the sidecar reproduces this exact prefix and
+    /// streams the answer underneath via card_update.
+    private func submitReply(_ card: Card, _ reply: String) {
+        guard let idx = store.cards.firstIndex(where: { $0.id == card.id }) else { return }
+        let base = store.cards[idx].body
+        // Send first: if the sidecar is down the message is dropped, so skip the
+        // optimistic edit — otherwise the card would spin forever with no answer
+        // coming and no cancel button (hidden while replying).
+        let sent = sidecar?.sendCardReply(
+            cardId: card.id, kind: card.kind, title: card.title,
+            base: base, replyText: reply, transcript: recentTranscript()) ?? false
+        guard sent else { return }
+        store.cards[idx].body = base + "\n\n---\n\n**You:** \(reply)\n\n…"
+        store.cards[idx].replying = true
+        store.cards[idx].state = "streaming"
+    }
+
+    /// The tail of the live transcript, for resolving referents ("she", "that")
+    /// in a follow-up. Bounded so a long session doesn't bloat the message.
+    private func recentTranscript(_ limit: Int = 15) -> String {
+        store.utterances.suffix(limit)
+            .map { "\($0.source.rawValue): \($0.text)" }
+            .joined(separator: "\n")
     }
 
     /// Right-click AI actions offered on selected transcript text — the same
@@ -470,6 +504,31 @@ struct TranscriptView: View {
             writer?.start()
             await recorder.start(device: selectedDevice, captureSystem: captureSystem)
         }
+    }
+}
+
+/// Follow-up input shown on a finished card. Owns its own draft text so each
+/// card edits independently; clears on submit.
+private struct CardReplyField: View {
+    let onSubmit: (String) -> Void
+    @State private var text = ""
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Ask a follow-up…", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .font(.callout)
+                .onSubmit(submit)
+            Button("Send", action: submit)
+                .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+
+    private func submit() {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        onSubmit(t)
+        text = ""
     }
 }
 

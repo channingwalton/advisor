@@ -8,6 +8,7 @@ import {
   cardKind,
   classify,
   configureClassifier,
+  replyTask,
   researchTask,
   resetClassifier,
   Trigger,
@@ -146,6 +147,40 @@ async function runCard(
   } finally {
     lane.currentCardId = undefined;
     cancelledCards.delete(cardId);
+  }
+}
+
+/// Answer a follow-up typed into an existing card. Runs on a transient one-shot
+/// session created and disposed here, so it never consumes a research-pool lane
+/// (the pool stays free for new triggers) and carries no cross-card state. The
+/// app supplies the card's current body and a transcript slice; we reproduce the
+/// prefix the app already shows so the streamed body stays consistent.
+async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Promise<void> {
+  const lane = makeLane("reply", config.queryAgent);
+  const header = `${msg.base}\n\n---\n\n**You:** ${msg.replyText}\n\n`;
+  send({ type: "card_update", id: msg.cardId, body: header + "…", state: "pending" });
+  try {
+    const task = replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
+    const { text, costUsd } = await lane.session.run(task, (body) => {
+      send({ type: "card_update", id: msg.cardId, body: header + body, state: "streaming" });
+    });
+    addCost(costUsd);
+    send({
+      type: "card_update",
+      id: msg.cardId,
+      body: header + (text || "no answer produced"),
+      state: text ? "done" : "failed",
+    });
+  } catch (err) {
+    log(`reply error: ${err}`);
+    send({
+      type: "card_update",
+      id: msg.cardId,
+      body: header + `error: ${err instanceof Error ? err.message : String(err)}`,
+      state: "failed",
+    });
+  } finally {
+    lane.session.reset(); // dispose the transient session
   }
 }
 
@@ -321,6 +356,10 @@ function handle(msg: Inbound): void {
       }
       break;
     }
+    case "card_reply":
+      // Transient session, parallel-safe — no busy gate, no pool slot.
+      void runCardReply(msg);
+      break;
     case "session_end":
       if (debounceTimer) clearTimeout(debounceTimer);
       log("session ended");

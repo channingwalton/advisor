@@ -17,6 +17,21 @@ export type Inbound =
     }
   | { type: "config"; auto?: boolean; lanes?: number }
   | { type: "cancel"; cardId: string }
+  // Follow-up typed into an existing card. The sidecar holds no card state, so
+  // the app sends everything needed to answer in context: the card's current
+  // body (original answer + any prior follow-up turns), the new question, and a
+  // recent transcript slice for resolving referents. Answered by a transient
+  // one-shot session (outside the research pool), streamed back as card_update
+  // on the same cardId.
+  | {
+      type: "card_reply";
+      cardId: string;
+      kind: "answer" | "context" | "factcheck" | "query";
+      title: string;
+      base: string;
+      replyText: string;
+      transcript?: string;
+    }
   | { type: "session_end" };
 
 export type CardState = "pending" | "streaming" | "done" | "failed" | "cancelled";

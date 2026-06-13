@@ -7,6 +7,10 @@ struct Card: Identifiable, Equatable {
     var title: String
     var body: String
     var state: String // pending | streaming | done | failed | cancelled
+    /// True while a follow-up the user typed into this card is being answered.
+    /// App-only (never from the protocol): suppresses the cancel button and the
+    /// reply field so a card can't take a second follow-up mid-answer.
+    var replying: Bool = false
 }
 
 /// Spawns and supervises the Node sidecar; NDJSON over stdio.
@@ -180,22 +184,46 @@ final class SidecarManager {
         send(["type": "cancel", "cardId": cardId])
     }
 
+    /// Follow-up typed into an existing card. The sidecar holds no card state, so
+    /// we send the card's current body (original answer + any prior turns), the
+    /// new question, and a recent transcript slice for resolving referents.
+    /// Returns false if the message couldn't be sent (sidecar down) so the caller
+    /// can skip the optimistic in-card edit rather than leaving a stuck spinner.
+    func sendCardReply(
+        cardId: String, kind: String, title: String, base: String, replyText: String,
+        transcript: String
+    ) -> Bool {
+        send([
+            "type": "card_reply",
+            "cardId": cardId,
+            "kind": kind,
+            "title": title,
+            "base": base,
+            "replyText": replyText,
+            "transcript": transcript,
+        ])
+    }
+
     func sendLanes(_ count: Int) {
         lastLanes = count
         send(["type": "config", "lanes": count])
     }
 
-    private func send(_ message: [String: Any]) {
+    /// Returns whether the message was written to the sidecar's stdin.
+    @discardableResult
+    private func send(_ message: [String: Any]) -> Bool {
         guard let stdinHandle else {
             setStatus("sidecar not running — message dropped")
-            return
+            return false
         }
-        guard var data = try? JSONSerialization.data(withJSONObject: message) else { return }
+        guard var data = try? JSONSerialization.data(withJSONObject: message) else { return false }
         data.append(0x0A)
         do {
             try stdinHandle.write(contentsOf: data)
+            return true
         } catch {
             setStatus("sidecar write failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -244,7 +272,14 @@ final class SidecarManager {
                 let idx = store.cards.firstIndex(where: { $0.id == id })
             else { return }
             if let body = obj["body"] as? String { store.cards[idx].body = body }
-            if let state = obj["state"] as? String { store.cards[idx].state = state }
+            if let state = obj["state"] as? String {
+                store.cards[idx].state = state
+                // A follow-up answer reaching a terminal state re-enables the
+                // reply field for another turn.
+                if state == "done" || state == "failed" || state == "cancelled" {
+                    store.cards[idx].replying = false
+                }
+            }
         case "usage":
             if let cost = obj["sessionCostUsd"] as? Double { store.costUsd = cost }
         case "error":
