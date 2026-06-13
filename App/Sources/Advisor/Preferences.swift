@@ -17,7 +17,6 @@ struct AdvisorConfig: Codable, Equatable {
 
     var triggerSensitivity = "balanced"
     var triggers = Triggers()
-    var maxTriggersPerPass = 2
     var allowMcpActions = false
     /// Agent backend shared by every lane (classifier, research, query). "" model
     /// = the provider's own default. Mirrors sidecar/src/config.ts.
@@ -29,7 +28,7 @@ struct AdvisorConfig: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case triggerSensitivity, triggers, maxTriggersPerPass, allowMcpActions
+        case triggerSensitivity, triggers, allowMcpActions
         case provider, model, sttLocale
     }
 
@@ -41,7 +40,6 @@ struct AdvisorConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         triggerSensitivity = try c.decodeIfPresent(String.self, forKey: .triggerSensitivity) ?? "balanced"
         triggers = try c.decodeIfPresent(Triggers.self, forKey: .triggers) ?? Triggers()
-        maxTriggersPerPass = try c.decodeIfPresent(Int.self, forKey: .maxTriggersPerPass) ?? 2
         allowMcpActions = try c.decodeIfPresent(Bool.self, forKey: .allowMcpActions) ?? false
         sttLocale = try c.decodeIfPresent(String.self, forKey: .sttLocale) ?? "en_GB"
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
@@ -127,12 +125,6 @@ struct PreferencesView: View {
         Form {
             Section("Agent backend") {
                 AgentBackendView(provider: $config.provider, model: $config.model)
-                Text("Shared by every lane — classifier, research, and manual query.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Codex uses your Codex CLI login and runs read-only (web + file reads, no writes). Its sandbox is coarser than Claude's — see DESIGN.md.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
                 Toggle("Allow connector actions", isOn: $config.allowMcpActions)
                 Text("Off: connectors (Slack, Jira, …) are read/search only. On: agents may also send, create, and update — use with care. Claude only.")
@@ -150,9 +142,6 @@ struct PreferencesView: View {
                 Toggle("Answer questions", isOn: $config.triggers.question)
                 Toggle("Surface background context", isOn: $config.triggers.context)
                 Toggle("Fact-check claims", isOn: $config.triggers.factcheck)
-                Stepper(
-                    "Max triggers per pass: \(config.maxTriggersPerPass)",
-                    value: $config.maxTriggersPerPass, in: 1...5)
             }
 
             Section("Transcription") {

@@ -11,7 +11,6 @@ export interface AdvisorConfig {
   triggerSensitivity: string;
   /// Which trigger kinds are enabled.
   triggers: { question: boolean; context: boolean; factcheck: boolean };
-  maxTriggersPerPass: number;
   /// Allow MCP connector tools that take actions (send/create/update/...).
   /// Read/search connector tools are always allowed. (Claude only — Codex MCP
   /// servers come from ~/.codex/config.toml and are not gated here.)
@@ -25,7 +24,6 @@ export interface AdvisorConfig {
 const DEFAULTS: AdvisorConfig = {
   triggerSensitivity: "balanced",
   triggers: { question: true, context: true, factcheck: true },
-  maxTriggersPerPass: 2,
   allowMcpActions: false,
   provider: "claude",
   model: "",
@@ -43,12 +41,10 @@ const CONFIG_PATH = `${homedir()}/Library/Application Support/Advisor/config.jso
 /// partially overridden by its still-recognised keys.
 export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
   const str = (k: string, d: string): string => (typeof raw[k] === "string" ? (raw[k] as string) : d);
-  const num = (k: string, d: number): number => (typeof raw[k] === "number" ? (raw[k] as number) : d);
   const bool = (k: string, d: boolean): boolean => (typeof raw[k] === "boolean" ? (raw[k] as boolean) : d);
   return {
     triggerSensitivity: str("triggerSensitivity", DEFAULTS.triggerSensitivity),
     triggers: { ...DEFAULTS.triggers, ...((raw.triggers as object) ?? {}) },
-    maxTriggersPerPass: num("maxTriggersPerPass", DEFAULTS.maxTriggersPerPass),
     allowMcpActions: bool("allowMcpActions", DEFAULTS.allowMcpActions),
     provider: str("provider", DEFAULTS.provider),
     model: str("model", DEFAULTS.model),

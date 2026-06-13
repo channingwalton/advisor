@@ -3,6 +3,11 @@ import { createAgent } from "./providers.js";
 import { AdvisorConfig, modelArg } from "./config.js";
 import { log } from "./protocol.js";
 
+/// Safety cap on triggers emitted per classification pass — bounds card spam
+/// and concurrent research lanes from one noisy window. The user steers volume
+/// via triggerSensitivity; this is just a backstop, not a preference.
+const MAX_TRIGGERS_PER_PASS = 2;
+
 export type ResearchKind = "question" | "context" | "factcheck";
 
 export interface Trigger {
@@ -113,7 +118,7 @@ ${kinds}
 Rules:
 - Reassembled-sentence questions count even if split across lines.
 - Skip anything whose subject is in the "already covered" list of the message.
-- Max ${cfg.maxTriggersPerPass} triggers per message. "subject" is a short dedup key; "query" is a
+- Max ${MAX_TRIGGERS_PER_PASS} triggers per message. "subject" is a short dedup key; "query" is a
   self-contained research instruction (include enough context to be understood alone).`;
 }
 
@@ -133,7 +138,6 @@ function ensureSession(): Agent {
       ({
         triggerSensitivity: "balanced",
         triggers: { question: true, context: true, factcheck: true },
-        maxTriggersPerPass: 2,
         provider: "claude",
         model: "",
         allowMcpActions: false,
@@ -191,7 +195,7 @@ JSON:`;
     const enabled = cfg?.triggers ?? { question: true, context: true, factcheck: true };
     const triggers = (parsed.triggers ?? [])
       .filter((t) => t.kind && t.subject && t.query && enabled[t.kind])
-      .slice(0, cfg?.maxTriggersPerPass ?? 2);
+      .slice(0, MAX_TRIGGERS_PER_PASS);
     return { triggers, costUsd };
   } catch (err) {
     log(`classifier JSON parse failed: ${err}`);
