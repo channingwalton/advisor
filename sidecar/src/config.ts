@@ -11,8 +11,6 @@ export interface AdvisorConfig {
   /// Editable persona/style block at the head of the research agents' system
   /// prompt. The protected operational core lives in prompts.ts, not here.
   personaPrompt: string;
-  /// Appended to the research agents' system prompt.
-  extraInstructions: string;
   /// conservative | balanced | eager
   triggerSensitivity: string;
   /// Which trigger kinds are enabled.
@@ -30,7 +28,6 @@ export interface AdvisorConfig {
 
 const DEFAULTS: AdvisorConfig = {
   personaPrompt: DEFAULT_PERSONA,
-  extraInstructions: "",
   triggerSensitivity: "balanced",
   triggers: { question: true, context: true, factcheck: true },
   maxTriggersPerPass: 2,
@@ -55,7 +52,6 @@ export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
   const bool = (k: string, d: boolean): boolean => (typeof raw[k] === "boolean" ? (raw[k] as boolean) : d);
   return {
     personaPrompt: str("personaPrompt", DEFAULTS.personaPrompt),
-    extraInstructions: str("extraInstructions", DEFAULTS.extraInstructions),
     triggerSensitivity: str("triggerSensitivity", DEFAULTS.triggerSensitivity),
     triggers: { ...DEFAULTS.triggers, ...((raw.triggers as object) ?? {}) },
     maxTriggersPerPass: num("maxTriggersPerPass", DEFAULTS.maxTriggersPerPass),

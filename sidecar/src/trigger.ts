@@ -137,7 +137,6 @@ function ensureSession(): Agent {
         provider: "claude",
         model: "",
         personaPrompt: "",
-        extraInstructions: "",
         allowMcpActions: false,
       } as AdvisorConfig);
     session = createAgent(config.provider, {

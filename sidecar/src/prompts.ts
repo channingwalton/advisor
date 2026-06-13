@@ -2,8 +2,7 @@
 // Preferences (config.personaPrompt); the operational core below is NOT — it
 // encodes the latency-critical two-pass answering, no-narration, tool and
 // citation rules, so it stays in code where edits can't break card behaviour.
-// extraInstructions (persistent) and the per-session context are appended after
-// the core.
+// The per-session context is appended per task, not baked in here.
 
 export const DEFAULT_PERSONA = `You are Advisor, a realtime meeting assistant running on the user's Mac.
 Respond concisely and usefully for someone mid-conversation.
@@ -34,21 +33,16 @@ transcript. However the persona above describes you, these operating rules alway
   answer under it. If context is missing, give the most useful answer you can
   with what you have.`;
 
-/// Build the research-lane system prompt: editable persona, protected core,
-/// then optional persistent extra instructions. A blank persona falls back to
-/// the default so the agent is never left without an identity. (Per-session
-/// context is NOT baked in here — it's injected per task via
-/// `sessionContextPrefix` so the user can edit it mid-session; persistent lanes
-/// fix their system prompt at session start.)
-export function buildResearchSystem(opts: {
-  persona?: string;
-  extraInstructions?: string;
-}): string {
+/// Build the research-lane system prompt: editable persona, then protected core.
+/// A blank persona falls back to the default so the agent is never left without
+/// an identity. (Per-session context is NOT baked in here — it's injected per
+/// task via `sessionContextPrefix` so the user can edit it mid-session;
+/// persistent lanes fix their system prompt at session start.)
+export function buildResearchSystem(opts: { persona?: string }): string {
   const persona = (opts.persona ?? "").trim() || DEFAULT_PERSONA;
-  const extra = (opts.extraInstructions ?? "").trim();
   return `${persona}
 
-${RESEARCH_CORE}${extra ? `\n\nUser preferences:\n${extra}` : ""}`;
+${RESEARCH_CORE}`;
 }
 
 /// Prefix prepended to each research/query/reply task carrying the user's live

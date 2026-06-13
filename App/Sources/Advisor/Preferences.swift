@@ -25,7 +25,6 @@ struct AdvisorConfig: Codable, Equatable {
         """
 
     var personaPrompt = AdvisorConfig.defaultPersona
-    var extraInstructions = ""
     var triggerSensitivity = "balanced"
     var triggers = Triggers()
     var maxTriggersPerPass = 2
@@ -40,7 +39,7 @@ struct AdvisorConfig: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case personaPrompt, extraInstructions, triggerSensitivity, triggers, maxTriggersPerPass, allowMcpActions
+        case personaPrompt, triggerSensitivity, triggers, maxTriggersPerPass, allowMcpActions
         case provider, model, sttLocale
     }
 
@@ -51,7 +50,6 @@ struct AdvisorConfig: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         personaPrompt = try c.decodeIfPresent(String.self, forKey: .personaPrompt) ?? Self.defaultPersona
-        extraInstructions = try c.decodeIfPresent(String.self, forKey: .extraInstructions) ?? ""
         triggerSensitivity = try c.decodeIfPresent(String.self, forKey: .triggerSensitivity) ?? "balanced"
         triggers = try c.decodeIfPresent(Triggers.self, forKey: .triggers) ?? Triggers()
         maxTriggersPerPass = try c.decodeIfPresent(Int.self, forKey: .maxTriggersPerPass) ?? 2
@@ -151,16 +149,6 @@ struct PreferencesView: View {
                 Text("Off: connectors (Slack, Jira, …) are read/search only. On: agents may also send, create, and update — use with care. Claude only.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Extra instructions")
-                    TextEditor(text: $config.extraInstructions)
-                        .font(.body)
-                        .frame(height: 90)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
-                    Text("Appended to the research agents' system prompt — tone, length, preferred sources, domain context.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
 
             Section("System prompt") {

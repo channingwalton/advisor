@@ -17,15 +17,6 @@ test("buildResearchSystem falls back to the default persona when blank", () => {
   assert.ok(buildResearchSystem({}).startsWith(DEFAULT_PERSONA));
 });
 
-test("buildResearchSystem appends extra instructions when present", () => {
-  const p = buildResearchSystem({ extraInstructions: "Prefer primary sources." });
-  assert.match(p, /User preferences:\nPrefer primary sources\./);
-});
-
-test("buildResearchSystem omits the extra-instructions block when empty or whitespace", () => {
-  assert.doesNotMatch(buildResearchSystem({ extraInstructions: "  " }), /User preferences:/);
-});
-
 test("buildResearchSystem never carries session context (that is injected per task)", () => {
   assert.doesNotMatch(buildResearchSystem({}), /Context for this session/);
 });

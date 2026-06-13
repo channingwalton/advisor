@@ -26,10 +26,7 @@ let config: AdvisorConfig = loadConfig();
 let sessionContext = "";
 
 function systemPrompt(): string {
-  return buildResearchSystem({
-    persona: config.personaPrompt,
-    extraInstructions: config.extraInstructions,
-  });
+  return buildResearchSystem({ persona: config.personaPrompt });
 }
 
 const TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
