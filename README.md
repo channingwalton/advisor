@@ -130,8 +130,9 @@ prompt** box (who's present, the topic, what to focus on): fill it before Listen
 or edit it live during the session to steer the agents — each edit applies to
 the next card. It clears when the session stops.
 
-Each component can run on **Claude** (Agent SDK) or **Codex** (`@openai/codex-sdk`)
-independently. Codex uses your Codex CLI login (`~/.codex/auth.json`) — no API
+Every agent lane (classifier, research, query) shares one backend — **Claude**
+(Agent SDK) by default, or **Codex** (`@openai/codex-sdk`) — picked in
+Preferences. Codex uses your Codex CLI login (`~/.codex/auth.json`) — no API
 key — and runs read-only (web search + file reads, no writes). Its sandbox is
 coarser than Claude's per-path policy (a read-only shell command can read
 sensitive dotfiles; Codex MCP servers come from `~/.codex/config.toml` and
@@ -144,13 +145,16 @@ locations and personal context belong.
 
 ## Safety
 
-Research agents are sandboxed by tool policy: web search, the user's MCP
-connectors (Slack, Jira, … — read/search only unless "Allow connector actions"
-is enabled), and read-only access to non-sensitive files in the home directory.
-No shell, no writes; credential paths (~/.ssh, ~/.aws, ~/.claude, ~/.codex,
-keychains, …) are denied (case-insensitively). File search (Grep/Glob) must be
-scoped to a specific subdirectory — an unscoped home-wide search is refused so a
-recursive pattern can't reach a denied path.
+On **Claude**, research agents are sandboxed by a per-call tool policy: web
+search, the user's MCP connectors (Slack, Jira, … — read/search only unless
+"Allow connector actions" is enabled), and read-only access to non-sensitive
+files in the home directory. No shell, no writes; credential paths (~/.ssh,
+~/.aws, ~/.claude, ~/.codex, keychains, …) are denied (case-insensitively, with
+symlinks resolved so a link can't point past the denylist). Connector tools fail
+closed — anything not recognised as a read/search is treated as an action and
+gated. File search (Grep/Glob) must be scoped to a specific subdirectory — an
+unscoped home-wide search is refused so a recursive pattern can't reach a denied
+path. On **Codex** the sandbox is coarser (see above) — no per-call policy.
 
 ## Documents
 

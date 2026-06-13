@@ -21,7 +21,7 @@ Two processes on one machine:
                    NDJSON over stdio
 ┌────────────────────────────┼──────────────── TS sidecar ─────────┐
 │                            ▼                                     │
-│  TriggerDetector (Haiku) ──► ResearchAgent (Claude Agent SDK)    │
+│  TriggerDetector ──────────► ResearchAgent (Claude Agent SDK)    │
 │                               tools: web search, Vault (RO),     │
 │                               Jira/Confluence/Slack MCP, files   │
 └──────────────────────────────────────────────────────────────────┘
@@ -45,7 +45,7 @@ The Swift app owns everything realtime and visual; the sidecar owns everything t
 
 ### TS sidecar (Claude Agent SDK)
 
-**TriggerDetector.** Maintains rolling transcript window (~2 min). On each utterance (debounced 1.5 s of silence-or-topic-shift), one Haiku call classifies: `question | entity | claim | none` + extracted subject. Dedup: don't re-trigger on a subject already carded in the last 10 min.
+**TriggerDetector.** Maintains rolling transcript window (~2 min). On each utterance (debounced 1.5 s of silence-or-topic-shift), one classify call (on the shared model — see the 2026-06-13 backend note below) classifies: `question | entity | claim | none` + extracted subject. Dedup: don't re-trigger on a subject already carded in the last 10 min.
 
 **ResearchAgent.** Per trigger, an Agent SDK query with budget caps (max turns ~6, streaming). Tools: web search; read-only filesystem MCP rooted at `~/Documents/Notes` and configured repo dirs; Atlassian + Slack MCPs. System prompt per trigger type (answer / context / fact-check). Fact-check answers must cite or return "couldn't verify" — never guess. Emits card immediately as placeholder, then streams body updates.
 

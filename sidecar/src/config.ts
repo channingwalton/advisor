@@ -41,11 +41,21 @@ const CONFIG_PATH = `${homedir()}/Library/Application Support/Advisor/config.jso
 /// partially overridden by its still-recognised keys.
 export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
   const str = (k: string, d: string): string => (typeof raw[k] === "string" ? (raw[k] as string) : d);
-  const bool = (k: string, d: boolean): boolean => (typeof raw[k] === "boolean" ? (raw[k] as boolean) : d);
+  const bool = (v: unknown, d: boolean): boolean => (typeof v === "boolean" ? v : d);
+  // Validate each trigger flag individually: a non-boolean (or an unknown key)
+  // must fall back to the default, not leak through and be read as a truthy /
+  // falsy boolean downstream. Matches the Swift side's strict decode.
+  const rawTriggers = (typeof raw.triggers === "object" && raw.triggers !== null
+    ? raw.triggers
+    : {}) as Record<string, unknown>;
   return {
     triggerSensitivity: str("triggerSensitivity", DEFAULTS.triggerSensitivity),
-    triggers: { ...DEFAULTS.triggers, ...((raw.triggers as object) ?? {}) },
-    allowMcpActions: bool("allowMcpActions", DEFAULTS.allowMcpActions),
+    triggers: {
+      question: bool(rawTriggers.question, DEFAULTS.triggers.question),
+      context: bool(rawTriggers.context, DEFAULTS.triggers.context),
+      factcheck: bool(rawTriggers.factcheck, DEFAULTS.triggers.factcheck),
+    },
+    allowMcpActions: bool(raw.allowMcpActions, DEFAULTS.allowMcpActions),
     provider: str("provider", DEFAULTS.provider),
     model: str("model", DEFAULTS.model),
   };

@@ -1,5 +1,6 @@
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { homedir } from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import { log } from "./protocol.js";
 
@@ -50,10 +51,37 @@ function isUnder(child: string, parent: string): boolean {
   return c === p || c.startsWith(p + path.sep);
 }
 
+/// Resolve symlinks so the denylist sees the real target, not a link that
+/// points into a denied dir (e.g. ~/Documents/x -> ~/.ssh). A purely lexical
+/// check is bypassable by one symlink. realpathSync needs the path to exist, so
+/// for a not-yet-existing leaf we resolve the deepest existing ancestor and
+/// re-append the unresolved tail (which, not existing, can hold no symlinks).
+function realResolve(abs: string, realpath: (p: string) => string): string {
+  const tail: string[] = [];
+  let cur = abs;
+  for (;;) {
+    try {
+      return path.join(realpath(cur), ...[...tail].reverse());
+    } catch {
+      const parent = path.dirname(cur);
+      if (parent === cur) return abs; // reached root with nothing resolvable
+      tail.push(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
 /// Read policy: any non-sensitive file at or under $HOME; nothing outside.
-export function readPathAllowed(home: string, cwd: string, p: unknown): boolean {
-  const r = resolveRoot(cwd, p);
-  if (r === null) return false;
+/// `realpath` is injectable for tests; production uses the real filesystem.
+export function readPathAllowed(
+  home: string,
+  cwd: string,
+  p: unknown,
+  realpath: (p: string) => string = fs.realpathSync
+): boolean {
+  const r0 = resolveRoot(cwd, p);
+  if (r0 === null) return false;
+  const r = realResolve(r0, realpath);
   if (!isUnder(r, home)) return false;
   return !deniedPaths(home).some((d) => isUnder(r, d));
 }
@@ -64,9 +92,14 @@ export function readPathAllowed(home: string, cwd: string, p: unknown): boolean 
 /// Grep {path:$HOME, pattern:"PRIVATE KEY"}). So validating the root path is not
 /// enough: the root must also not sit at or above any denied path. This makes an
 /// unscoped $HOME-rooted search illegal; agents must target a specific subtree.
-export function searchRootAllowed(home: string, cwd: string, p: unknown): boolean {
-  if (!readPathAllowed(home, cwd, p)) return false;
-  const r = resolveRoot(cwd, p)!;
+export function searchRootAllowed(
+  home: string,
+  cwd: string,
+  p: unknown,
+  realpath: (p: string) => string = fs.realpathSync
+): boolean {
+  if (!readPathAllowed(home, cwd, p, realpath)) return false;
+  const r = realResolve(resolveRoot(cwd, p)!, realpath);
   return !deniedPaths(home).some((d) => isUnder(d, r));
 }
 
@@ -147,9 +180,38 @@ export interface Agent {
   interrupt(): Promise<void>;
 }
 
-/// MCP tool names that mutate external state.
+/// Connector action verbs — tools that can change external state. Matched as a
+/// word (start, or after _ / -, ending at _ / - / end / a camelCase boundary) in
+/// the bare tool name. Case-sensitive: connector verbs are always lower-case
+/// (`createJiraIssue`, `send_message`, `lib-install`), so this avoids "set"
+/// matching "settings". Checked BEFORE the read allowlist so a name carrying
+/// both an action and a read verb (e.g. `ddsql_upsert_saved_query`) is gated.
 const MCP_ACTION_PATTERN =
-  /(send|post|create|update|delete|remove|write|upload|schedule|transition|invite|archive|publish|edit|move|rename|merge|close|assign|set[_A-Z])/i;
+  /(?:^|[_-])(send|post|create|update|upsert|delete|remove|write|upload|install|uninstall|add|run|exec|execute|start|stop|enable|disable|schedule|transition|invite|archive|publish|edit|move|rename|merge|close|cancel|assign|apply|approve|reject|import|export|reset|clear|drop|grant|revoke|set|authenticate|complete)(?:[_-]|[A-Z]|$)/;
+
+/// Connector read/search verbs. Only consulted after the action check fails, so
+/// it can be permissive (no trailing boundary) without re-opening the hole.
+const MCP_READ_PATTERN =
+  /(?:^|[_-])(get|list|search|read|fetch|lookup|view|find|describe|query|history|docs?|info|schema|aggregate|analy[sz]e|explore|expand|rank|recommend|summari[sz]e|visuali[sz]e|typecheck|diff|share)/;
+
+/// The bare tool name after the `mcp__server__` prefix (so the server name can't
+/// trip a verb match). Non-MCP names are returned unchanged.
+function bareMcpName(toolName: string): string {
+  const i = toolName.lastIndexOf("__");
+  return i >= 0 ? toolName.slice(i + 2) : toolName;
+}
+
+/// MCP connector permission. Fail closed: when actions are disabled a tool is
+/// allowed only if it is recognised as a read/search. An action verb, OR any
+/// name we don't recognise, is denied — a new mutating tool we've never seen is
+/// blocked by default rather than waved through.
+export function mcpPermission(toolName: string, allowMcpActions: boolean): "allow" | "deny" {
+  if (allowMcpActions) return "allow";
+  const name = bareMcpName(toolName);
+  if (MCP_ACTION_PATTERN.test(name)) return "deny";
+  if (MCP_READ_PATTERN.test(name)) return "allow";
+  return "deny";
+}
 
 /**
  * A long-lived Agent SDK session fed via streaming input. Avoids the ~5–10 s
@@ -231,20 +293,23 @@ export class AgentSession implements Agent {
     input: Record<string, unknown>
   ): Promise<PermissionResult> => {
     const allow: PermissionResult = { behavior: "allow", updatedInput: input };
-    // User-configured MCP connectors (Slack, Jira, ...): reads/searches allowed;
-    // action tools only when enabled in preferences.
-    if (toolName.startsWith("mcp__") || toolName === "ListMcpResources"
-        || toolName === "ReadMcpResource") {
-      if (MCP_ACTION_PATTERN.test(toolName) && !this.opts.allowMcpActions) {
-        log(`${this.opts.name}: denied MCP action ${toolName}`);
-        return {
-          behavior: "deny",
-          message:
-            `${toolName} looks like an action (it can change external state). ` +
-            `Advisor allows read/search connector tools only, unless "Allow connector actions" is enabled in Preferences.`,
-        };
-      }
+    // SDK MCP resource enumeration/read — pure reads, always allowed. (Both the
+    // bare and `…Tool`-suffixed names the SDK may use.)
+    if (toolName === "ListMcpResources" || toolName === "ReadMcpResource"
+        || toolName === "ListMcpResourcesTool" || toolName === "ReadMcpResourceTool") {
       return allow;
+    }
+    // User-configured MCP connectors (Slack, Jira, ...): reads/searches allowed;
+    // action tools only when enabled in preferences. Fail closed (mcpPermission).
+    if (toolName.startsWith("mcp__")) {
+      if (mcpPermission(toolName, this.opts.allowMcpActions ?? false) === "allow") return allow;
+      log(`${this.opts.name}: denied MCP tool ${toolName}`);
+      return {
+        behavior: "deny",
+        message:
+          `${toolName} is not an allowed read/search connector tool. ` +
+          `Advisor allows read/search connector tools only, unless "Allow connector actions" is enabled in Preferences.`,
+      };
     }
     switch (toolName) {
       case "WebSearch":

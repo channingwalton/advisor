@@ -18,8 +18,8 @@ check them before re-litigating a decision.
   echo dedup, chronological feed UI (selectable transcript lines with a
   right-click action menu), session markdown writer, preferences.
 - `sidecar/` — Node 22 + TypeScript + Claude Agent SDK. Trigger classifier
-  (persistent Haiku session, delta-fed), parallel research lanes, query lane,
-  `canUseTool` sandbox. NDJSON over stdio to the app (protocol in
+  (persistent delta-fed session on the shared model), parallel research lanes,
+  query lane, `canUseTool` sandbox. NDJSON over stdio to the app (protocol in
   `src/protocol.ts`, both directions).
 - `vendor/whisper.cpp` — gitignored; cloned/built per README.
 
@@ -47,12 +47,17 @@ after touching whisper/audio code.
 - The app must stay generic: no personal paths (vault, etc.) in code — the
   user's own Claude config (`~/.claude/CLAUDE.md`) carries personal context,
   loaded via `settingSources: ["user"]`.
-- Agents are sandboxed in `sidecar/src/agent.ts` (`canUseTool`): web + MCP
-  read/search + non-sensitive `$HOME` reads only; MCP action tools gated by
-  the `allowMcpActions` preference. Do not weaken this silently.
+- Claude agents are sandboxed in `sidecar/src/agent.ts` (`canUseTool`): web +
+  MCP read/search + non-sensitive `$HOME` reads only (symlinks resolved before
+  the denylist check); MCP tools fail closed — anything not recognised as a
+  read/search is gated by the `allowMcpActions` preference. Do not weaken this
+  silently. Codex (`sidecar/src/codex.ts`) has no per-call hook, so it uses a
+  coarser `sandboxMode: "read-only"` and bypasses `canUseTool` entirely — see
+  DESIGN.md.
 - User preferences: `~/Library/Application Support/Advisor/config.json`
   (mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts` —
-  change both together).
+  change both together; `sttLocale` is App-side only, deliberately absent from
+  the sidecar config).
 - Auth is the user's Claude Code login (subscription); never introduce an
   API-key requirement.
 - Sessions/transcripts are user data in `~/Library/Application Support/Advisor/`

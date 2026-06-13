@@ -53,6 +53,9 @@ final class SidecarManager {
     }
 
     private func spawn() {
+        // Drop any partial NDJSON frame left by a crashed sidecar: otherwise the
+        // stale bytes would prefix (and corrupt) the first frame from the new one.
+        buffer = Data()
         let p = Process()
         if let node = AppResources.bundledNode {
             // Packaged app: run the bundled Node directly; no system Node needed.
