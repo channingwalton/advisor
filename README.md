@@ -117,8 +117,7 @@ saved as markdown under
 
 ## Preferences
 
-⌘, opens settings: the research agents' editable persona/style prompt (with
-Restore default — the operational core stays fixed), parallel
+⌘, opens settings: parallel
 agent count, connector action permissions, trigger sensitivity
 (conservative/balanced/eager) and per-kind toggles, the agent backend (one
 provider + model shared by the classifier, research, and manual-query lanes),

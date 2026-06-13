@@ -25,10 +25,6 @@ let config: AdvisorConfig = loadConfig();
 /// the next research/query/reply without rebuilding the persistent lanes.
 let sessionContext = "";
 
-function systemPrompt(): string {
-  return buildResearchSystem({ persona: config.personaPrompt });
-}
-
 const TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
 
 /// Parallel research lanes: triggers fan out across persistent sessions.
@@ -51,7 +47,7 @@ function makeLane(name: string): Lane {
     name,
     session: createAgent(config.provider, {
       name,
-      systemPrompt: systemPrompt(),
+      systemPrompt: buildResearchSystem(),
       model: modelArg(config),
       allowedTools: TOOLS,
       cwd: HOME,

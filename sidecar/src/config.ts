@@ -1,16 +1,12 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { log } from "./protocol.js";
-import { DEFAULT_PERSONA } from "./prompts.js";
 
 /// A provider id (registry key in providers.ts). Plain string so new providers
 /// need no change here.
 export type Provider = string;
 
 export interface AdvisorConfig {
-  /// Editable persona/style block at the head of the research agents' system
-  /// prompt. The protected operational core lives in prompts.ts, not here.
-  personaPrompt: string;
   /// conservative | balanced | eager
   triggerSensitivity: string;
   /// Which trigger kinds are enabled.
@@ -27,7 +23,6 @@ export interface AdvisorConfig {
 }
 
 const DEFAULTS: AdvisorConfig = {
-  personaPrompt: DEFAULT_PERSONA,
   triggerSensitivity: "balanced",
   triggers: { question: true, context: true, factcheck: true },
   maxTriggersPerPass: 2,
@@ -51,7 +46,6 @@ export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
   const num = (k: string, d: number): number => (typeof raw[k] === "number" ? (raw[k] as number) : d);
   const bool = (k: string, d: boolean): boolean => (typeof raw[k] === "boolean" ? (raw[k] as boolean) : d);
   return {
-    personaPrompt: str("personaPrompt", DEFAULTS.personaPrompt),
     triggerSensitivity: str("triggerSensitivity", DEFAULTS.triggerSensitivity),
     triggers: { ...DEFAULTS.triggers, ...((raw.triggers as object) ?? {}) },
     maxTriggersPerPass: num("maxTriggersPerPass", DEFAULTS.maxTriggersPerPass),

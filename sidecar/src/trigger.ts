@@ -136,7 +136,6 @@ function ensureSession(): Agent {
         maxTriggersPerPass: 2,
         provider: "claude",
         model: "",
-        personaPrompt: "",
         allowMcpActions: false,
       } as AdvisorConfig);
     session = createAgent(config.provider, {
