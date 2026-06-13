@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import MarkdownUI
 import SwiftUI
 
 // Repo root, derived from this source file's compile-time location so the
@@ -328,7 +329,7 @@ struct TranscriptView: View {
                     Text("failed").font(.caption2).foregroundStyle(.red)
                 }
             }
-            Text(LocalizedStringKey(card.body))
+            Markdown(card.body)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

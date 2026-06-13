@@ -13,13 +13,21 @@ let whisperRoot = URL(fileURLWithPath: #filePath)
 let package = Package(
     name: "Advisor",
     platforms: [.macOS(.v26)],
+    dependencies: [
+        // GitHub-flavoured markdown renderer for card bodies (tables, lists,
+        // headings, code blocks) — SwiftUI's Text only does inline markdown.
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
+    ],
     targets: [
         // C shim exposing whisper.h to Swift. Headers are symlinks into vendor/whisper.cpp
         // (created by setup.sh) so the clang importer resolves everything from one flat dir.
         .target(name: "CWhisper"),
         .executableTarget(
             name: "Advisor",
-            dependencies: ["CWhisper"],
+            dependencies: [
+                "CWhisper",
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .unsafeFlags([
