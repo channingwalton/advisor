@@ -17,6 +17,22 @@ test("Read denies sensitive paths, including .codex", () => {
   assert.equal(readPathAllowed(HOME, HOME, "/home/u/.config/gh/hosts.yml"), false);
 });
 
+test("Read denies case variants on a case-insensitive filesystem", () => {
+  // macOS APFS default: ~/.SSH/id_rsa reaches the same file as ~/.ssh/id_rsa.
+  assert.equal(readPathAllowed(HOME, HOME, "/home/u/.SSH/id_rsa"), false);
+  assert.equal(readPathAllowed(HOME, HOME, "/home/u/.Codex/auth.json"), false);
+  assert.equal(readPathAllowed(HOME, HOME, "/home/u/Library/keychains/x"), false);
+});
+
+test("Read still allows a distinct sibling that only shares a denied prefix", () => {
+  // .ssh-notes is not under .ssh — the path-separator guard must hold.
+  assert.equal(readPathAllowed(HOME, HOME, "/home/u/.ssh-notes/todo.txt"), true);
+});
+
+test("search denies case variants of a denied root", () => {
+  assert.equal(searchRootAllowed(HOME, HOME, "/home/u/.SSH"), false);
+});
+
 test("Read denies paths outside home", () => {
   assert.equal(readPathAllowed(HOME, HOME, "/etc/passwd"), false);
   assert.equal(readPathAllowed(HOME, HOME, "../../etc/passwd"), false);

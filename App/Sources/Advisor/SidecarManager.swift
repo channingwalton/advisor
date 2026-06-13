@@ -25,6 +25,10 @@ final class SidecarManager {
     private var stopping = false
     private var restartAttempts = 0
     private let maxRestarts = 5
+    /// A sidecar that ran this long before crashing is treated as healthy, so
+    /// the backoff budget resets — only a tight crash loop exhausts maxRestarts.
+    private let healthyRunSeconds: TimeInterval = 60
+    private var lastSpawn: Date?
     private var lastSessionId: String?
     private var lastLanes: Int?
     private var lastAuto: Bool?
@@ -79,6 +83,7 @@ final class SidecarManager {
             try p.run()
             process = p
             stdinHandle = inPipe.fileHandleForWriting
+            lastSpawn = Date()
         } catch {
             Task { @MainActor in self.store.status = "sidecar failed to start: \(error)" }
         }
@@ -89,6 +94,10 @@ final class SidecarManager {
         stdinHandle = nil
         process = nil
         if stopping { stopping = false; return } // deliberate stop()
+        // A crash after a healthy run is a fresh failure, not part of a loop.
+        if let lastSpawn, Date().timeIntervalSince(lastSpawn) > healthyRunSeconds {
+            restartAttempts = 0
+        }
         guard restartAttempts < maxRestarts else {
             store.status =
                 "sidecar crashed (\(code)) — restart attempts exhausted; stop and start listening again"

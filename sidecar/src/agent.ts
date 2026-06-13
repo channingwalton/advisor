@@ -40,12 +40,22 @@ function resolveRoot(cwd: string, p: unknown): string | null {
   return path.resolve(cwd, p);
 }
 
+/// macOS's default filesystem is case-insensitive, so `~/.SSH/id_rsa` reaches
+/// the same file as `~/.ssh/id_rsa`. Compare case-folded so a case variant can
+/// never slip past the denylist. (Strictly safer than the FS: on a genuinely
+/// case-sensitive volume this only ever denies more, never less.)
+function isUnder(child: string, parent: string): boolean {
+  const c = child.toLowerCase();
+  const p = parent.toLowerCase();
+  return c === p || c.startsWith(p + path.sep);
+}
+
 /// Read policy: any non-sensitive file at or under $HOME; nothing outside.
 export function readPathAllowed(home: string, cwd: string, p: unknown): boolean {
   const r = resolveRoot(cwd, p);
   if (r === null) return false;
-  if (r !== home && !r.startsWith(home + path.sep)) return false;
-  return !deniedPaths(home).some((d) => r === d || r.startsWith(d + path.sep));
+  if (!isUnder(r, home)) return false;
+  return !deniedPaths(home).some((d) => isUnder(r, d));
 }
 
 /// Search (Grep/Glob) policy: stricter than Read because these recurse — a
@@ -57,7 +67,7 @@ export function readPathAllowed(home: string, cwd: string, p: unknown): boolean 
 export function searchRootAllowed(home: string, cwd: string, p: unknown): boolean {
   if (!readPathAllowed(home, cwd, p)) return false;
   const r = resolveRoot(cwd, p)!;
-  return !deniedPaths(home).some((d) => d === r || d.startsWith(r + path.sep));
+  return !deniedPaths(home).some((d) => isUnder(d, r));
 }
 
 /** Unbounded async queue usable as the SDK's streaming prompt input. */
