@@ -31,13 +31,9 @@ final class WhisperTranscriber {
             Claude
             Anthropic
             Jira
-            Patchwork
-            ESR
             Obsidian
             Vault
             Twitter feed
-            SCIM
-            Okta
             whisper
             MCP
             """
