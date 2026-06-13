@@ -105,7 +105,9 @@ is worth answering, checking, or explaining — or when you ask via the query
 box. Transcript text is selectable; **right-click** a selection (or the whole
 sentence) to run **Answer / Context / Fact check** on it directly — the same
 actions the assistant triggers automatically, gated by the same preference
-toggles, with the resulting card anchored under that line. The menu also lets
+toggles, with the resulting card anchored under that line. Once a card has
+finished, a follow-up box appears on it — ask a question about the card and the
+answer is appended in place, so a card becomes a short thread. The menu also lets
 you copy the text or add words to the STT dictionary (whisper engine only —
 Apple has no vocabulary hook). `Float` keeps the window on top. Sessions are
 saved as markdown under
