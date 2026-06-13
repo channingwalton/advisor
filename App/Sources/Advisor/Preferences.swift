@@ -52,6 +52,16 @@ struct AdvisorConfig: Codable, Equatable {
         }
     }
 
+    /// Editable persona/style block at the head of the research agents' system
+    /// prompt. Mirrors sidecar default in prompts.ts; the protected operational
+    /// core is not exposed here.
+    static let defaultPersona = """
+        You are Advisor, a realtime meeting assistant running on the user's Mac.
+        Respond concisely and usefully for someone mid-conversation.
+        British spelling. Keep answers under ~150 words unless asked for depth.
+        """
+
+    var personaPrompt = AdvisorConfig.defaultPersona
     var extraInstructions = ""
     var triggerSensitivity = "balanced"
     var triggers = Triggers()
@@ -66,7 +76,7 @@ struct AdvisorConfig: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case extraInstructions, triggerSensitivity, triggers, maxTriggersPerPass, allowMcpActions
+        case personaPrompt, extraInstructions, triggerSensitivity, triggers, maxTriggersPerPass, allowMcpActions
         case classifier, research, queryAgent, sttLocale
     }
 
@@ -82,6 +92,7 @@ struct AdvisorConfig: Codable, Equatable {
     /// {claudeModel, codexModel} shape is migrated inside ProviderChoice.)
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        personaPrompt = try c.decodeIfPresent(String.self, forKey: .personaPrompt) ?? Self.defaultPersona
         extraInstructions = try c.decodeIfPresent(String.self, forKey: .extraInstructions) ?? ""
         triggerSensitivity = try c.decodeIfPresent(String.self, forKey: .triggerSensitivity) ?? "balanced"
         triggers = try c.decodeIfPresent(Triggers.self, forKey: .triggers) ?? Triggers()
@@ -204,6 +215,27 @@ struct PreferencesView: View {
                         .frame(height: 90)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
                     Text("Appended to the research agents' system prompt — tone, length, preferred sources, domain context.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("System prompt") {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Persona & style")
+                        Spacer()
+                        Button("Restore default") {
+                            config.personaPrompt = AdvisorConfig.defaultPersona
+                        }
+                        .controlSize(.small)
+                        .disabled(config.personaPrompt == AdvisorConfig.defaultPersona)
+                    }
+                    TextEditor(text: $config.personaPrompt)
+                        .font(.body)
+                        .frame(height: 110)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
+                    Text("Who the research agents are and how they write. The operational rules (fast two-pass answers, citations, no narration) are fixed and not shown here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

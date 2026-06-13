@@ -137,6 +137,7 @@ function ensureSession(): Agent {
         classifier: { provider: "claude", models: { claude: "haiku" } },
         research: { provider: "claude", models: {} },
         queryAgent: { provider: "claude", models: {} },
+        personaPrompt: "",
         extraInstructions: "",
         allowMcpActions: false,
       } as AdvisorConfig);

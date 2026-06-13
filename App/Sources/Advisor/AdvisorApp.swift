@@ -123,6 +123,10 @@ struct TranscriptView: View {
     @State private var sidecar: SidecarManager?
     @State private var builtEngine = ""
     @State private var queryText = ""
+    /// The session prompt: optional free-text context. Filled before Listen
+    /// (sent on session_start) or edited live during the session (pushed via
+    /// onChange). Cleared when the session stops.
+    @State private var sessionContext = ""
     @State private var triggers = AdvisorConfig.Triggers()
     @State private var autoCards = true
     @State private var pinned = false
@@ -203,6 +207,32 @@ struct TranscriptView: View {
                 .controlSize(.small)
             }
             .padding(10)
+            // TextEditor (not TextField) so Return inserts a newline rather than
+            // committing — the session prompt is multi-line and edited live.
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $sessionContext)
+                    .font(.body)
+                    .frame(height: 56)
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
+                    .onChange(of: sessionContext) { _, new in
+                        // Push live edits to the running agents; pre-session text
+                        // rides along on session_start instead.
+                        if store.listening {
+                            sidecar?.sendSessionContext(
+                                new.trimmingCharacters(in: .whitespacesAndNewlines))
+                        }
+                    }
+                if sessionContext.isEmpty {
+                    Text("Session prompt (optional): who's here, what it's about, what to focus on — editable during the session…")
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 8)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
             Divider()
             feedPane
             Divider()
@@ -500,13 +530,15 @@ struct TranscriptView: View {
             recorder.stop()
             sidecar?.sendSessionEnd()
             writer?.end()
+            sessionContext = "" // blank slate for the next session
             // Engine changed in preferences mid-session: apply now.
             if builtEngine != sttEngine { rebuildRecorder() }
         } else {
             store.utterances = []
             store.cards = []
             store.costUsd = 0
-            sidecar?.sendSessionStart(UUID().uuidString)
+            let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
+            sidecar?.sendSessionStart(UUID().uuidString, context: ctx)
             writer?.start()
             await recorder.start(device: selectedDevice, captureSystem: captureSystem)
         }

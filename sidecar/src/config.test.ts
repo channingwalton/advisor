@@ -1,8 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mergeConfig, toChoice, modelFor } from "./config.js";
+import { DEFAULT_PERSONA } from "./prompts.js";
 
 const def = { provider: "claude", models: {} };
+
+test("mergeConfig defaults personaPrompt to the default persona and overrides it", () => {
+  assert.equal(mergeConfig({}).personaPrompt, DEFAULT_PERSONA);
+  assert.equal(mergeConfig({ personaPrompt: "You are Bob." }).personaPrompt, "You are Bob.");
+});
 
 test("mergeConfig fills defaults for empty input", () => {
   const c = mergeConfig({});

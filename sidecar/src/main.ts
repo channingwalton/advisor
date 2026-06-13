@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { Agent } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, loadConfig, modelFor, ProviderChoice } from "./config.js";
+import { buildResearchSystem, sessionContextPrefix } from "./prompts.js";
 import { Inbound, log, send, Source } from "./protocol.js";
 import {
   cardKind,
@@ -18,34 +19,17 @@ import {
 const HOME = homedir();
 let config: AdvisorConfig = loadConfig();
 
+/// The user's live session prompt: free-text context seeded at session_start
+/// and editable mid-session (session_context messages). Injected per task via
+/// sessionContextPrefix() — read fresh at dispatch — so edits take effect on
+/// the next research/query/reply without rebuilding the persistent lanes.
+let sessionContext = "";
+
 function systemPrompt(): string {
-  return `You are Advisor, a realtime meeting assistant running on the user's Mac.
-Each user message is a research task, usually with a snippet of live conversation
-transcript. Respond concisely and usefully for someone mid-conversation:
-- Lead with the answer; no preamble.
-- Answer in two passes within this one turn, so something useful reaches the
-  card fast: FIRST check the user's local notes/files (Read/Grep/Glob) and
-  immediately write a brief preliminary answer prefixed "From your notes:".
-  THEN consult the web and connectors and revise into the final answer. Do
-  NOT wait until all research is done to start writing. (Claude gathers every
-  tool result then dumps one block unless told to do this — measured ~15s
-  later first content without it.)
-- NEVER narrate what you are about to do ("I'll check…", "Let me look…").
-  The first text you write MUST be the preliminary answer itself — real
-  content from the local search, not a description of your plan.
-- Use WebSearch for facts about the world; use Read/Grep/Glob to search the
-  user's notes and files for personal/work context — your configuration
-  (CLAUDE.md) tells you where their notes live. Use the user's connected
-  tools (Slack, Jira, Confluence, ...) where they're the natural source.
-- Cite sources inline as markdown links or file paths.
-- If you cannot verify something, say "couldn't verify" rather than guessing.
-- NEVER ask the user questions — this is a one-shot answer with no way to
-  reply. If the request is ambiguous, state your assumption in one line and
-  answer under it. If context is missing, give the most useful answer you can
-  with what you have.
-- British spelling. Keep answers under ~150 words unless asked for depth.${
-    config.extraInstructions ? `\n\nUser preferences:\n${config.extraInstructions}` : ""
-  }`;
+  return buildResearchSystem({
+    persona: config.personaPrompt,
+    extraInstructions: config.extraInstructions,
+  });
 }
 
 const TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
@@ -131,7 +115,8 @@ async function runCard(
   lane.currentCardId = cardId;
   send({ type: "card", id: cardId, trigger: triggerId, kind, title, body: "…", state: "pending" });
   try {
-    const { text, costUsd } = await lane.session.run(transcriptDelta(lane.name) + task, (body) => {
+    const prompt = sessionContextPrefix(sessionContext) + transcriptDelta(lane.name) + task;
+    const { text, costUsd } = await lane.session.run(prompt, (body) => {
       if (!cancelledCards.has(cardId)) {
         send({ type: "card_update", id: cardId, body, state: "streaming" });
       }
@@ -171,7 +156,9 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
   const header = `${msg.base}\n\n---\n\n**You:** ${msg.replyText}\n\n`;
   send({ type: "card_update", id: msg.cardId, body: header + "…", state: "pending" });
   try {
-    const task = replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
+    const task =
+      sessionContextPrefix(sessionContext) +
+      replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
     const { text, costUsd } = await lane.session.run(task, (body) => {
       send({ type: "card_update", id: msg.cardId, body: header + body, state: "streaming" });
     });
@@ -310,6 +297,8 @@ function handle(msg: Inbound): void {
       covered.clear();
       researchQueue.length = 0;
       sessionCostUsd = 0;
+      // Seed the live session prompt; the app may update it mid-session.
+      sessionContext = msg.context ?? "";
       // Re-read preferences and rebuild sessions so prompt/model changes apply.
       config = loadConfig();
       configureClassifier(config);
@@ -355,6 +344,11 @@ function handle(msg: Inbound): void {
           busy = false;
         });
       }
+      break;
+    case "session_context":
+      // Live edit of the session prompt; applied to the next dispatched task.
+      sessionContext = msg.text;
+      log(`session prompt updated (${sessionContext.trim().length} chars)`);
       break;
     case "config":
       if (typeof msg.auto === "boolean") {

@@ -117,14 +117,18 @@ saved as markdown under
 
 ## Preferences
 
-⌘, opens settings: extra instructions for the research agents, parallel agent
-count, connector action permissions, trigger sensitivity
+⌘, opens settings: the research agents' editable persona/style prompt (with
+Restore default — the operational core stays fixed), extra instructions, parallel
+agent count, connector action permissions, trigger sensitivity
 (conservative/balanced/eager) and per-kind toggles, the provider + model for
 each component (classifier, research, manual query), STT engine (Apple/whisper),
 system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
 next session start. The toolbar keeps only in-session controls: Listen, pause,
-mic mute, mic device, Auto cards, Float.
+mic mute, mic device, Auto cards, Float. Below it sits an optional **session
+prompt** box (who's present, the topic, what to focus on): fill it before Listen
+or edit it live during the session to steer the agents — each edit applies to
+the next card. It clears when the session stops.
 
 Each component can run on **Claude** (Agent SDK) or **Codex** (`@openai/codex-sdk`)
 independently. Codex uses your Codex CLI login (`~/.codex/auth.json`) — no API

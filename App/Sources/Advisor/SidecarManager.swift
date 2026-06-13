@@ -34,6 +34,7 @@ final class SidecarManager {
     private let healthyRunSeconds: TimeInterval = 60
     private var lastSpawn: Date?
     private var lastSessionId: String?
+    private var lastSessionContext = ""
     private var lastLanes: Int?
     private var lastAuto: Bool?
 
@@ -124,12 +125,13 @@ final class SidecarManager {
         // Replay the session context the running conversation depends on.
         if let lastLanes { sendLanes(lastLanes) }
         if let lastAuto { sendAuto(lastAuto) }
-        if let lastSessionId { sendSessionStart(lastSessionId) }
+        if let lastSessionId { sendSessionStart(lastSessionId, context: lastSessionContext) }
     }
 
     func stop() {
         stopping = true
         lastSessionId = nil
+        lastSessionContext = ""
         try? stdinHandle?.close() // sidecar exits on stdin close
         stdinHandle = nil
         if let process, process.isRunning { process.terminate() } // backstop: no orphan
@@ -138,14 +140,27 @@ final class SidecarManager {
 
     // MARK: outbound
 
-    func sendSessionStart(_ id: String) {
+    func sendSessionStart(_ id: String, context: String = "") {
         lastSessionId = id
-        send(["type": "session_start", "sessionId": id, "ts": Date().timeIntervalSince1970])
+        lastSessionContext = context // replayed verbatim if the sidecar restarts
+        var msg: [String: Any] = [
+            "type": "session_start", "sessionId": id, "ts": Date().timeIntervalSince1970,
+        ]
+        if !context.isEmpty { msg["context"] = context }
+        send(msg)
     }
 
     func sendSessionEnd() {
         lastSessionId = nil // nothing to replay after the session ends
+        lastSessionContext = ""
         send(["type": "session_end"])
+    }
+
+    /// Live edit of the session prompt mid-session. Stored so a sidecar restart
+    /// replays the latest text via session_start.
+    func sendSessionContext(_ text: String) {
+        lastSessionContext = text
+        send(["type": "session_context", "text": text])
     }
 
     func sendUtterance(_ u: Utterance) {

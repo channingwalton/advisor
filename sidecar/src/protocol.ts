@@ -3,7 +3,12 @@
 export type Source = "me" | "them";
 
 export type Inbound =
-  | { type: "session_start"; sessionId: string; ts: number }
+  // context: optional free-text the user enters before Listen (e.g. who's in
+  // the meeting, what it's about) — injected into the research/query prompts.
+  | { type: "session_start"; sessionId: string; ts: number; context?: string }
+  // Live edit of the session prompt mid-session — replaces the current context,
+  // applied to the next dispatched research/query/reply task.
+  | { type: "session_context"; text: string }
   | { type: "utterance"; id: string; source: Source; text: string; ts: number }
   // Manual user action. action+triggerId are set by the right-click menu:
   // action picks the prompt/card kind, triggerId anchors the card under the
