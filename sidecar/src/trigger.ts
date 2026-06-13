@@ -145,6 +145,9 @@ function ensureSession(): Agent {
       systemPrompt: classifierSystem(config),
       model: modelFor(config.classifier),
       allowedTools: [],
+      // The classifier only reads the transcript window — it needs none of the
+      // user's Claude config, so don't load it on every classify.
+      settingSources: [],
     });
   }
   return session;
@@ -152,6 +155,17 @@ function ensureSession(): Agent {
 
 export function resetClassifier(): void {
   session?.reset();
+}
+
+/// Pay the SDK subprocess cold-spawn now (at session start) instead of on the
+/// first real classification, which sits on the critical path before the first
+/// card appears. Best-effort; the warm-up "answer" is discarded.
+export async function warmClassifier(): Promise<void> {
+  try {
+    await ensureSession().run("warm-up", undefined, 15_000);
+  } catch {
+    /* best effort */
+  }
 }
 
 export interface ClassifyResult {

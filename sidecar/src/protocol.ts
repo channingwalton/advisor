@@ -58,5 +58,6 @@ export function send(msg: Outbound): void {
 }
 
 export function log(message: string): void {
-  process.stderr.write(`[sidecar] ${message}\n`);
+  // Elapsed-since-start prefix so all log lines sit on one timeline.
+  process.stderr.write(`[sidecar +${process.uptime().toFixed(1)}s] ${message}\n`);
 }

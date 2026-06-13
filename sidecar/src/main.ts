@@ -12,6 +12,7 @@ import {
   researchTask,
   resetClassifier,
   Trigger,
+  warmClassifier,
 } from "./trigger.js";
 
 const HOME = homedir();
@@ -22,6 +23,16 @@ function systemPrompt(): string {
 Each user message is a research task, usually with a snippet of live conversation
 transcript. Respond concisely and usefully for someone mid-conversation:
 - Lead with the answer; no preamble.
+- Answer in two passes within this one turn, so something useful reaches the
+  card fast: FIRST check the user's local notes/files (Read/Grep/Glob) and
+  immediately write a brief preliminary answer prefixed "From your notes:".
+  THEN consult the web and connectors and revise into the final answer. Do
+  NOT wait until all research is done to start writing. (Claude gathers every
+  tool result then dumps one block unless told to do this — measured ~15s
+  later first content without it.)
+- NEVER narrate what you are about to do ("I'll check…", "Let me look…").
+  The first text you write MUST be the preliminary answer itself — real
+  content from the local search, not a description of your plan.
 - Use WebSearch for facts about the world; use Read/Grep/Glob to search the
   user's notes and files for personal/work context — your configuration
   (CLAUDE.md) tells you where their notes live. Use the user's connected
@@ -249,7 +260,10 @@ async function runClassify(): Promise<void> {
   try {
     const { text: window, anchorId } = classifierDelta();
     if (!window) return;
+    log(`classify start (window ${window.length} chars)`);
+    const ct0 = Date.now();
     const { triggers, costUsd } = await classify(window, coveredSubjects());
+    log(`classify ${Date.now() - ct0}ms → ${triggers.length} trigger(s)`);
     addCost(costUsd);
     log(`classify → ${triggers.length} trigger(s)`);
     for (const t of triggers) {
@@ -277,7 +291,9 @@ function drainResearch(): void {
     if (!lane) return; // a lane finishing will call drainResearch again
     const t = researchQueue.shift()!;
     lane.busy = true;
+    const t0 = Date.now();
     void runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId).finally(() => {
+      log(`research "${t.subject}" ${Date.now() - t0}ms`);
       lane.busy = false;
       drainResearch();
     });
@@ -303,6 +319,11 @@ function handle(msg: Inbound): void {
       ensureLanes();
       queryLane.session.reset();
       queryLane = makeLane("query", config.queryAgent);
+      // Warm the cold-spawn off the critical path: the first real question then
+      // skips the SDK subprocess boot (~5-10s) on the classifier and lead
+      // research lane. Best-effort, fire-and-forget; warm-up answers discarded.
+      void warmClassifier();
+      void researchLanes[0]?.session.run("warm-up; reply READY", undefined, 15_000);
       log(`session ${msg.sessionId} started (sensitivity=${config.triggerSensitivity})`);
       break;
     case "utterance":

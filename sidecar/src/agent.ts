@@ -112,6 +112,9 @@ interface PendingTask {
   resolve: (r: TaskResult) => void;
   settled: boolean;
   buffer: string;
+  t0: number; // dispatch time, for latency logging
+  cold: boolean; // first run after a (re)spawn pays the SDK subprocess boot
+  firstTextLogged: boolean;
 }
 
 export interface AgentSessionOptions {
@@ -120,6 +123,11 @@ export interface AgentSessionOptions {
   model?: string;
   allowedTools: string[];
   cwd?: string;
+  /// SDK setting sources to load. Defaults to ["user"] (the user's own Claude
+  /// config — CLAUDE.md, MCP, etc.), which the research/query lanes need for
+  /// personal context. Pass [] for components that don't (e.g. the classifier,
+  /// which only reads the transcript window) to avoid loading it on every turn.
+  settingSources?: ("user" | "project" | "local")[];
   /// Allow MCP connector tools that take actions (send/create/...). Read/search
   /// connector tools are always allowed.
   allowMcpActions?: boolean;
@@ -154,6 +162,7 @@ export class AgentSession implements Agent {
   /// total_cost_usd on result messages is cumulative per session; track the
   /// last value so each task reports its delta.
   private lastCostUsd = 0;
+  private firstRunAfterSpawn = false;
 
   constructor(private readonly opts: AgentSessionOptions) {}
 
@@ -180,7 +189,18 @@ export class AgentSession implements Agent {
     timeoutMs = 180_000
   ): Promise<TaskResult> {
     this.ensure();
-    const p: PendingTask = { onText, resolve: () => {}, settled: false, buffer: "" };
+    const cold = this.firstRunAfterSpawn;
+    this.firstRunAfterSpawn = false;
+    const p: PendingTask = {
+      onText,
+      resolve: () => {},
+      settled: false,
+      buffer: "",
+      t0: Date.now(),
+      cold,
+      firstTextLogged: false,
+    };
+    log(`${this.opts.name}: run start (cold=${cold}, queue=${this.pending.length})`);
     const answer = new Promise<TaskResult>((res) => {
       p.resolve = res;
     });
@@ -254,6 +274,8 @@ export class AgentSession implements Agent {
 
   private ensure(): void {
     if (this.input) return;
+    log(`${this.opts.name}: spawning SDK subprocess (cold-start)`);
+    this.firstRunAfterSpawn = true;
     const q = new AsyncQueue<SDKUserMessage>();
     this.input = q;
     const stream = query({
@@ -270,7 +292,8 @@ export class AgentSession implements Agent {
         canUseTool: this.canUseTool,
         // Load the user's own Claude configuration (CLAUDE.md etc.) — that is
         // where personal context like vault locations belongs, not in Advisor.
-        settingSources: ["user"],
+        // Components that don't need it (the classifier) pass [] to skip it.
+        settingSources: this.opts.settingSources ?? ["user"],
         maxTurns: 1000,
       },
     });
@@ -282,6 +305,11 @@ export class AgentSession implements Agent {
           if (msg.type === "assistant") {
             for (const block of msg.message.content) {
               if (block.type === "text" && current && !current.settled) {
+                // Log every text block (each card update) as a delta, so the
+                // progression of what reaches the card is visible in the logs.
+                const tag = current.firstTextLogged ? "text+" : "first text";
+                current.firstTextLogged = true;
+                log(`${this.opts.name}: ${tag} +${Date.now() - current.t0}ms: ${JSON.stringify(block.text.slice(0, 280))}`);
                 current.buffer += (current.buffer ? "\n\n" : "") + block.text;
                 current.onText?.(current.buffer);
               } else if (block.type === "tool_use") {
@@ -293,6 +321,10 @@ export class AgentSession implements Agent {
             const cumulative = "total_cost_usd" in msg ? (msg.total_cost_usd ?? 0) : 0;
             const delta = Math.max(0, cumulative - this.lastCostUsd);
             this.lastCostUsd = cumulative;
+            if (p) {
+              const finalText = msg.subtype === "success" ? msg.result : p.buffer;
+              log(`${this.opts.name}: run done +${Date.now() - p.t0}ms (cold=${p.cold}) final: ${JSON.stringify((finalText ?? "").slice(0, 400))}`);
+            }
             if (p && !p.settled) {
               p.settled = true;
               p.resolve({
