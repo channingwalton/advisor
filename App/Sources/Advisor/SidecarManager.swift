@@ -6,7 +6,7 @@ struct Card: Identifiable, Equatable {
     var kind: String
     var title: String
     var body: String
-    var state: String // pending | streaming | done | failed
+    var state: String // pending | streaming | done | failed | cancelled
 }
 
 /// Spawns and supervises the Node sidecar; NDJSON over stdio.

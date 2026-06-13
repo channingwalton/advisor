@@ -327,6 +327,8 @@ struct TranscriptView: View {
                     .help("Skip this card")
                 } else if card.state == "failed" {
                     Text("failed").font(.caption2).foregroundStyle(.red)
+                } else if card.state == "cancelled" {
+                    Text("cancelled").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             Markdown(card.body)

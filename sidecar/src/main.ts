@@ -313,7 +313,7 @@ function handle(msg: Inbound): void {
       break;
     case "cancel": {
       cancelledCards.add(msg.cardId);
-      send({ type: "card_update", id: msg.cardId, body: "cancelled", state: "failed" });
+      send({ type: "card_update", id: msg.cardId, body: "cancelled", state: "cancelled" });
       const lane = [...researchLanes, queryLane].find((l) => l.currentCardId === msg.cardId);
       if (lane) {
         log(`cancelling ${msg.cardId} on ${lane.name}`);

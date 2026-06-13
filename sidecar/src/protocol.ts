@@ -19,7 +19,7 @@ export type Inbound =
   | { type: "cancel"; cardId: string }
   | { type: "session_end" };
 
-export type CardState = "pending" | "streaming" | "done" | "failed";
+export type CardState = "pending" | "streaming" | "done" | "failed" | "cancelled";
 
 export type Outbound =
   | { type: "hello"; version: number }
