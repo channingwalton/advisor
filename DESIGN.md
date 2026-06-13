@@ -37,11 +37,11 @@ The Swift app owns everything realtime and visual; the sidecar owns everything t
 
 **Transcription.** whisper.cpp via C bindings, Metal. Energy/Silero VAD segments speech; each segment (cap ~6 s, 0.5 s overlap) transcribed off the audio thread, one decode queue per source. Model: `small` to start; `large-v3-turbo` if M0 spike shows headroom. Emits `Utterance{id, source, text, t0, t1}`.
 
-**SidecarManager.** Spawns the Node sidecar, supervises (restart with backoff, max 3; replay last 60 s of utterances on restart so context survives). Transport: newline-delimited JSON over stdin/stdout. Chosen over WebSocket: no port management, lifecycle tied to parent, trivially debuggable. Logs on stderr.
+**SidecarManager.** Spawns the Node sidecar and supervises it: on a crash it restarts with exponential backoff (1/2/4/8 s, capped 8 s, ≤5 attempts; a crash that follows a >60 s healthy run resets the budget, so only a tight loop exhausts it), then replays the session context the running conversation depends on — `session_start` plus the lane/auto config (not the utterance history; the classifier session is gone, so new utterances resume in a fresh sidecar session). A deliberate `stop()` is distinguished from a crash and cancels any pending restart. Sends to a dead sidecar surface on the status line rather than failing silently; budget exhausted → status asks the user to stop and start listening again. Transport: newline-delimited JSON over stdin/stdout. Chosen over WebSocket: no port management, lifecycle tied to parent, trivially debuggable. Logs on stderr.
 
 **OverlayUI.** Non-activating `NSPanel` (`.floating`, `.nonactivatingPanel`) hosting SwiftUI: vertical card feed (newest top), collapsible live transcript drawer, query box, listening indicator + cost ticker. Menu-bar item: start/stop listening, open session history. Panel never takes key focus except when the query box is clicked.
 
-**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmm.md`: YAML frontmatter (start/end, cost), transcript section, cards section (type, body, sources). Written incrementally; transcripts only, no audio (decided). Vault is never written.
+**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmmss.md` (second precision, so a same-minute restart can't overwrite the prior transcript): YAML frontmatter (start/end, cost), transcript section, cards section (type, body, sources). Written incrementally; transcripts only, no audio (decided). Vault is never written.
 
 ### TS sidecar (Claude Agent SDK)
 
@@ -87,7 +87,7 @@ The placeholder-then-stream pattern is what makes the budget achievable; a full 
 
 ## Error handling
 
-Sidecar crash → supervisor restarts, replays window, UI shows transient "reconnecting". STT stall → watchdog restarts decode queue. LLM/tool failure → card flips to `failed` with reason; never silent. Anthropic key missing/invalid → blocking banner at session start, not mid-conversation.
+Sidecar crash → supervisor restarts with exponential backoff (≤5; a healthy run resets the budget), replays the session context (`session_start` + lane/auto config), status line shows the crash and the restart attempt; budget exhausted → status asks the user to stop and start listening again. STT stall → watchdog restarts decode queue. LLM/tool failure → card flips to `failed` with reason; never silent. Anthropic key missing/invalid → blocking banner at session start, not mid-conversation.
 
 ## Trade-offs made
 
@@ -131,7 +131,9 @@ Volatile results are enabled: in-progress words render grey/italic at the feed t
 
 ## Agent sandboxing (2026-06-13)
 
-Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: web tools auto-allowed; Read/Grep/Glob restricted to non-sensitive paths under `$HOME` (denylist: .ssh, .aws, .claude, keychains, …); Bash/Write/Edit/etc. denied and disallowed. Verified: `/etc/passwd` read denied, notes queries unaffected. A hard OS boundary (OrbStack/Docker container, app spawning `docker run -i`) remains a future option — note the OAuth credentials sit inside any such boundary.
+Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: web tools auto-allowed; Read/Grep/Glob restricted to non-sensitive paths under `$HOME` (denylist: .ssh, .aws, .claude, .codex, keychains, …); Bash/Write/Edit/etc. denied and disallowed. Verified: `/etc/passwd` read denied, notes queries unaffected. A hard OS boundary (OrbStack/Docker container, app spawning `docker run -i`) remains a future option — note the OAuth credentials sit inside any such boundary.
+
+Two refinements after review (`sandbox.test.ts` pins them): **Grep/Glob are gated more tightly than Read** because they recurse — validating only the root path lets a recursive pattern (`Glob {path:$HOME, pattern:".ssh/**"}`, `Grep {path:$HOME, pattern:"PRIVATE KEY"}`) reach secrets in a denied descendant. So a search root may not sit *at or above* any denied path; an unscoped `$HOME` search is illegal and the agent must target a specific subtree. **Comparisons are case-folded** — macOS's default filesystem is case-insensitive, so `~/.SSH/id_rsa` reaches the same file as `~/.ssh`; a case-sensitive denylist check would let the variant through. The path-separator guard still keeps distinct siblings (e.g. `.ssh-notes`) allowed.
 
 ## Connector tools (2026-06-13)
 
@@ -143,7 +145,7 @@ Advisor no longer knows about the vault: agents load the user's own Claude confi
 
 ## Right-click transcript actions (2026-06-12)
 
-Selected transcript text can be acted on directly: right-click → **Answer / Context / Fact check**. These are exactly the auto-classifier's kinds (`question`→answer, `context`, `factcheck`), gated by the same `config.triggers` toggles, so the manual menu and the automatic pipeline never diverge. The prompt templates live once in `trigger.ts` (`researchTask`/`cardKind`), shared by `drainResearch` and the manual path. The action rides the existing `query` lane (now carrying optional `action` + `triggerId`); `triggerId` anchors the resulting card under the clicked line, the same way auto cards anchor via the classifier's `anchorId`. The free-text Ask box still sends a bare `query` (kind `query`, no anchor) — unchanged.
+Selected transcript text can be acted on directly: right-click → **Answer / Context / Fact check**. These are exactly the auto-classifier's kinds (`question`→answer, `context`, `factcheck`), gated by the same `config.triggers` toggles, so the manual menu and the automatic pipeline never diverge. Preferences posts `advisorConfigChanged` on save and the transcript view reloads its trigger toggles on receipt, so toggling a kind updates the menu live rather than only after a relaunch. The prompt templates live once in `trigger.ts` (`researchTask`/`cardKind`), shared by `drainResearch` and the manual path. The action rides the existing `query` lane (now carrying optional `action` + `triggerId`); `triggerId` anchors the resulting card under the clicked line, the same way auto cards anchor via the classifier's `anchorId`. The free-text Ask box still sends a bare `query` (kind `query`, no anchor) — unchanged.
 
 Selection capture needs the real highlighted span, which SwiftUI's `Text` + `.textSelection` hides from a `.contextMenu`; the transcript line is therefore an `NSTextView` (`SelectableTranscriptText`) whose `menu(for:)` builds the action items over `selectedRange` (falling back to the whole line). Building it via the convenience `NSTextView(frame:)` (not a hand-assembled TextKit stack) so the view owns its text storage — a manual stack leaves storage/layoutManager unretained and they deallocate, blanking the line. The space-to-pause monitor now ignores only *editable* text views, so a focused (non-editable) transcript line still toggles playback.
 

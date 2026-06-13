@@ -139,8 +139,10 @@ locations and personal context belong.
 Research agents are sandboxed by tool policy: web search, the user's MCP
 connectors (Slack, Jira, … — read/search only unless "Allow connector actions"
 is enabled), and read-only access to non-sensitive files in the home directory.
-No shell, no writes; credential paths (~/.ssh, ~/.aws, ~/.claude, keychains, …)
-are denied.
+No shell, no writes; credential paths (~/.ssh, ~/.aws, ~/.claude, ~/.codex,
+keychains, …) are denied (case-insensitively). File search (Grep/Glob) must be
+scoped to a specific subdirectory — an unscoped home-wide search is refused so a
+recursive pattern can't reach a denied path.
 
 ## Documents
 
