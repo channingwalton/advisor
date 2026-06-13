@@ -1,6 +1,6 @@
 import { Agent } from "./agent.js";
 import { createAgent } from "./providers.js";
-import { AdvisorConfig, modelFor } from "./config.js";
+import { AdvisorConfig, modelArg } from "./config.js";
 import { log } from "./protocol.js";
 
 export type ResearchKind = "question" | "context" | "factcheck";
@@ -134,17 +134,16 @@ function ensureSession(): Agent {
         triggerSensitivity: "balanced",
         triggers: { question: true, context: true, factcheck: true },
         maxTriggersPerPass: 2,
-        classifier: { provider: "claude", models: { claude: "haiku" } },
-        research: { provider: "claude", models: {} },
-        queryAgent: { provider: "claude", models: {} },
+        provider: "claude",
+        model: "",
         personaPrompt: "",
         extraInstructions: "",
         allowMcpActions: false,
       } as AdvisorConfig);
-    session = createAgent(config.classifier.provider, {
+    session = createAgent(config.provider, {
       name: "classifier",
       systemPrompt: classifierSystem(config),
-      model: modelFor(config.classifier),
+      model: modelArg(config),
       allowedTools: [],
       // The classifier only reads the transcript window — it needs none of the
       // user's Claude config, so don't load it on every classify.

@@ -17,7 +17,7 @@ sys ──┘                                                ├─ Swift app (U
                 NDJSON over stdio                      │
                                                        ▼
    TS sidecar — Claude Agent SDK:
-     • trigger classifier (persistent Haiku session, delta-fed)
+     • trigger classifier (persistent session, delta-fed)
      • parallel research lanes (web search + vault, read-only)
      • on-demand query lane
 ```
@@ -120,8 +120,9 @@ saved as markdown under
 ⌘, opens settings: the research agents' editable persona/style prompt (with
 Restore default — the operational core stays fixed), extra instructions, parallel
 agent count, connector action permissions, trigger sensitivity
-(conservative/balanced/eager) and per-kind toggles, the provider + model for
-each component (classifier, research, manual query), STT engine (Apple/whisper),
+(conservative/balanced/eager) and per-kind toggles, the agent backend (one
+provider + model shared by the classifier, research, and manual-query lanes),
+STT engine (Apple/whisper),
 system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
 next session start. The toolbar keeps only in-session controls: Listen, pause,

@@ -15,43 +15,6 @@ struct AdvisorConfig: Codable, Equatable {
         var factcheck = true
     }
 
-    /// Per-component agent backend: a provider id plus a remembered model per
-    /// provider, so switching provider restores the previous choice. Mirrors
-    /// sidecar/src/config.ts `ProviderChoice`.
-    struct ProviderChoice: Codable, Equatable {
-        var provider = "claude"
-        var models: [String: String] = [:]
-
-        init(provider: String = "claude", models: [String: String] = [:]) {
-            self.provider = provider
-            self.models = models
-        }
-
-        private enum CodingKeys: String, CodingKey { case provider, models }
-        /// v2 named fields (pre models-map) — read on decode, never written.
-        private enum LegacyKeys: String, CodingKey { case claudeModel, codexModel }
-
-        /// Tolerant decode: keeps defaults for missing keys, and migrates the v2
-        /// {claudeModel, codexModel} shape into the models map.
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
-            if let m = try c.decodeIfPresent([String: String].self, forKey: .models) {
-                models = m
-            } else {
-                let legacy = try decoder.container(keyedBy: LegacyKeys.self)
-                var m: [String: String] = [:]
-                if let cm = try legacy.decodeIfPresent(String.self, forKey: .claudeModel), !cm.isEmpty {
-                    m["claude"] = cm
-                }
-                if let xm = try legacy.decodeIfPresent(String.self, forKey: .codexModel), !xm.isEmpty {
-                    m["codex"] = xm
-                }
-                models = m
-            }
-        }
-    }
-
     /// Editable persona/style block at the head of the research agents' system
     /// prompt. Mirrors sidecar default in prompts.ts; the protected operational
     /// core is not exposed here.
@@ -67,9 +30,10 @@ struct AdvisorConfig: Codable, Equatable {
     var triggers = Triggers()
     var maxTriggersPerPass = 2
     var allowMcpActions = false
-    var classifier = ProviderChoice(provider: "claude", models: ["claude": "haiku"])
-    var research = ProviderChoice()
-    var queryAgent = ProviderChoice()
+    /// Agent backend shared by every lane (classifier, research, query). "" model
+    /// = the provider's own default. Mirrors sidecar/src/config.ts.
+    var provider = "claude"
+    var model = ""
     /// App-side only: STT locale identifier (e.g. en_GB).
     var sttLocale = "en_GB"
 
@@ -77,19 +41,13 @@ struct AdvisorConfig: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case personaPrompt, extraInstructions, triggerSensitivity, triggers, maxTriggersPerPass, allowMcpActions
-        case classifier, research, queryAgent, sttLocale
+        case provider, model, sttLocale
     }
 
-    /// Legacy flat fields (pre per-component provider) — read on decode, never written.
-    private enum LegacyKeys: String, CodingKey {
-        case classifierModel, researchModel
-    }
-
-    /// Tolerant decode: missing keys keep defaults, and legacy flat
-    /// classifierModel/researchModel (v1) are migrated onto the nested choices —
-    /// mirrors sidecar/src/config.ts `mergeConfig`. Without this, decoding an old
-    /// config.json would throw and silently reset every saved setting. (The v2
-    /// {claudeModel, codexModel} shape is migrated inside ProviderChoice.)
+    /// Tolerant decode: missing keys keep their default, unknown keys are
+    /// ignored. No migration of older shapes — a stale config.json is just
+    /// partially overridden. Without this custom init, a synthesised `Decodable`
+    /// would throw on any missing key and the next save would wipe every setting.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         personaPrompt = try c.decodeIfPresent(String.self, forKey: .personaPrompt) ?? Self.defaultPersona
@@ -99,20 +57,8 @@ struct AdvisorConfig: Codable, Equatable {
         maxTriggersPerPass = try c.decodeIfPresent(Int.self, forKey: .maxTriggersPerPass) ?? 2
         allowMcpActions = try c.decodeIfPresent(Bool.self, forKey: .allowMcpActions) ?? false
         sttLocale = try c.decodeIfPresent(String.self, forKey: .sttLocale) ?? "en_GB"
-        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
-        let legacyClassifier = try legacy.decodeIfPresent(String.self, forKey: .classifierModel)
-        let legacyResearch = try legacy.decodeIfPresent(String.self, forKey: .researchModel)
-        func claudeModels(_ id: String?, default def: String?) -> [String: String] {
-            if let id, !id.isEmpty { return ["claude": id] }
-            if let def { return ["claude": def] }
-            return [:]
-        }
-        classifier = try c.decodeIfPresent(ProviderChoice.self, forKey: .classifier)
-            ?? ProviderChoice(models: claudeModels(legacyClassifier, default: "haiku"))
-        research = try c.decodeIfPresent(ProviderChoice.self, forKey: .research)
-            ?? ProviderChoice(models: claudeModels(legacyResearch, default: nil))
-        queryAgent = try c.decodeIfPresent(ProviderChoice.self, forKey: .queryAgent)
-            ?? ProviderChoice(models: claudeModels(legacyResearch, default: nil))
+        provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
     }
 
     static var fileURL: URL {
@@ -162,28 +108,23 @@ struct AgentProvider: Identifiable {
     ]
 }
 
-/// Provider + provider-specific model picker for one pipeline component, driven
-/// entirely by `AgentProvider.all`.
-struct ProviderChoiceView: View {
-    let title: String
-    @Binding var choice: AdvisorConfig.ProviderChoice
+/// Provider + model picker for the single shared agent backend, driven entirely
+/// by `AgentProvider.all`. Switching provider resets the model to that
+/// provider's default (the scalar model can't carry a stale cross-provider id).
+struct AgentBackendView: View {
+    @Binding var provider: String
+    @Binding var model: String
 
     private var models: [(String, String)] {
-        AgentProvider.all.first { $0.id == choice.provider }?.models ?? []
-    }
-
-    /// The remembered model for the current provider, defaulting to "".
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { choice.models[choice.provider] ?? "" },
-            set: { choice.models[choice.provider] = $0 })
+        AgentProvider.all.first { $0.id == provider }?.models ?? []
     }
 
     var body: some View {
-        Picker("\(title) provider", selection: $choice.provider) {
+        Picker("Provider", selection: $provider) {
             ForEach(AgentProvider.all) { Text($0.label).tag($0.id) }
         }
-        Picker("\(title) model", selection: modelBinding) {
+        .onChange(of: provider) { _, _ in model = "" }
+        Picker("Model", selection: $model) {
             ForEach(models, id: \.0) { Text($0.1).tag($0.0) }
         }
     }
@@ -197,9 +138,11 @@ struct PreferencesView: View {
 
     var body: some View {
         Form {
-            Section("Research agents") {
-                ProviderChoiceView(title: "Research", choice: $config.research)
-                ProviderChoiceView(title: "Manual query", choice: $config.queryAgent)
+            Section("Agent backend") {
+                AgentBackendView(provider: $config.provider, model: $config.model)
+                Text("Shared by every lane — classifier, research, and manual query.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("Codex uses your Codex CLI login and runs read-only (web + file reads, no writes). Its sandbox is coarser than Claude's — see DESIGN.md.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -254,7 +197,6 @@ struct PreferencesView: View {
                 Stepper(
                     "Max triggers per pass: \(config.maxTriggersPerPass)",
                     value: $config.maxTriggersPerPass, in: 1...5)
-                ProviderChoiceView(title: "Classifier", choice: $config.classifier)
             }
 
             Section("Transcription") {

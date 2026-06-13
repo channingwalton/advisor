@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { Agent } from "./agent.js";
 import { createAgent } from "./providers.js";
-import { AdvisorConfig, loadConfig, modelFor, ProviderChoice } from "./config.js";
+import { AdvisorConfig, loadConfig, modelArg } from "./config.js";
 import { buildResearchSystem, sessionContextPrefix } from "./prompts.js";
 import { Inbound, log, send, Source } from "./protocol.js";
 import {
@@ -49,13 +49,13 @@ const cancelledCards = new Set<string>();
 
 const researchLanes: Lane[] = [];
 
-function makeLane(name: string, choice: ProviderChoice): Lane {
+function makeLane(name: string): Lane {
   return {
     name,
-    session: createAgent(choice.provider, {
+    session: createAgent(config.provider, {
       name,
       systemPrompt: systemPrompt(),
-      model: modelFor(choice),
+      model: modelArg(config),
       allowedTools: TOOLS,
       cwd: HOME,
       allowMcpActions: config.allowMcpActions,
@@ -66,12 +66,12 @@ function makeLane(name: string, choice: ProviderChoice): Lane {
 
 function ensureLanes(): void {
   while (researchLanes.length < maxLanes) {
-    researchLanes.push(makeLane(`research${researchLanes.length}`, config.research));
+    researchLanes.push(makeLane(`research${researchLanes.length}`));
   }
 }
 ensureLanes();
 
-let queryLane: Lane = makeLane("query", config.queryAgent);
+let queryLane: Lane = makeLane("query");
 
 interface TranscriptEntry {
   id: string;
@@ -152,7 +152,7 @@ async function runCard(
 /// app supplies the card's current body and a transcript slice; we reproduce the
 /// prefix the app already shows so the streamed body stays consistent.
 async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Promise<void> {
-  const lane = makeLane("reply", config.queryAgent);
+  const lane = makeLane("reply");
   const header = `${msg.base}\n\n---\n\n**You:** ${msg.replyText}\n\n`;
   send({ type: "card_update", id: msg.cardId, body: header + "…", state: "pending" });
   try {
@@ -307,7 +307,7 @@ function handle(msg: Inbound): void {
       researchLanes.length = 0;
       ensureLanes();
       queryLane.session.reset();
-      queryLane = makeLane("query", config.queryAgent);
+      queryLane = makeLane("query");
       // Warm the cold-spawn off the critical path: the first real question then
       // skips the SDK subprocess boot (~5-10s) on the classifier and lead
       // research lane. Best-effort, fire-and-forget; warm-up answers discarded.
