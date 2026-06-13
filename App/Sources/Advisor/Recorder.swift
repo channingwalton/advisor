@@ -19,6 +19,8 @@ final class TranscriptStore: ObservableObject {
     @Published var listening = false
     /// True while listening but audio is paused (engines idle, no new input).
     @Published var paused = false
+    /// True while the local mic is muted (system audio still captured).
+    @Published var micMuted = false
     @Published var status = "idle"
     /// Cards from the sidecar, newest first.
     @Published var cards: [Card] = []
@@ -48,6 +50,8 @@ final class Recorder {
     private var systemActive = false
     /// When true, capture callbacks drop audio so no new transcription occurs.
     private var paused = false
+    /// When true, mic callbacks drop audio (system audio keeps flowing).
+    private var micMuted = false
     /// Recent `them` utterances for echo dedup. Only touched on whisperQueue.
     private var recentThem: [(time: Date, tokens: [String])] = []
     /// Called on the main actor for each accepted utterance.
@@ -81,7 +85,7 @@ final class Recorder {
         appleSys?.onVolatile = { [weak self] text in self?.setVolatile(text, for: .them) }
 
         capture.onSamples = { [weak self] samples in
-            guard let self, !self.paused else { return }
+            guard let self, !self.paused, !self.micMuted else { return }
             switch self.engine {
             case .whisper: self.micSegmenter.append(samples)
             case .apple: self.appleMic?.append(samples)
@@ -280,6 +284,7 @@ final class Recorder {
 
     func stop() {
         paused = false
+        micMuted = false
         capture.stop()
         micSegmenter.flush()
         sysSegmenter.flush()
@@ -290,6 +295,7 @@ final class Recorder {
             await MainActor.run {
                 store.listening = false
                 store.paused = false
+                store.micMuted = false
                 store.status = "idle"
                 store.volatile = [:]
             }
@@ -317,6 +323,18 @@ final class Recorder {
         Task { @MainActor in
             store.paused = false
             store.status = "listening"
+        }
+    }
+
+    /// Mute/unmute the local mic. System audio keeps being captured and
+    /// transcribed. Flushes the pending mic segment on mute.
+    func setMicMuted(_ muted: Bool) {
+        guard micMuted != muted else { return }
+        micMuted = muted
+        if muted { micSegmenter.flush() }
+        Task { @MainActor in
+            store.micMuted = muted
+            store.volatile[.me] = nil
         }
     }
 

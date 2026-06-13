@@ -109,7 +109,9 @@ toggles, with the resulting card anchored under that line. Once a card has
 finished, a follow-up box appears on it — ask a question about the card and the
 answer is appended in place, so a card becomes a short thread. The menu also lets
 you copy the text or add words to the STT dictionary (whisper engine only —
-Apple has no vocabulary hook). `Float` keeps the window on top. Sessions are
+Apple has no vocabulary hook). The **mic** button mutes the local microphone
+while the session keeps running — system audio is still captured and
+transcribed; tap again to unmute. `Float` keeps the window on top. Sessions are
 saved as markdown under
 `~/Library/Application Support/Advisor/sessions/` (`Sessions` button).
 
@@ -121,8 +123,8 @@ count, connector action permissions, trigger sensitivity
 each component (classifier, research, manual query), STT engine (Apple/whisper),
 system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
-next session start. The toolbar keeps only in-session controls: Listen, mic,
-Auto cards, Float.
+next session start. The toolbar keeps only in-session controls: Listen, pause,
+mic mute, mic device, Auto cards, Float.
 
 Each component can run on **Claude** (Agent SDK) or **Codex** (`@openai/codex-sdk`)
 independently. Codex uses your Codex CLI login (`~/.codex/auth.json`) — no API

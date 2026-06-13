@@ -144,6 +144,12 @@ struct TranscriptView: View {
                     }
                     .help(store.paused ? "Resume (Space)" : "Pause (Space)")
                     Button {
+                        recorder?.setMicMuted(!store.micMuted)
+                    } label: {
+                        Image(systemName: store.micMuted ? "mic.slash.fill" : "mic.fill")
+                    }
+                    .help(store.micMuted ? "Unmute mic" : "Mute mic (system audio keeps recording)")
+                    Button {
                         Task { await toggle() }
                     } label: {
                         Image(systemName: "stop.fill")
