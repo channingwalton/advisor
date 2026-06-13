@@ -115,11 +115,20 @@ saved as markdown under
 
 ⌘, opens settings: extra instructions for the research agents, parallel agent
 count, connector action permissions, trigger sensitivity
-(conservative/balanced/eager) and per-kind toggles, classifier and research
-model choice, STT engine (Apple/whisper), system-audio capture, and STT
-locale. Stored in `~/Library/Application Support/Advisor/config.json`; agent
-settings apply at the next session start. The toolbar keeps only in-session
-controls: Listen, mic, Auto cards, Float.
+(conservative/balanced/eager) and per-kind toggles, the provider + model for
+each component (classifier, research, manual query), STT engine (Apple/whisper),
+system-audio capture, and STT locale. Stored in
+`~/Library/Application Support/Advisor/config.json`; agent settings apply at the
+next session start. The toolbar keeps only in-session controls: Listen, mic,
+Auto cards, Float.
+
+Each component can run on **Claude** (Agent SDK) or **Codex** (`@openai/codex-sdk`)
+independently. Codex uses your Codex CLI login (`~/.codex/auth.json`) — no API
+key — and runs read-only (web search + file reads, no writes). Its sandbox is
+coarser than Claude's per-path policy (a read-only shell command can read
+sensitive dotfiles; Codex MCP servers come from `~/.codex/config.toml` and
+aren't gated by the connector-actions toggle) — see DESIGN.md. To use Codex,
+have the `codex` CLI logged in.
 
 Advisor itself knows nothing about your notes: the research agents load your
 own Claude configuration (`~/.claude/CLAUDE.md`), which is where vault

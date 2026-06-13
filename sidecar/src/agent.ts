@@ -81,6 +81,20 @@ export interface AgentSessionOptions {
   allowMcpActions?: boolean;
 }
 
+/// A long-lived agent backend. Tasks are answered in FIFO order; the session
+/// retains context across tasks until reset().
+export interface Agent {
+  run(
+    task: string,
+    onText?: (accumulated: string) => void,
+    timeoutMs?: number
+  ): Promise<TaskResult>;
+  /** Drop the session (and its accumulated context); next run() starts fresh. */
+  reset(): void;
+  /** Interrupt the currently-running turn (best effort). */
+  interrupt(): Promise<void>;
+}
+
 /// MCP tool names that mutate external state.
 const MCP_ACTION_PATTERN =
   /(send|post|create|update|delete|remove|write|upload|schedule|transition|invite|archive|publish|edit|move|rename|merge|close|assign|set[_A-Z])/i;
@@ -90,7 +104,7 @@ const MCP_ACTION_PATTERN =
  * CLI cold-spawn per request; each task is one (possibly multi-turn) exchange.
  * Tasks are answered strictly in FIFO order.
  */
-export class AgentSession {
+export class AgentSession implements Agent {
   private input?: AsyncQueue<SDKUserMessage>;
   private pending: PendingTask[] = [];
   /// total_cost_usd on result messages is cumulative per session; track the

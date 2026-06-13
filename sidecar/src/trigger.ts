@@ -1,5 +1,6 @@
-import { AgentSession } from "./agent.js";
-import { AdvisorConfig } from "./config.js";
+import { Agent } from "./agent.js";
+import { createAgent } from "./providers.js";
+import { AdvisorConfig, modelFor } from "./config.js";
 import { log } from "./protocol.js";
 
 export type ResearchKind = "question" | "context" | "factcheck";
@@ -94,7 +95,7 @@ Rules:
 }
 
 let cfg: AdvisorConfig | undefined;
-let session: AgentSession | undefined;
+let session: Agent | undefined;
 
 export function configureClassifier(config: AdvisorConfig): void {
   cfg = config;
@@ -102,17 +103,28 @@ export function configureClassifier(config: AdvisorConfig): void {
   session = undefined;
 }
 
-function ensureSession(): AgentSession {
+function ensureSession(): Agent {
   if (!session) {
-    const config = cfg ?? ({ triggerSensitivity: "balanced", triggers: { question: true, context: true, factcheck: true }, maxTriggersPerPass: 2, classifierModel: "haiku", researchModel: "", extraInstructions: "" } as AdvisorConfig);
-    session = new AgentSession({
+    const config =
+      cfg ??
+      ({
+        triggerSensitivity: "balanced",
+        triggers: { question: true, context: true, factcheck: true },
+        maxTriggersPerPass: 2,
+        classifier: { provider: "claude", models: { claude: "haiku" } },
+        research: { provider: "claude", models: {} },
+        queryAgent: { provider: "claude", models: {} },
+        extraInstructions: "",
+        allowMcpActions: false,
+      } as AdvisorConfig);
+    session = createAgent(config.classifier.provider, {
       name: "classifier",
       systemPrompt: classifierSystem(config),
-      model: config.classifierModel || "haiku",
+      model: modelFor(config.classifier),
       allowedTools: [],
     });
   }
-  return session
+  return session;
 }
 
 export function resetClassifier(): void {

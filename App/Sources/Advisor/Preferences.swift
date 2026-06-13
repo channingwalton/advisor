@@ -9,15 +9,94 @@ struct AdvisorConfig: Codable, Equatable {
         var factcheck = true
     }
 
+    /// Per-component agent backend: a provider id plus a remembered model per
+    /// provider, so switching provider restores the previous choice. Mirrors
+    /// sidecar/src/config.ts `ProviderChoice`.
+    struct ProviderChoice: Codable, Equatable {
+        var provider = "claude"
+        var models: [String: String] = [:]
+
+        init(provider: String = "claude", models: [String: String] = [:]) {
+            self.provider = provider
+            self.models = models
+        }
+
+        private enum CodingKeys: String, CodingKey { case provider, models }
+        /// v2 named fields (pre models-map) — read on decode, never written.
+        private enum LegacyKeys: String, CodingKey { case claudeModel, codexModel }
+
+        /// Tolerant decode: keeps defaults for missing keys, and migrates the v2
+        /// {claudeModel, codexModel} shape into the models map.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
+            if let m = try c.decodeIfPresent([String: String].self, forKey: .models) {
+                models = m
+            } else {
+                let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+                var m: [String: String] = [:]
+                if let cm = try legacy.decodeIfPresent(String.self, forKey: .claudeModel), !cm.isEmpty {
+                    m["claude"] = cm
+                }
+                if let xm = try legacy.decodeIfPresent(String.self, forKey: .codexModel), !xm.isEmpty {
+                    m["codex"] = xm
+                }
+                models = m
+            }
+        }
+    }
+
     var extraInstructions = ""
     var triggerSensitivity = "balanced"
     var triggers = Triggers()
     var maxTriggersPerPass = 2
-    var classifierModel = "haiku"
-    var researchModel = ""
     var allowMcpActions = false
+    var classifier = ProviderChoice(provider: "claude", models: ["claude": "haiku"])
+    var research = ProviderChoice()
+    var queryAgent = ProviderChoice()
     /// App-side only: STT locale identifier (e.g. en_GB).
     var sttLocale = "en_GB"
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case extraInstructions, triggerSensitivity, triggers, maxTriggersPerPass, allowMcpActions
+        case classifier, research, queryAgent, sttLocale
+    }
+
+    /// Legacy flat fields (pre per-component provider) — read on decode, never written.
+    private enum LegacyKeys: String, CodingKey {
+        case classifierModel, researchModel
+    }
+
+    /// Tolerant decode: missing keys keep defaults, and legacy flat
+    /// classifierModel/researchModel (v1) are migrated onto the nested choices —
+    /// mirrors sidecar/src/config.ts `mergeConfig`. Without this, decoding an old
+    /// config.json would throw and silently reset every saved setting. (The v2
+    /// {claudeModel, codexModel} shape is migrated inside ProviderChoice.)
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        extraInstructions = try c.decodeIfPresent(String.self, forKey: .extraInstructions) ?? ""
+        triggerSensitivity = try c.decodeIfPresent(String.self, forKey: .triggerSensitivity) ?? "balanced"
+        triggers = try c.decodeIfPresent(Triggers.self, forKey: .triggers) ?? Triggers()
+        maxTriggersPerPass = try c.decodeIfPresent(Int.self, forKey: .maxTriggersPerPass) ?? 2
+        allowMcpActions = try c.decodeIfPresent(Bool.self, forKey: .allowMcpActions) ?? false
+        sttLocale = try c.decodeIfPresent(String.self, forKey: .sttLocale) ?? "en_GB"
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        let legacyClassifier = try legacy.decodeIfPresent(String.self, forKey: .classifierModel)
+        let legacyResearch = try legacy.decodeIfPresent(String.self, forKey: .researchModel)
+        func claudeModels(_ id: String?, default def: String?) -> [String: String] {
+            if let id, !id.isEmpty { return ["claude": id] }
+            if let def { return ["claude": def] }
+            return [:]
+        }
+        classifier = try c.decodeIfPresent(ProviderChoice.self, forKey: .classifier)
+            ?? ProviderChoice(models: claudeModels(legacyClassifier, default: "haiku"))
+        research = try c.decodeIfPresent(ProviderChoice.self, forKey: .research)
+            ?? ProviderChoice(models: claudeModels(legacyResearch, default: nil))
+        queryAgent = try c.decodeIfPresent(ProviderChoice.self, forKey: .queryAgent)
+            ?? ProviderChoice(models: claudeModels(legacyResearch, default: nil))
+    }
 
     static var fileURL: URL {
         FileManager.default
@@ -41,6 +120,58 @@ struct AdvisorConfig: Codable, Equatable {
     }
 }
 
+/// One selectable agent backend for the UI — mirrors a sidecar providers.ts
+/// entry. Adding a provider = one entry in `AgentProvider.all` (plus the
+/// matching `create` in the sidecar registry).
+struct AgentProvider: Identifiable {
+    let id: String
+    let label: String
+    /// (tag, label) model options; tag "" = the provider's default.
+    let models: [(String, String)]
+
+    static let all: [AgentProvider] = [
+        AgentProvider(
+            id: "claude", label: "Claude",
+            models: [
+                ("", "Default (Sonnet)"), ("haiku", "Haiku — fast/cheap"),
+                ("sonnet", "Sonnet — sharper"), ("opus", "Opus — deepest"),
+            ]),
+        // Codex's model is account/subscription-driven and set in
+        // ~/.codex/config.toml; an explicit slug the ChatGPT plan doesn't
+        // support is rejected (HTTP 400), so offer only the configured default.
+        AgentProvider(
+            id: "codex", label: "Codex",
+            models: [("", "Default (from ~/.codex/config.toml)")]),
+    ]
+}
+
+/// Provider + provider-specific model picker for one pipeline component, driven
+/// entirely by `AgentProvider.all`.
+struct ProviderChoiceView: View {
+    let title: String
+    @Binding var choice: AdvisorConfig.ProviderChoice
+
+    private var models: [(String, String)] {
+        AgentProvider.all.first { $0.id == choice.provider }?.models ?? []
+    }
+
+    /// The remembered model for the current provider, defaulting to "".
+    private var modelBinding: Binding<String> {
+        Binding(
+            get: { choice.models[choice.provider] ?? "" },
+            set: { choice.models[choice.provider] = $0 })
+    }
+
+    var body: some View {
+        Picker("\(title) provider", selection: $choice.provider) {
+            ForEach(AgentProvider.all) { Text($0.label).tag($0.id) }
+        }
+        Picker("\(title) model", selection: modelBinding) {
+            ForEach(models, id: \.0) { Text($0.1).tag($0.0) }
+        }
+    }
+}
+
 struct PreferencesView: View {
     @State private var config = AdvisorConfig.load()
     @AppStorage("sttEngine") private var sttEngine = STTEngine.apple.rawValue
@@ -50,14 +181,14 @@ struct PreferencesView: View {
     var body: some View {
         Form {
             Section("Research agents") {
-                Picker("Research model", selection: $config.researchModel) {
-                    Text("Default (Sonnet)").tag("")
-                    Text("Haiku — fast/cheap").tag("haiku")
-                    Text("Opus — deepest").tag("opus")
-                }
+                ProviderChoiceView(title: "Research", choice: $config.research)
+                ProviderChoiceView(title: "Manual query", choice: $config.queryAgent)
+                Text("Codex uses your Codex CLI login and runs read-only (web + file reads, no writes). Its sandbox is coarser than Claude's — see DESIGN.md.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
                 Toggle("Allow connector actions", isOn: $config.allowMcpActions)
-                Text("Off: connectors (Slack, Jira, …) are read/search only. On: agents may also send, create, and update — use with care.")
+                Text("Off: connectors (Slack, Jira, …) are read/search only. On: agents may also send, create, and update — use with care. Claude only.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 4) {
@@ -85,10 +216,7 @@ struct PreferencesView: View {
                 Stepper(
                     "Max triggers per pass: \(config.maxTriggersPerPass)",
                     value: $config.maxTriggersPerPass, in: 1...5)
-                Picker("Classifier model", selection: $config.classifierModel) {
-                    Text("Haiku — fast/cheap").tag("haiku")
-                    Text("Sonnet — sharper").tag("sonnet")
-                }
+                ProviderChoiceView(title: "Classifier", choice: $config.classifier)
             }
 
             Section("Transcription") {

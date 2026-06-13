@@ -1,7 +1,8 @@
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
-import { AgentSession } from "./agent.js";
-import { AdvisorConfig, loadConfig } from "./config.js";
+import { Agent } from "./agent.js";
+import { createAgent } from "./providers.js";
+import { AdvisorConfig, loadConfig, modelFor, ProviderChoice } from "./config.js";
 import { Inbound, log, send, Source } from "./protocol.js";
 import {
   cardKind,
@@ -43,7 +44,7 @@ let maxLanes = 3;
 
 interface Lane {
   name: string;
-  session: AgentSession;
+  session: Agent;
   busy: boolean;
   currentCardId?: string;
 }
@@ -52,13 +53,13 @@ const cancelledCards = new Set<string>();
 
 const researchLanes: Lane[] = [];
 
-function makeLane(name: string): Lane {
+function makeLane(name: string, choice: ProviderChoice): Lane {
   return {
     name,
-    session: new AgentSession({
+    session: createAgent(choice.provider, {
       name,
       systemPrompt: systemPrompt(),
-      model: config.researchModel || undefined,
+      model: modelFor(choice),
       allowedTools: TOOLS,
       cwd: HOME,
       allowMcpActions: config.allowMcpActions,
@@ -69,12 +70,12 @@ function makeLane(name: string): Lane {
 
 function ensureLanes(): void {
   while (researchLanes.length < maxLanes) {
-    researchLanes.push(makeLane(`research${researchLanes.length}`));
+    researchLanes.push(makeLane(`research${researchLanes.length}`, config.research));
   }
 }
 ensureLanes();
 
-let queryLane: Lane = makeLane("query");
+let queryLane: Lane = makeLane("query", config.queryAgent);
 
 interface TranscriptEntry {
   id: string;
@@ -266,7 +267,7 @@ function handle(msg: Inbound): void {
       researchLanes.length = 0;
       ensureLanes();
       queryLane.session.reset();
-      queryLane = makeLane("query");
+      queryLane = makeLane("query", config.queryAgent);
       log(`session ${msg.sessionId} started (sensitivity=${config.triggerSensitivity})`);
       break;
     case "utterance":
