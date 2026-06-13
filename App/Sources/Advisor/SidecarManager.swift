@@ -7,6 +7,10 @@ struct Card: Identifiable, Equatable {
     var title: String
     var body: String
     var state: String // pending | streaming | done | failed | cancelled
+    /// Utterance id this card answers (from the protocol `trigger`). Lets the
+    /// session writer footnote-link the card to its transcript line. Nil for
+    /// Ask-box/query cards with no anchor.
+    var triggerId: String?
     /// True while a follow-up the user typed into this card is being answered.
     /// App-only (never from the protocol): suppresses the cancel button and the
     /// reply field so a card can't take a second follow-up mid-answer.
@@ -270,8 +274,9 @@ final class SidecarManager {
             // Anchor the card to the sentence that triggered it, so it sorts
             // into the feed under that line rather than at research-completion
             // time (10–30s later). Fall back to now for query cards / unknown ids.
+            let triggerId = obj["trigger"] as? String
             let created =
-                (obj["trigger"] as? String)
+                triggerId
                 .flatMap { trigger in store.utterances.first { $0.id.uuidString == trigger } }?
                 .time ?? Date()
             store.cards.append(
@@ -281,7 +286,8 @@ final class SidecarManager {
                     kind: obj["kind"] as? String ?? "query",
                     title: obj["title"] as? String ?? "",
                     body: obj["body"] as? String ?? "",
-                    state: obj["state"] as? String ?? "pending"))
+                    state: obj["state"] as? String ?? "pending",
+                    triggerId: triggerId))
         case "card_update":
             guard let id = obj["id"] as? String,
                 let idx = store.cards.firstIndex(where: { $0.id == id })

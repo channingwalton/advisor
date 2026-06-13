@@ -41,7 +41,7 @@ The Swift app owns everything realtime and visual; the sidecar owns everything t
 
 **OverlayUI.** Non-activating `NSPanel` (`.floating`, `.nonactivatingPanel`) hosting SwiftUI: vertical card feed (newest top), collapsible live transcript drawer, query box, listening indicator + cost ticker. Menu-bar item: start/stop listening, open session history. Panel never takes key focus except when the query box is clicked.
 
-**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmmss.md` (second precision, so a same-minute restart can't overwrite the prior transcript): YAML frontmatter (start/end, cost), transcript section, cards section (type, body, sources). Written incrementally; transcripts only, no audio (decided). Vault is never written.
+**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmmss.md` (second precision, so a same-minute restart can't overwrite the prior transcript): YAML frontmatter (start/end, cost), transcript section, cards section (type, body, sources). Each card is emitted as a Markdown footnote whose `[^card-N]` reference rides the transcript line that triggered it (via the card's `trigger` utterance id), so Obsidian/GitHub render a bidirectional link between line and card; cards with no anchor (Ask-box/query) fall into an "Other cards" section. Written incrementally; transcripts only, no audio (decided). Vault is never written.
 
 ### TS sidecar (Claude Agent SDK)
 

@@ -49,18 +49,61 @@ final class SessionWriter {
         let time = DateFormatter()
         time.dateFormat = "HH:mm:ss"
 
+        // Cards anchored to a known transcript line become footnotes on that
+        // line (bidirectional link in Obsidian/GitHub); the rest go in a flat
+        // "Other cards" section.
+        let doneCards = store.cards.filter { $0.state == "done" || $0.state == "failed" }
+        var refsByUtterance: [UUID: [String]] = [:]
+        var footnotes: [(label: String, card: Card)] = []
+        var orphans: [Card] = []
+        for card in doneCards {
+            if let tid = card.triggerId,
+                let u = store.utterances.first(where: { $0.id.uuidString == tid }) {
+                let label = "card-\(footnotes.count + 1)"
+                refsByUtterance[u.id, default: []].append(label)
+                footnotes.append((label, card))
+            } else {
+                orphans.append(card)
+            }
+        }
+
         var md = "---\n"
         md += "started: \(iso.string(from: started))\n"
         if let ended { md += "ended: \(iso.string(from: ended))\n" }
         md += String(format: "cost_usd: %.4f\n", store.costUsd)
         md += "---\n\n# Transcript\n\n"
         for u in store.utterances {
-            md += "- \(time.string(from: u.time)) \(u.text)\n"
+            var line = "- \(time.string(from: u.time)) \(u.text)"
+            if let refs = refsByUtterance[u.id] {
+                line += refs.map { "[^\($0)]" }.joined()
+            }
+            md += line + "\n"
         }
-        md += "\n# Cards\n\n"
-        for card in store.cards where card.state == "done" || card.state == "failed" {
-            md += "## [\(card.kind)] \(card.title)\n\n\(card.body)\n\n"
+
+        if !footnotes.isEmpty {
+            md += "\n# Cards\n\n"
+            for (label, card) in footnotes {
+                md += footnote(label: label, card: card)
+            }
         }
+
+        if !orphans.isEmpty {
+            md += "\n# Other cards\n\n"
+            for card in orphans {
+                md += "## [\(card.kind)] \(card.title)\n\n\(card.body)\n\n"
+            }
+        }
+
         try? md.write(to: fileURL, atomically: true, encoding: .utf8)
+    }
+
+    /// Renders a card as a footnote definition. The body is indented 4 spaces
+    /// per line so multi-paragraph cards stay inside the footnote.
+    private func footnote(label: String, card: Card) -> String {
+        var out = "[^\(label)]: **[\(card.kind)] \(card.title)**\n\n"
+        for line in card.body.split(separator: "\n", omittingEmptySubsequences: false) {
+            out += line.isEmpty ? "\n" : "    \(line)\n"
+        }
+        return out + "\n"
     }
 }
