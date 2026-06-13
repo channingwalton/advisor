@@ -4,6 +4,7 @@ import { Agent } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, loadConfig, modelArg } from "./config.js";
 import { buildResearchSystem, sessionContextPrefix } from "./prompts.js";
+import { cardOutcome, boundedPush } from "./cards.js";
 import { Inbound, log, send, Source } from "./protocol.js";
 import {
   cardKind,
@@ -109,19 +110,15 @@ async function runCard(
   send({ type: "card", id: cardId, trigger: triggerId, kind, title, body: "…", state: "pending" });
   try {
     const prompt = sessionContextPrefix(sessionContext) + transcriptDelta(lane.name) + task;
-    const { text, costUsd } = await lane.session.run(prompt, (body) => {
+    const { text, costUsd, error } = await lane.session.run(prompt, (body) => {
       if (!cancelledCards.has(cardId)) {
         send({ type: "card_update", id: cardId, body, state: "streaming" });
       }
     });
     addCost(costUsd);
     if (!cancelledCards.has(cardId)) {
-      send({
-        type: "card_update",
-        id: cardId,
-        body: text || "no answer produced",
-        state: text ? "done" : "failed",
-      });
+      const outcome = cardOutcome(text, error);
+      send({ type: "card_update", id: cardId, body: outcome.body, state: outcome.state });
     }
   } catch (err) {
     log(`agent error: ${err}`);
@@ -144,24 +141,35 @@ async function runCard(
 /// (the pool stays free for new triggers) and carries no cross-card state. The
 /// app supplies the card's current body and a transcript slice; we reproduce the
 /// prefix the app already shows so the streamed body stays consistent.
+/// Each reply spawns a fresh SDK subprocess; cap concurrent ones so a burst of
+/// taps can't fork unbounded processes.
+const MAX_CONCURRENT_REPLIES = 3;
+let activeReplies = 0;
+
 async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Promise<void> {
-  const lane = makeLane("reply");
   const header = `${msg.base}\n\n---\n\n**You:** ${msg.replyText}\n\n`;
+  if (activeReplies >= MAX_CONCURRENT_REPLIES) {
+    send({
+      type: "card_update",
+      id: msg.cardId,
+      body: header + "failed: too many replies in flight — wait for one to finish",
+      state: "failed",
+    });
+    return;
+  }
+  activeReplies++;
+  const lane = makeLane("reply");
   send({ type: "card_update", id: msg.cardId, body: header + "…", state: "pending" });
   try {
     const task =
       sessionContextPrefix(sessionContext) +
       replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
-    const { text, costUsd } = await lane.session.run(task, (body) => {
+    const { text, costUsd, error } = await lane.session.run(task, (body) => {
       send({ type: "card_update", id: msg.cardId, body: header + body, state: "streaming" });
     });
     addCost(costUsd);
-    send({
-      type: "card_update",
-      id: msg.cardId,
-      body: header + (text || "no answer produced"),
-      state: text ? "done" : "failed",
-    });
+    const outcome = cardOutcome(text, error);
+    send({ type: "card_update", id: msg.cardId, body: header + outcome.body, state: outcome.state });
   } catch (err) {
     log(`reply error: ${err}`);
     send({
@@ -172,6 +180,7 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
     });
   } finally {
     lane.session.reset(); // dispose the transient session
+    activeReplies--;
   }
 }
 
@@ -213,6 +222,14 @@ let rerunWanted = false;
 const covered = new Map<string, number>();
 const researchQueue: Trigger[] = [];
 
+/// Cap the backlog so a long, noisy session can't grow it without bound.
+const MAX_RESEARCH_QUEUE = 20;
+function enqueueResearch(item: Trigger): void {
+  for (const dropped of boundedPush(researchQueue, item, MAX_RESEARCH_QUEUE)) {
+    log(`research queue full — dropped oldest: ${dropped.subject}`);
+  }
+}
+
 function normalise(subject: string): string {
   return subject.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
 }
@@ -251,7 +268,7 @@ async function runClassify(): Promise<void> {
       if (!key || covered.has(key)) continue;
       covered.set(key, Date.now());
       log(`trigger(${t.kind}): ${t.subject}`);
-      researchQueue.push({ ...t, anchorId });
+      enqueueResearch({ ...t, anchorId });
     }
     drainResearch();
   } finally {

@@ -24,6 +24,10 @@ final class SessionWriter {
         started = Date()
         ended = nil
         let fmt = DateFormatter()
+        // Pin the calendar/locale so the filename is always Gregorian yyyy-MM-dd
+        // regardless of the user's system calendar (e.g. Japanese/Buddhist).
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.calendar = Calendar(identifier: .gregorian)
         fmt.dateFormat = "yyyy-MM-dd-HHmmss"
         fileURL = sessionsDirectory.appendingPathComponent("\(fmt.string(from: started!)).md")
         write()

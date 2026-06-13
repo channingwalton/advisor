@@ -66,7 +66,11 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             let fd = CMSampleBufferGetFormatDescription(sb),
             let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee,
             asbd.mFormatID == kAudioFormatLinearPCM,
-            asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
+            asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+            // We request mono (channelCount = 1) and read only buffer 0. If SCK
+            // ever delivered stereo/interleaved, that assumption would silently
+            // mis-read; bail rather than feed garbage to STT.
+            asbd.mChannelsPerFrame == 1
         else { return [] }
 
         var abl = AudioBufferList()

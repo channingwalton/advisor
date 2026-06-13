@@ -95,6 +95,8 @@ final class AppleSpeechEngine {
     /// Feed 16 kHz mono samples (any thread).
     func append(_ samples: [Float]) {
         guard let input else { return }
+        // An empty buffer makes baseAddress nil → force-unwrap crash below.
+        guard !samples.isEmpty else { return }
         guard
             let buffer = AVAudioPCMBuffer(
                 pcmFormat: sourceFormat, frameCapacity: AVAudioFrameCount(samples.count))

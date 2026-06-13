@@ -68,12 +68,18 @@ export class CodexAgentSession implements Agent {
 
     const controller = new AbortController();
     this.controller = controller;
-    let buffer = "";
+    // Accumulate agent_message items by id: a turn can emit more than one, and
+    // each item.updated carries that item's full text so far. Keying by id means
+    // streaming updates overwrite their own item while distinct items concatenate
+    // (the old `buffer = ev.item.text` dropped all but the last).
+    const messages = new Map<string, string>();
+    const joined = (): string => [...messages.values()].join("\n\n");
     let settled = false;
-    const finish = (resolve: (r: TaskResult) => void, text: string): void => {
+    const finish = (resolve: (r: TaskResult) => void, error?: string): void => {
       if (settled) return;
       settled = true;
-      resolve({ text, costUsd: 0 }); // subscription auth: no per-task USD cost
+      // subscription auth: no per-task USD cost
+      resolve({ text: joined(), costUsd: 0, error });
     };
 
     const turn = new Promise<TaskResult>((resolve) => {
@@ -83,8 +89,8 @@ export class CodexAgentSession implements Agent {
           for await (const ev of events) {
             if (ev.type === "item.updated" || ev.type === "item.completed") {
               if (ev.item.type === "agent_message") {
-                buffer = ev.item.text;
-                onText?.(buffer);
+                messages.set(ev.item.id, ev.item.text);
+                onText?.(joined());
               }
             } else if (ev.type === "turn.failed") {
               throw new Error(ev.error.message);
@@ -92,16 +98,19 @@ export class CodexAgentSession implements Agent {
               throw new Error(ev.message);
             }
           }
-          finish(resolve, buffer);
+          finish(resolve);
         } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
           if (!controller.signal.aborted) {
             log(`${this.opts.name}: codex turn failed: ${err}`);
             // Drop the (possibly dead) thread so the next task starts fresh and
             // re-sends the system prompt, mirroring the Claude backend.
             this.thread = undefined;
             this.firstTurn = true;
+            finish(resolve, message);
+          } else {
+            finish(resolve);
           }
-          finish(resolve, buffer);
         }
       })();
     });
@@ -111,7 +120,7 @@ export class CodexAgentSession implements Agent {
         if (!settled) {
           log(`${this.opts.name}: codex task timed out`);
           controller.abort();
-          finish(resolve, buffer);
+          finish(resolve, "timed out");
         }
       }, timeoutMs)
     );

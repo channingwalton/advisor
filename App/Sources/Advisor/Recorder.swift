@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 enum Source: String {
     case me
@@ -47,11 +48,15 @@ final class Recorder {
     private let appleSys: AppleSpeechEngine?
     private let store: TranscriptStore
     private let whisperQueue = DispatchQueue(label: "advisor.whisper")
-    private var systemActive = false
+    // These flags are read on the realtime audio/sysaudio capture threads and
+    // written from the control path (start/stop/pause/mute), so they are atomic
+    // to avoid a data race. Relaxed ordering: each is independent, no flag guards
+    // another's visibility.
+    private let systemActive = Atomic<Bool>(false)
     /// When true, capture callbacks drop audio so no new transcription occurs.
-    private var paused = false
+    private let paused = Atomic<Bool>(false)
     /// When true, mic callbacks drop audio (system audio keeps flowing).
-    private var micMuted = false
+    private let micMuted = Atomic<Bool>(false)
     /// Recent `them` utterances for echo dedup. Only touched on whisperQueue.
     private var recentThem: [(time: Date, tokens: [String])] = []
     /// Called on the main actor for each accepted utterance.
@@ -85,14 +90,16 @@ final class Recorder {
         appleSys?.onVolatile = { [weak self] text in self?.setVolatile(text, for: .them) }
 
         capture.onSamples = { [weak self] samples in
-            guard let self, !self.paused, !self.micMuted else { return }
+            guard let self,
+                !self.paused.load(ordering: .relaxed),
+                !self.micMuted.load(ordering: .relaxed) else { return }
             switch self.engine {
             case .whisper: self.micSegmenter.append(samples)
             case .apple: self.appleMic?.append(samples)
             }
         }
         systemCapture.onSamples = { [weak self] samples in
-            guard let self, !self.paused else { return }
+            guard let self, !self.paused.load(ordering: .relaxed) else { return }
             switch self.engine {
             case .whisper: self.sysSegmenter.append(samples)
             case .apple: self.appleSys?.append(samples)
@@ -106,21 +113,23 @@ final class Recorder {
         }
     }
 
-    private var queueDepth = 0 // approximate; updated on whisperQueue
+    // Incremented on the capture thread, decremented on whisperQueue — atomic so
+    // the cross-thread arithmetic can't lose updates.
+    private let queueDepth = Atomic<Int>(0)
 
     private func handleSegment(_ segment: [Float], from source: Source) {
         let spokenEnd = Date()
-        queueDepth += 1
+        let depth = queueDepth.wrappingAdd(1, ordering: .relaxed).newValue
         FileHandle.standardError.write(
-            Data("[advisor] segment(\(source)): \(Float(segment.count) / 16_000)s queue=\(queueDepth)\n".utf8))
+            Data("[advisor] segment(\(source)): \(Float(segment.count) / 16_000)s queue=\(depth)\n".utf8))
         // `me` is delayed so the matching `them` segment (same speech via the
         // speakers) is transcribed first and can be matched by the echo check
         // (system segments cap at 5 s, so 4 s covers most boundary skew).
-        let delay: TimeInterval = source == .me && systemActive ? 4.0 : 0
+        let delay: TimeInterval = source == .me && systemActive.load(ordering: .relaxed) ? 4.0 : 0
         whisperQueue.asyncAfter(deadline: .now() + delay) {
             // Back-pressure: if we're lagging badly, drop rather than replay a backlog.
             if Date().timeIntervalSince(spokenEnd) > 20 {
-                self.queueDepth -= 1
+                self.queueDepth.wrappingAdd(-1, ordering: .relaxed)
                 FileHandle.standardError.write(
                     Data("[advisor] skipped stale segment(\(source)) — lagging\n".utf8))
                 return
@@ -128,7 +137,7 @@ final class Recorder {
             guard let transcriber = self.transcriber else { return }
             let decodeStart = Date()
             let text = transcriber.transcribe(segment)
-            self.queueDepth -= 1
+            self.queueDepth.wrappingAdd(-1, ordering: .relaxed)
             let decodeMs = Int(Date().timeIntervalSince(decodeStart) * 1000)
             let audioMs = segment.count / 16
             FileHandle.standardError.write(
@@ -151,7 +160,7 @@ final class Recorder {
         FileHandle.standardError.write(
             Data("[advisor] apple(\(source)): \"\(text)\"\n".utf8))
         Task { @MainActor in self.store.volatile[source] = nil }
-        let delay: TimeInterval = source == .me && systemActive ? 1.5 : 0
+        let delay: TimeInterval = source == .me && systemActive.load(ordering: .relaxed) ? 1.5 : 0
         whisperQueue.asyncAfter(deadline: .now() + delay) {
             self.accept(text, from: source, spokenEnd: spokenEnd)
         }
@@ -164,9 +173,13 @@ final class Recorder {
         let tokens = Self.tokens(text)
         switch source {
         case .them:
-            recentThem.append((time: Date(), tokens: tokens))
+            // Prune here too, not only in isEcho: a system-only session (no mic
+            // input) never calls isEcho, so recentThem would grow unbounded.
+            let now = Date()
+            recentThem.removeAll { now.timeIntervalSince($0.time) > 15 }
+            recentThem.append((time: now, tokens: tokens))
         case .me:
-            if systemActive, isEcho(tokens) {
+            if systemActive.load(ordering: .relaxed), isEcho(tokens) {
                 FileHandle.standardError.write(
                     Data("[advisor] echo suppressed: \"\(text)\"\n".utf8))
                 return
@@ -254,7 +267,7 @@ final class Recorder {
         if captureSystem {
             do {
                 try await systemCapture.start()
-                systemActive = true
+                systemActive.store(true, ordering: .relaxed)
             } catch {
                 notes.append("system audio failed: \(error.localizedDescription)")
             }
@@ -266,11 +279,11 @@ final class Recorder {
             try capture.start(deviceID: device?.id, echoCancellation: false)
             let detail = [
                 "listening — \(device?.label ?? "default input")",
-                systemActive ? "+ system audio" : nil,
+                systemActive.load(ordering: .relaxed) ? "+ system audio" : nil,
             ]
             .compactMap { $0 }.joined(separator: " ")
             let status = ([detail] + notes).joined(separator: " | ")
-            paused = false
+            paused.store(false, ordering: .relaxed)
             await MainActor.run {
                 store.listening = true
                 store.paused = false
@@ -283,8 +296,8 @@ final class Recorder {
     }
 
     func stop() {
-        paused = false
-        micMuted = false
+        paused.store(false, ordering: .relaxed)
+        micMuted.store(false, ordering: .relaxed)
         capture.stop()
         micSegmenter.flush()
         sysSegmenter.flush()
@@ -306,8 +319,8 @@ final class Recorder {
     /// audio so no new transcription is produced. Flushes pending segments on
     /// pause so they aren't held mid-utterance.
     func pause() {
-        guard !paused else { return }
-        paused = true
+        guard !paused.load(ordering: .relaxed) else { return }
+        paused.store(true, ordering: .relaxed)
         micSegmenter.flush()
         sysSegmenter.flush()
         Task { @MainActor in
@@ -318,8 +331,8 @@ final class Recorder {
     }
 
     func resume() {
-        guard paused else { return }
-        paused = false
+        guard paused.load(ordering: .relaxed) else { return }
+        paused.store(false, ordering: .relaxed)
         Task { @MainActor in
             store.paused = false
             store.status = "listening"
@@ -329,8 +342,8 @@ final class Recorder {
     /// Mute/unmute the local mic. System audio keeps being captured and
     /// transcribed. Flushes the pending mic segment on mute.
     func setMicMuted(_ muted: Bool) {
-        guard micMuted != muted else { return }
-        micMuted = muted
+        guard micMuted.load(ordering: .relaxed) != muted else { return }
+        micMuted.store(muted, ordering: .relaxed)
         if muted { micSegmenter.flush() }
         Task { @MainActor in
             store.micMuted = muted
@@ -339,8 +352,8 @@ final class Recorder {
     }
 
     private func stopSystem() async {
-        guard systemActive else { return }
-        systemActive = false
+        guard systemActive.load(ordering: .relaxed) else { return }
+        systemActive.store(false, ordering: .relaxed)
         await systemCapture.stop()
     }
 }

@@ -24,6 +24,9 @@ final class SidecarManager {
     private var buffer = Data()
     private let store: TranscriptStore
     private let sidecarDir = AppResources.sidecarDir
+    /// stdin writes run here, off the main thread: a hung sidecar that stops
+    /// draining its stdin must not block the UI on a full-pipe `write`.
+    private let writeQueue = DispatchQueue(label: "advisor.sidecar.write")
 
     // Crash recovery: a crashed sidecar leaves listening alive but mute (no
     // cards, no query). Restart with backoff and replay the session context the
@@ -44,6 +47,10 @@ final class SidecarManager {
 
     init(store: TranscriptStore) {
         self.store = store
+        // Writing to a sidecar that has died closes its read end → SIGPIPE, which
+        // would kill the app. Ignore it; the write throws EPIPE instead, handled
+        // below. (Process-global, set once.)
+        signal(SIGPIPE, SIG_IGN)
     }
 
     func start() {
@@ -139,7 +146,10 @@ final class SidecarManager {
         stopping = true
         lastSessionId = nil
         lastSessionContext = ""
-        try? stdinHandle?.close() // sidecar exits on stdin close
+        // Close on writeQueue so it serialises with in-flight async writes (a
+        // close racing a write mid-syscall is an fd-reuse hazard). sidecar exits
+        // on stdin close.
+        if let handle = stdinHandle { writeQueue.async { try? handle.close() } }
         stdinHandle = nil
         if let process, process.isRunning { process.terminate() } // backstop: no orphan
         process = nil
@@ -231,7 +241,9 @@ final class SidecarManager {
         send(["type": "config", "lanes": count])
     }
 
-    /// Returns whether the message was written to the sidecar's stdin.
+    /// Returns whether the message was accepted (sidecar up and JSON encodable).
+    /// The write itself happens asynchronously on `writeQueue`; a write failure
+    /// surfaces on the status line rather than in the return value.
     @discardableResult
     private func send(_ message: [String: Any]) -> Bool {
         guard let stdinHandle else {
@@ -240,13 +252,14 @@ final class SidecarManager {
         }
         guard var data = try? JSONSerialization.data(withJSONObject: message) else { return false }
         data.append(0x0A)
-        do {
-            try stdinHandle.write(contentsOf: data)
-            return true
-        } catch {
-            setStatus("sidecar write failed: \(error.localizedDescription)")
-            return false
+        writeQueue.async { [weak self] in
+            do {
+                try stdinHandle.write(contentsOf: data)
+            } catch {
+                self?.setStatus("sidecar write failed: \(error.localizedDescription)")
+            }
         }
+        return true
     }
 
     /// store is @MainActor; send() may be called off the main thread.

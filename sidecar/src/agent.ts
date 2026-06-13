@@ -138,6 +138,9 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
 export interface TaskResult {
   text: string;
   costUsd: number;
+  /// Set when the turn failed/timed out/ended without a clean answer, so the
+  /// caller can surface the reason instead of a generic "no answer" message.
+  error?: string;
 }
 
 interface PendingTask {
@@ -279,7 +282,10 @@ export class AgentSession implements Agent {
         if (!p.settled) {
           p.settled = true;
           log(`${this.opts.name}: task timed out`);
-          res({ text: p.buffer, costUsd: 0 });
+          // Stop the abandoned turn: without this it runs on (up to maxTurns),
+          // burning cost off the books and queueing behind the next task.
+          void this.interrupt();
+          res({ text: p.buffer, costUsd: 0, error: "timed out" });
         }
       }, timeoutMs)
     );
@@ -395,6 +401,7 @@ export class AgentSession implements Agent {
               p.resolve({
                 text: msg.subtype === "success" ? msg.result : p.buffer,
                 costUsd: delta,
+                error: msg.subtype === "success" ? undefined : msg.subtype,
               });
             }
           }
@@ -407,7 +414,7 @@ export class AgentSession implements Agent {
         for (const p of this.pending.splice(0)) {
           if (!p.settled) {
             p.settled = true;
-            p.resolve({ text: p.buffer, costUsd: 0 });
+            p.resolve({ text: p.buffer, costUsd: 0, error: "agent session ended" });
           }
         }
       }
