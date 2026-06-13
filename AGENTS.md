@@ -42,6 +42,7 @@ after touching whisper/audio code.
 ## Conventions & constraints
 
 - Work in main, don't branch unless told to
+- Always keep docs up to date
 - British spelling in UI strings, prompts, and docs.
 - The app must stay generic: no personal paths (vault, etc.) in code — the
   user's own Claude config (`~/.claude/CLAUDE.md`) carries personal context,
