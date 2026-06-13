@@ -45,6 +45,19 @@ ADVISOR_WHISPER_MODEL=/path/to/ggml-large-v3-turbo.bin .build/debug/Advisor
 
 Benchmarks (M4 Max, 11 s clip, warm): `small` 130 ms, `large-v3-turbo` 395 ms.
 
+## Packaging
+
+```sh
+sh package.sh        # → dist/Advisor.app (self-contained, ad-hoc signed)
+```
+
+The app icon source is `Resources/AppIcon.iconset/` (master: `AppIcon-1024.png`);
+`package.sh` compiles it to `AppIcon.icns` via `iconutil` and `Info.plist`
+references it through `CFBundleIconFile`/`CFBundleIconName`. To re-skin, tweak the
+knobs (palette, waveform, squircle) at the top of `Resources/make-icon.py`, run
+`python3 Resources/make-icon.py` to regenerate the iconset, then repackage —
+no app code change needed.
+
 ## Layout
 
 - `Sources/CWhisper/` — C shim exposing `whisper.h` (headers are symlinks into `vendor/`)

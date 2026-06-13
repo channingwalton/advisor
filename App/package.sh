@@ -28,6 +28,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resourc
 cp .build/release/Advisor "$APP/Contents/MacOS/Advisor"
 cp Resources/Info.plist   "$APP/Contents/Info.plist"
 
+echo "==> compile app icon"
+# AppIcon.iconset (the PNG source) -> AppIcon.icns in the bundle. Info.plist
+# points at it via CFBundleIconFile/CFBundleIconName = AppIcon.
+iconutil -c icns Resources/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
+
 echo "==> bundle whisper dylibs"
 # Flatten every dylib (and its version symlinks) into one Frameworks dir.
 for dir in "$W/src" "$W/ggml/src" "$W/ggml/src/ggml-blas" "$W/ggml/src/ggml-metal"; do
