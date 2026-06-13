@@ -17,11 +17,29 @@ final class SidecarManager {
     private let store: TranscriptStore
     private let sidecarDir = AppResources.sidecarDir
 
+    // Crash recovery: a crashed sidecar leaves listening alive but mute (no
+    // cards, no query). Restart with backoff and replay the session context the
+    // running conversation depends on. (In-flight utterances at crash time are
+    // not replayed — the classifier session is gone; new utterances flow into a
+    // fresh session via the replayed session_start.)
+    private var stopping = false
+    private var restartAttempts = 0
+    private let maxRestarts = 5
+    private var lastSessionId: String?
+    private var lastLanes: Int?
+    private var lastAuto: Bool?
+
     init(store: TranscriptStore) {
         self.store = store
     }
 
     func start() {
+        restartAttempts = 0
+        stopping = false
+        spawn()
+    }
+
+    private func spawn() {
         let p = Process()
         if let node = AppResources.bundledNode {
             // Packaged app: run the bundled Node directly; no system Node needed.
@@ -55,9 +73,7 @@ final class SidecarManager {
             if !data.isEmpty { FileHandle.standardError.write(data) }
         }
         p.terminationHandler = { [weak self] proc in
-            Task { @MainActor in
-                self?.store.status = "sidecar exited (\(proc.terminationStatus))"
-            }
+            Task { @MainActor in self?.handleTermination(proc.terminationStatus) }
         }
         do {
             try p.run()
@@ -68,7 +84,39 @@ final class SidecarManager {
         }
     }
 
+    @MainActor
+    private func handleTermination(_ code: Int32) {
+        stdinHandle = nil
+        process = nil
+        if stopping { stopping = false; return } // deliberate stop()
+        guard restartAttempts < maxRestarts else {
+            store.status =
+                "sidecar crashed (\(code)) — restart attempts exhausted; stop and start listening again"
+            return
+        }
+        restartAttempts += 1
+        let attempt = restartAttempts
+        let delay = min(8.0, pow(2.0, Double(attempt - 1))) // 1, 2, 4, 8, 8 s
+        store.status = "sidecar crashed (\(code)); restarting (\(attempt)/\(maxRestarts))…"
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.restart()
+        }
+    }
+
+    @MainActor
+    private func restart() {
+        guard !stopping else { return } // user stopped during the backoff window
+        spawn()
+        guard process != nil else { return } // spawn failed; status already set
+        // Replay the session context the running conversation depends on.
+        if let lastLanes { sendLanes(lastLanes) }
+        if let lastAuto { sendAuto(lastAuto) }
+        if let lastSessionId { sendSessionStart(lastSessionId) }
+    }
+
     func stop() {
+        stopping = true
+        lastSessionId = nil
         try? stdinHandle?.close() // sidecar exits on stdin close
         stdinHandle = nil
         if let process, process.isRunning { process.terminate() } // backstop: no orphan
@@ -78,10 +126,12 @@ final class SidecarManager {
     // MARK: outbound
 
     func sendSessionStart(_ id: String) {
+        lastSessionId = id
         send(["type": "session_start", "sessionId": id, "ts": Date().timeIntervalSince1970])
     }
 
     func sendSessionEnd() {
+        lastSessionId = nil // nothing to replay after the session ends
         send(["type": "session_end"])
     }
 
@@ -113,6 +163,7 @@ final class SidecarManager {
     }
 
     func sendAuto(_ enabled: Bool) {
+        lastAuto = enabled
         send(["type": "config", "auto": enabled])
     }
 
@@ -121,15 +172,27 @@ final class SidecarManager {
     }
 
     func sendLanes(_ count: Int) {
+        lastLanes = count
         send(["type": "config", "lanes": count])
     }
 
     private func send(_ message: [String: Any]) {
-        guard let stdinHandle,
-            var data = try? JSONSerialization.data(withJSONObject: message)
-        else { return }
+        guard let stdinHandle else {
+            setStatus("sidecar not running — message dropped")
+            return
+        }
+        guard var data = try? JSONSerialization.data(withJSONObject: message) else { return }
         data.append(0x0A)
-        try? stdinHandle.write(contentsOf: data)
+        do {
+            try stdinHandle.write(contentsOf: data)
+        } catch {
+            setStatus("sidecar write failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// store is @MainActor; send() may be called off the main thread.
+    private func setStatus(_ s: String) {
+        Task { @MainActor in self.store.status = s }
     }
 
     // MARK: inbound

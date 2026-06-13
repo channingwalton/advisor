@@ -215,6 +215,11 @@ struct TranscriptView: View {
             if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
             spaceMonitor = nil
         }
+        .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
+            // Preference toggles for triggers must reflect in the right-click
+            // action menu immediately, not only after a relaunch.
+            triggers = AdvisorConfig.load().triggers
+        }
         .onChange(of: store.utterances) { _, _ in writer?.noteChanged() }
         .onChange(of: store.cards) { _, _ in writer?.noteChanged() }
         .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }

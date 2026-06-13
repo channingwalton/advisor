@@ -8,7 +8,9 @@ cd "$(dirname "$0")/.."
     i=$((i+1))
     src=$(printf '%s' "$line" | cut -d"|" -f1)
     txt=$(printf '%s' "$line" | cut -d"|" -f2-)
-    printf '{"type":"utterance","id":"u%s","source":"%s","text":"%s","ts":%s}\n' "$i" "$src" "$txt" "$i"
+    # jq -n encodes quotes/backslashes in the transcript text safely.
+    jq -cn --arg id "u$i" --arg src "$src" --arg txt "$txt" --argjson ts "$i" \
+      '{type:"utterance",id:$id,source:$src,text:$txt,ts:$ts}'
     sleep 0.4
   done < test/fragments.txt
   sleep 30

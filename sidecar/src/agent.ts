@@ -9,8 +9,8 @@ type PermissionResult =
 
 const HOME = homedir();
 
-/// Paths the agents may never read, even inside $HOME.
-const DENIED = [
+/// Paths (relative to $HOME) the agents may never read, even inside $HOME.
+const DENY_NAMES = [
   ".ssh",
   ".aws",
   ".gnupg",
@@ -21,10 +21,44 @@ const DENIED = [
   ".git-credentials",
   ".docker",
   ".kube",
+  ".codex", // Codex provider creds/config (auth.json, config.toml)
+  ".codex-global-state.json", // Codex global state (tokens)
   ".config/gh",
   "Library/Keychains",
   "Library/Cookies",
-].map((p) => path.join(HOME, p));
+];
+
+export function deniedPaths(home: string): string[] {
+  return DENY_NAMES.map((p) => path.join(home, p));
+}
+
+/// Resolve a tool path argument to an absolute root. undefined/null/"" means the
+/// tool defaults to cwd; a non-string is invalid (null).
+function resolveRoot(cwd: string, p: unknown): string | null {
+  if (p === undefined || p === null || p === "") return cwd;
+  if (typeof p !== "string") return null;
+  return path.resolve(cwd, p);
+}
+
+/// Read policy: any non-sensitive file at or under $HOME; nothing outside.
+export function readPathAllowed(home: string, cwd: string, p: unknown): boolean {
+  const r = resolveRoot(cwd, p);
+  if (r === null) return false;
+  if (r !== home && !r.startsWith(home + path.sep)) return false;
+  return !deniedPaths(home).some((d) => r === d || r.startsWith(d + path.sep));
+}
+
+/// Search (Grep/Glob) policy: stricter than Read because these recurse — a
+/// recursive pattern from an allowed root would otherwise reach secrets in a
+/// denied descendant (e.g. Glob {path:$HOME, pattern:".ssh/**"} or
+/// Grep {path:$HOME, pattern:"PRIVATE KEY"}). So validating the root path is not
+/// enough: the root must also not sit at or above any denied path. This makes an
+/// unscoped $HOME-rooted search illegal; agents must target a specific subtree.
+export function searchRootAllowed(home: string, cwd: string, p: unknown): boolean {
+  if (!readPathAllowed(home, cwd, p)) return false;
+  const r = resolveRoot(cwd, p)!;
+  return !deniedPaths(home).some((d) => d === r || d.startsWith(r + path.sep));
+}
 
 /** Unbounded async queue usable as the SDK's streaming prompt input. */
 export class AsyncQueue<T> implements AsyncIterable<T> {
@@ -187,23 +221,18 @@ export class AgentSession implements Agent {
       case "WebFetch":
         return allow;
       case "Read":
-        return this.pathAllowed(input.file_path) ? allow : this.denyPath(toolName, input.file_path);
+        return readPathAllowed(HOME, this.opts.cwd ?? HOME, input.file_path)
+          ? allow
+          : this.denyPath(toolName, input.file_path);
       case "Grep":
       case "Glob":
-        return this.pathAllowed(input.path) ? allow : this.denyPath(toolName, input.path);
+        return searchRootAllowed(HOME, this.opts.cwd ?? HOME, input.path)
+          ? allow
+          : this.denyPath(toolName, input.path);
       default:
         return { behavior: "deny", message: `${toolName} is not permitted in Advisor` };
     }
   };
-
-  /// Reads allowed anywhere under $HOME except sensitive paths; nothing outside.
-  private pathAllowed(p: unknown): boolean {
-    if (p === undefined || p === null || p === "") return true; // tool defaults to cwd ($HOME)
-    if (typeof p !== "string") return false;
-    const resolved = path.resolve(this.opts.cwd ?? HOME, p);
-    if (resolved !== HOME && !resolved.startsWith(HOME + path.sep)) return false;
-    return !DENIED.some((d) => resolved === d || resolved.startsWith(d + path.sep));
-  }
 
   private denyPath(tool: string, p: unknown): PermissionResult {
     log(`${this.opts.name}: denied ${tool} on ${String(p)}`);

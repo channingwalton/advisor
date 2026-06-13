@@ -1,5 +1,11 @@
 import SwiftUI
 
+extension Notification.Name {
+    /// Posted when Preferences saves config.json, so live views (e.g. the
+    /// right-click action menu) can reload without an app relaunch.
+    static let advisorConfigChanged = Notification.Name("advisorConfigChanged")
+}
+
 /// Mirrors sidecar/src/config.ts — written to Application Support/Advisor/config.json.
 /// The sidecar re-reads it at each session start.
 struct AdvisorConfig: Codable, Equatable {
@@ -240,6 +246,9 @@ struct PreferencesView: View {
         .formStyle(.grouped)
         .frame(width: 480)
         .padding()
-        .onChange(of: config) { _, new in new.save() }
+        .onChange(of: config) { _, new in
+            new.save()
+            NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+        }
     }
 }

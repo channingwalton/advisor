@@ -24,7 +24,7 @@ final class SessionWriter {
         started = Date()
         ended = nil
         let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd-HHmm"
+        fmt.dateFormat = "yyyy-MM-dd-HHmmss"
         fileURL = sessionsDirectory.appendingPathComponent("\(fmt.string(from: started!)).md")
         write()
     }
