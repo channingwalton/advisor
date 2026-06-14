@@ -1,7 +1,19 @@
 import { homedir } from "node:os";
-import { Codex, type Thread, type ThreadOptions } from "@openai/codex-sdk";
+import { Codex, type CodexOptions, type Thread, type ThreadOptions } from "@openai/codex-sdk";
 import type { Agent, AgentSessionOptions, TaskResult } from "./agent.js";
 import { log } from "./protocol.js";
+
+/// Codex client auth. With an explicit `apiKey` the SDK talks to the OpenAI API
+/// directly; without one it falls back to the user's Codex CLI login
+/// (`~/.codex/auth.json`). The app injects `OPENAI_API_KEY` into the sidecar's
+/// environment only when "API key" auth is selected, so its mere presence is the
+/// signal to use it — passing it explicitly beats a stale ChatGPT login that
+/// would otherwise win. `env` is left unset so the Codex CLI still inherits
+/// `process.env` (MCP servers, PATH, …).
+export function codexConstructorOptions(env: NodeJS.ProcessEnv): CodexOptions {
+  const apiKey = env.OPENAI_API_KEY;
+  return apiKey ? { apiKey } : {};
+}
 
 /// Map an Advisor agent spec onto Codex thread options.
 ///
@@ -52,7 +64,7 @@ export class CodexAgentSession implements Agent {
   }
 
   private ensure(): Thread {
-    if (!this.codex) this.codex = new Codex();
+    if (!this.codex) this.codex = new Codex(codexConstructorOptions(process.env));
     if (!this.thread) this.thread = this.codex.startThread(codexThreadOptions(this.opts));
     return this.thread;
   }

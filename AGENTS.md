@@ -55,8 +55,11 @@ There is no CI. Always build both sides before committing.
   (mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts` —
   change both together; `sttLocale` is App-side only, deliberately absent from
   the sidecar config).
-- Auth is the user's Claude Code login (subscription); never introduce an
-  API-key requirement.
+- Auth defaults to the user's Claude Code / Codex CLI login (subscription);
+  never make an API key *required*. An opt-in API-key fallback exists
+  (Preferences "Authentication" toggle): keys live in the macOS Keychain
+  (`Keychain.swift`), injected as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` at
+  sidecar spawn (`SidecarManager.apiKeyEnv`), never in `config.json`.
 - Sessions/transcripts are user data in `~/Library/Application Support/Advisor/`
   — read freely when debugging, never commit their contents.
 - Known limit (don't fight it): overlapping simultaneous speakers on a mono

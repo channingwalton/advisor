@@ -196,6 +196,29 @@ Whisper.cpp dropped entirely; Apple SpeechAnalyzer is now the only STT engine. I
 
 The vocabulary/dictionary feature went with it: its sole purpose was biasing whisper's `initial_prompt`, and Apple's path has no equivalent hook — so `VocabularyStore`, the Dictionary preferences pane, and the right-click "Add to dictionary" submenu are gone. Supersedes the "STT engine switch" and "STT tuning findings" sections above. The historical reasoning there is kept as the record of how the engine choice evolved.
 
+## Optional API-key auth (2026-06-14)
+
+Subscription login (Claude Code / Codex CLI) stays the default, but a machine
+with no CLI login can now authenticate with a provider API key — an **opt-in
+fallback**, not a requirement (which the project constraints still forbid). A
+Preferences **Authentication** toggle picks `subscription` vs `apiKey` for the
+active provider; the key is held in the **macOS Keychain** (`Keychain.swift`),
+never in `config.json`. In API-key mode the app reads the active provider's key
+at sidecar spawn and injects it as an environment variable
+(`SidecarManager.apiKeyEnv`): `ANTHROPIC_API_KEY` for Claude, `OPENAI_API_KEY`
+for Codex.
+
+The injection is the whole mechanism — the sidecar never sees the secret in
+config. Claude needs **no sidecar change**: the Agent SDK's `query()` spawns the
+`claude` CLI which inherits `process.env`, so the env key flows through (when set
+it takes precedence over a stored OAuth login). Codex needs an explicit pass —
+`codexConstructorOptions(process.env)` returns `{ apiKey }` only when
+`OPENAI_API_KEY` is present, since a leftover ChatGPT login would otherwise win;
+`env` is left unset so the Codex CLI still inherits the rest of `process.env`.
+`authMode` is App-side only (like `sttLocale`) — deliberately absent from
+`sidecar/src/config.ts`, because the sidecar acts purely on the injected env.
+Supersedes the "no API key" lines in the packaging and Codex sections above.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

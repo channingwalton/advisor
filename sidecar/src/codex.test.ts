@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { codexThreadOptions } from "./codex.js";
+import { codexConstructorOptions, codexThreadOptions } from "./codex.js";
 
 const base = { name: "x", systemPrompt: "sp", allowedTools: [] as string[] };
 
@@ -17,6 +17,13 @@ test("codexThreadOptions enables web only when a Web tool is allowed", () => {
   const web = codexThreadOptions({ ...base, allowedTools: ["WebSearch", "Read"] });
   assert.equal(web.webSearchEnabled, true);
   assert.equal(web.networkAccessEnabled, true);
+});
+
+test("codexConstructorOptions passes apiKey only when OPENAI_API_KEY is set", () => {
+  assert.deepEqual(codexConstructorOptions({ OPENAI_API_KEY: "sk-x" }), { apiKey: "sk-x" });
+  // Absent or empty → no apiKey, so the SDK falls back to the Codex CLI login.
+  assert.deepEqual(codexConstructorOptions({}), {});
+  assert.deepEqual(codexConstructorOptions({ OPENAI_API_KEY: "" }), {});
 });
 
 test("codexThreadOptions passes the model through and defaults cwd to home", () => {

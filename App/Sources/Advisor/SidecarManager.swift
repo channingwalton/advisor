@@ -90,25 +90,45 @@ final class SidecarManager {
         spawn()
     }
 
+    /// Environment additions carrying the active provider's API key, read fresh
+    /// from config + Keychain at each spawn. Empty for subscription auth (the
+    /// default) or when no key is stored, leaving the SDKs on their CLI login.
+    private static func apiKeyEnv() -> [String: String] {
+        let config = AdvisorConfig.load()
+        guard config.authMode == "apiKey" else { return [:] }
+        switch config.provider {
+        case "codex":
+            if let key = Keychain.read(.openai) { return ["OPENAI_API_KEY": key] }
+        default:
+            if let key = Keychain.read(.anthropic) { return ["ANTHROPIC_API_KEY": key] }
+        }
+        return [:]
+    }
+
     private func spawn() {
         // Drop any partial NDJSON frame left by a crashed sidecar: otherwise the
         // stale bytes would prefix (and corrupt) the first frame from the new one.
         buffer = Data()
         let p = Process()
+        // Base env + any provider API key (empty unless "API key" auth is selected
+        // and a key is stored). The key reaches the SDKs purely through the
+        // environment — the sidecar code never sees config secrets.
+        var env = ProcessInfo.processInfo.environment
+        for (key, value) in Self.apiKeyEnv() { env[key] = value }
         if let node = AppResources.bundledNode {
             // Packaged app: run the bundled Node directly; no system Node needed.
             // Child processes the Agent SDK spawns reuse this via process.execPath.
             p.executableURL = URL(fileURLWithPath: node)
             p.arguments = ["dist/main.js"]
-            var env = ProcessInfo.processInfo.environment
             let nodeDir = URL(fileURLWithPath: node).deletingLastPathComponent().path
             env["PATH"] = nodeDir + ":" + (env["PATH"] ?? "/usr/bin:/bin")
-            p.environment = env
         } else {
-            // Dev checkout: resolve `node` from the login shell PATH.
+            // Dev checkout: resolve `node` from the login shell PATH (zsh -l
+            // re-sources the profile, so an explicit env here doesn't lose PATH).
             p.executableURL = URL(fileURLWithPath: "/bin/zsh")
             p.arguments = ["-lc", "exec node dist/main.js"]
         }
+        p.environment = env
         p.currentDirectoryURL = URL(fileURLWithPath: sidecarDir)
         let inPipe = Pipe()
         let outPipe = Pipe()

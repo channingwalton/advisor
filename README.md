@@ -30,7 +30,8 @@ sys ──┘                                                ├─ Swift app (U
   transcript, decides what is worth researching (questions, topics, claims —
   including questions about the user's own notes), researches in parallel
   persistent sessions, and streams answer cards back. Uses your local CLI
-  login (Claude Code subscription, or Codex CLI), never an API key.
+  login (Claude Code subscription, or Codex CLI) by default; an API key is an
+  optional fallback for machines with no CLI login (see below).
 
 ## Setup
 
@@ -120,6 +121,14 @@ coarser than Claude's per-path policy (a read-only shell command can read
 sensitive dotfiles; Codex MCP servers come from `~/.codex/config.toml` and
 aren't gated by the connector-actions toggle) — see DESIGN.md. To use Codex,
 have the `codex` CLI logged in.
+
+**Authentication** defaults to the provider's subscription login (Claude Code /
+Codex CLI). On a machine with no CLI login, switch **Authentication** to *API
+key* in Preferences and paste an Anthropic or OpenAI key (whichever matches the
+selected provider). The key is stored in your macOS Keychain — never in
+`config.json` — and injected into the sidecar's environment at launch
+(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). Note that API-key usage is billed to
+that key, not your subscription. Changing it applies on the next Listen.
 
 Advisor itself knows nothing about your notes: the research agents load your
 own Claude configuration (`~/.claude/CLAUDE.md`), which is where vault

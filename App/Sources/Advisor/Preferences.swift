@@ -24,12 +24,17 @@ struct AdvisorConfig: Codable, Equatable {
     var model = ""
     /// App-side only: STT locale identifier (e.g. en_GB).
     var sttLocale = "en_GB"
+    /// App-side only: "subscription" (the provider's CLI login, the default) or
+    /// "apiKey" (talk to Anthropic/OpenAI directly with a key from the Keychain).
+    /// The sidecar acts purely on the injected env var, so this is not mirrored in
+    /// sidecar/src/config.ts — like sttLocale.
+    var authMode = "subscription"
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
-        case provider, model, sttLocale
+        case provider, model, sttLocale, authMode
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -44,6 +49,7 @@ struct AdvisorConfig: Codable, Equatable {
         sttLocale = try c.decodeIfPresent(String.self, forKey: .sttLocale) ?? "en_GB"
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        authMode = try c.decodeIfPresent(String.self, forKey: .authMode) ?? "subscription"
     }
 
     static var fileURL: URL {
@@ -115,6 +121,64 @@ struct AgentBackendView: View {
     }
 }
 
+/// Authentication picker for the active provider: subscription login (default)
+/// or a direct API key. The key is held in the Keychain, not config.json; this
+/// view loads/saves it and reloads when the provider changes (each provider has
+/// its own Keychain item).
+struct AuthModeView: View {
+    let provider: String
+    @Binding var authMode: String
+    @State private var apiKey = ""
+    /// True while entering/replacing a key. A stored key is shown redacted; the
+    /// editable field appears only when there's no key yet or the user taps Change.
+    @State private var editing = false
+
+    private var keychainKey: Keychain.Key { provider == "codex" ? .openai : .anthropic }
+    private var providerLabel: String { provider == "codex" ? "OpenAI" : "Anthropic" }
+    private var loginLabel: String { provider == "codex" ? "Codex CLI login" : "Claude Code login" }
+
+    /// First 5 + "…" + last 3 — enough to recognise the key without revealing it.
+    /// Short strings (where that would expose most of the key) are fully masked.
+    private var redacted: String {
+        apiKey.count > 8 ? "\(apiKey.prefix(5))…\(apiKey.suffix(3))"
+            : String(repeating: "•", count: apiKey.count)
+    }
+
+    private func reload() {
+        apiKey = Keychain.read(keychainKey) ?? ""
+        editing = apiKey.isEmpty
+    }
+
+    var body: some View {
+        Group {
+            Picker("Authentication", selection: $authMode) {
+                Text("Subscription (\(loginLabel))").tag("subscription")
+                Text("API key").tag("apiKey")
+            }
+            if authMode == "apiKey" {
+                if editing {
+                    TextField("\(providerLabel) API key", text: $apiKey)
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit { editing = apiKey.isEmpty }
+                } else {
+                    LabeledContent("\(providerLabel) API key") {
+                        HStack {
+                            Text(redacted).foregroundStyle(.secondary)
+                            Button("Change") { apiKey = ""; editing = true }
+                        }
+                    }
+                }
+                Text("Stored in your macOS Keychain, never in config.json. Talks to \(providerLabel) directly. Applies on the next session.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { reload() }
+        .onChange(of: provider) { _, _ in reload() }
+        .onChange(of: apiKey) { _, new in Keychain.save(keychainKey, new) }
+    }
+}
+
 struct PreferencesView: View {
     @State private var config = AdvisorConfig.load()
     @AppStorage("agentLanes") private var agentLanes = 3
@@ -124,6 +188,7 @@ struct PreferencesView: View {
         Form {
             Section("Agent backend") {
                 AgentBackendView(provider: $config.provider, model: $config.model)
+                AuthModeView(provider: config.provider, authMode: $config.authMode)
                 Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
                 Toggle("Allow connector actions", isOn: $config.allowMcpActions)
                 Text("Off: connectors (Slack, Jira, …) are read/search only. On: agents may also send, create, and update — use with care. Claude only.")
