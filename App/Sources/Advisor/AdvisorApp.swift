@@ -1,5 +1,4 @@
 import AppKit
-import AVFoundation
 import MarkdownUI
 import SwiftUI
 
@@ -11,8 +10,6 @@ let repoRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()   // Sources/
     .deletingLastPathComponent()   // App/
     .deletingLastPathComponent()   // repo root
-
-let defaultModelPath = AppResources.defaultModelPath
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var shared: AppDelegate?
@@ -43,61 +40,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-enum Main {
-    static func main() {
-        if let i = CommandLine.arguments.firstIndex(of: "--smoke"),
-            CommandLine.arguments.count > i + 1 {
-            smokeTest(wavPath: CommandLine.arguments[i + 1])
-        } else {
-            AdvisorApp.main()
-        }
-    }
-
-    /// Headless check: model loads and transcribes a 16 kHz mono wav.
-    private static func smokeTest(wavPath: String) {
-        // Run in a nested scope so WhisperTranscriber deinits (whisper_free)
-        // before exit() — ggml's Metal teardown asserts otherwise.
-        let code = runSmoke(wavPath: wavPath)
-        exit(code)
-    }
-
-    private static func runSmoke(wavPath: String) -> Int32 {
-        do {
-            let modelPath =
-                ProcessInfo.processInfo.environment["ADVISOR_WHISPER_MODEL"] ?? defaultModelPath
-            let url = URL(fileURLWithPath: wavPath)
-            let file = try AVAudioFile(forReading: url)
-            guard file.processingFormat.sampleRate == 16_000 else {
-                print("SMOKE FAIL: expected 16 kHz wav, got \(file.processingFormat.sampleRate)")
-                return 1
-            }
-            guard
-                let buf = AVAudioPCMBuffer(
-                    pcmFormat: file.processingFormat,
-                    frameCapacity: AVAudioFrameCount(file.length))
-            else {
-                print("SMOKE FAIL: buffer alloc")
-                return 1
-            }
-            try file.read(into: buf)
-            guard let ch = buf.floatChannelData else {
-                print("SMOKE FAIL: no float data")
-                return 1
-            }
-            let samples = Array(UnsafeBufferPointer(start: ch[0], count: Int(buf.frameLength)))
-            let transcriber = try WhisperTranscriber(modelPath: modelPath)
-            let t0 = Date()
-            let text = transcriber.transcribe(samples)
-            let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            print("SMOKE OK (\(ms) ms): \(text)")
-            return text.isEmpty ? 1 : 0
-        } catch {
-            print("SMOKE FAIL: \(error)")
-            return 1
-        }
-    }
-}
-
 struct AdvisorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var store = TranscriptStore()
@@ -121,7 +63,6 @@ struct TranscriptView: View {
     @State private var selectedDevice: InputDevice?
     @AppStorage("captureSystem") private var captureSystem = true
     @State private var sidecar: SidecarManager?
-    @State private var builtEngine = ""
     @State private var queryText = ""
     /// The session prompt: optional free-text context. Filled before Listen
     /// (sent on session_start) or edited live during the session (pushed via
@@ -132,9 +73,7 @@ struct TranscriptView: View {
     @State private var pinned = false
     @State private var writer: SessionWriter?
     @State private var spaceMonitor: Any?
-    @ObservedObject private var vocabulary = VocabularyStore.shared
     @AppStorage("agentLanes") private var agentLanes = 3
-    @AppStorage("sttEngine") private var sttEngine = STTEngine.apple.rawValue
     @AppStorage("micDeviceName") private var micDeviceName = ""
 
     var body: some View {
@@ -254,9 +193,6 @@ struct TranscriptView: View {
         .onChange(of: store.utterances) { _, _ in writer?.noteChanged() }
         .onChange(of: store.cards) { _, _ in writer?.noteChanged() }
         .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }
-        .onChange(of: sttEngine) { _, _ in
-            if !store.listening { rebuildRecorder() }
-        }
     }
 
     private enum FeedItem: Identifiable {
@@ -312,9 +248,7 @@ struct TranscriptView: View {
                                 onAction: { kind, selection in
                                     sidecar?.sendAction(
                                         kind, text: selection, triggerId: u.id.uuidString)
-                                },
-                                dictionaryCandidates: { dictionaryCandidates(u.text) },
-                                onAddWord: { vocabulary.add($0) }
+                                }
                             )
                             .id(item.id)
                         case .card(let card):
@@ -423,14 +357,6 @@ struct TranscriptView: View {
         return actions
     }
 
-    /// Distinct words worth adding to the STT dictionary, in sentence order.
-    private func dictionaryCandidates(_ text: String) -> [String] {
-        var seen = Set<String>()
-        return text.split(separator: " ")
-            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-            .filter { $0.count > 2 && !vocabulary.contains($0) && seen.insert($0.lowercased()).inserted }
-    }
-
     private func kindColour(_ kind: String) -> Color {
         switch kind {
         case "answer": .blue
@@ -466,22 +392,11 @@ struct TranscriptView: View {
 
     private func rebuildRecorder() {
         guard let manager = sidecar else { return }
-        let engine = STTEngine(rawValue: sttEngine) ?? .apple
-        let modelPath =
-            ProcessInfo.processInfo.environment["ADVISOR_WHISPER_MODEL"] ?? defaultModelPath
         do {
             recorder = try Recorder(
-                store: store, modelPath: modelPath, engine: engine,
-                locale: AdvisorConfig.load().sttLocale)
+                store: store, locale: AdvisorConfig.load().sttLocale)
             recorder?.onUtterance = { manager.sendUtterance($0) }
-            vocabulary.onChange = { [weak recorder = recorder] vocab in
-                recorder?.setVocabulary(vocab)
-            }
-            recorder?.setVocabulary(vocabulary.joined) // include system spelling terms
-            store.status =
-                engine == .apple
-                ? "ready — Apple speech" : "ready — \((modelPath as NSString).lastPathComponent)"
-            builtEngine = engine.rawValue
+            store.status = "ready — Apple speech"
             fatalError = nil
         } catch {
             fatalError = "\(error)"
@@ -526,8 +441,6 @@ struct TranscriptView: View {
             sidecar?.sendSessionEnd()
             writer?.end()
             sessionContext = "" // blank slate for the next session
-            // Engine changed in preferences mid-session: apply now.
-            if builtEngine != sttEngine { rebuildRecorder() }
         } else {
             store.utterances = []
             store.cards = []
@@ -579,9 +492,6 @@ struct SelectableTranscriptText: NSViewRepresentable {
     let actions: [TranscriptAction]
     /// (card kind, selected text) — fired when an AI action is chosen.
     let onAction: (String, String) -> Void
-    /// Words from this line worth adding to the STT dictionary (vocabulary-filtered).
-    let dictionaryCandidates: () -> [String]
-    let onAddWord: (String) -> Void
 
     func makeNSView(context: Context) -> ActionTextView {
         // Convenience init builds a TextKit stack the view *owns* (storage
@@ -609,8 +519,6 @@ struct SelectableTranscriptText: NSViewRepresentable {
         tv.toolTip = toolTip
         tv.menuActions = actions
         tv.onAction = onAction
-        tv.dictionaryCandidates = dictionaryCandidates
-        tv.onAddWord = onAddWord
     }
 
     func sizeThatFits(
@@ -626,13 +534,11 @@ struct SelectableTranscriptText: NSViewRepresentable {
 }
 
 /// NSTextView that swaps the default editing context menu for transcript AI
-/// actions, the dictionary submenu, and copy — all operating on the current
-/// selection (or the whole line when nothing is highlighted).
+/// actions and copy — all operating on the current selection (or the whole
+/// line when nothing is highlighted).
 final class ActionTextView: NSTextView {
     var menuActions: [TranscriptAction] = []
     var onAction: ((String, String) -> Void)?
-    var dictionaryCandidates: (() -> [String])?
-    var onAddWord: ((String) -> Void)?
 
     /// Highlighted substring, or the whole line when the selection is empty.
     private var effectiveSelection: String {
@@ -655,20 +561,6 @@ final class ActionTextView: NSTextView {
         }
         if !menuActions.isEmpty { menu.addItem(.separator()) }
 
-        let words = dictionaryCandidates?() ?? []
-        if !words.isEmpty {
-            let parent = NSMenuItem(title: "Add to dictionary", action: nil, keyEquivalent: "")
-            let submenu = NSMenu()
-            for word in words {
-                let item = NSMenuItem(
-                    title: word, action: #selector(addWord(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = word
-                submenu.addItem(item)
-            }
-            parent.submenu = submenu
-            menu.addItem(parent)
-        }
         let copy = NSMenuItem(title: "Copy", action: #selector(copyText(_:)), keyEquivalent: "")
         copy.target = self
         menu.addItem(copy)
@@ -680,10 +572,6 @@ final class ActionTextView: NSTextView {
         let selection = effectiveSelection.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selection.isEmpty else { return }
         onAction?(kind, selection)
-    }
-
-    @objc private func addWord(_ sender: NSMenuItem) {
-        if let word = sender.representedObject as? String { onAddWord?(word) }
     }
 
     @objc private func copyText(_ sender: NSMenuItem) {

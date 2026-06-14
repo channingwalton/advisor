@@ -2,9 +2,9 @@ import AVFAudio
 import Foundation
 import Speech
 
-/// Apple's on-device SpeechAnalyzer/SpeechTranscriber (macOS 26+) as an STT
-/// engine. Streaming with built-in endpointing — no hand-rolled VAD — and far
-/// less prone than whisper to hallucinating sentences from noise.
+/// Apple's on-device SpeechAnalyzer/SpeechTranscriber (macOS 26+) as the STT
+/// engine. Streaming with built-in endpointing — no hand-rolled VAD — and
+/// resistant to hallucinating sentences from noise.
 final class AppleSpeechEngine {
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?

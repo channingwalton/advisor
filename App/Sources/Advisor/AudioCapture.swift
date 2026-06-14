@@ -102,12 +102,10 @@ final class AudioCapture {
 
 enum AdvisorError: Error, CustomStringConvertible {
     case audioSetup(String)
-    case whisper(String)
 
     var description: String {
         switch self {
         case .audioSetup(let m): "audio setup failed: \(m)"
-        case .whisper(let m): "whisper failed: \(m)"
         }
     }
 }

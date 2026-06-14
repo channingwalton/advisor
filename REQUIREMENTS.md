@@ -41,7 +41,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 
 - N1. **Latency:** best efforts; ~2–5 s after the triggering utterance is the aspiration, not a hard requirement (relaxed 2026-06-11).
 - N2. **Platform:** macOS only (Apple Silicon).
-- N3. **Privacy:** STT runs on-device (Apple SpeechAnalyzer by default, or whisper.cpp on Apple Silicon); only text leaves the machine. Listening must be explicitly user-initiated.
+- N3. **Privacy:** STT runs on-device (Apple SpeechAnalyzer); only text leaves the machine. Listening must be explicitly user-initiated.
 - N4. **Cost:** STT is local (free); LLM cost per listening-hour must be tolerable for daily personal use.
 - N5. **Single user:** no auth, multi-tenancy, or deployment concerns.
 - N6. **Reliability:** capture pipeline must not drop audio during long sessions (1 h+).
@@ -62,7 +62,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 mic ──┐
       ├─ audio capture (ScreenCaptureKit / AVAudioEngine)   ─┐
 sys ──┘        │                                             │
-        local streaming STT (whisper.cpp/MLX, Metal)         ├─ Swift app
+        local streaming STT (Apple SpeechAnalyzer)           ├─ Swift app
                │                                             │
         trigger detection (question? entity? claim?)         │
                │                                            ─┘
@@ -92,3 +92,7 @@ Two-tier latency strategy: a fast classifier decides *whether* to act (<1 s); th
 - **STT:** local Whisper on Apple Silicon (whisper.cpp or MLX). Latency budget must accommodate this — needs early prototyping (N1 risk).
 - **Storage:** transcripts only, no audio recordings.
 - **Output:** app-managed local markdown files; the Obsidian Vault is read-only.
+
+## Changed (2026-06-14)
+
+- **STT:** dropped whisper.cpp entirely; Apple SpeechAnalyzer is now the only engine. It needs no model download, no vendored build, and hallucinates far less on noise. Supersedes the 2026-06-11 Whisper decision above.

@@ -25,8 +25,7 @@ sys ──┘                                                ├─ Swift app (U
 - **App** (`App/`): Swift/SwiftUI. Captures the microphone and system audio
   (ScreenCaptureKit), transcribes on-device, dedups speaker echo, shows a
   chronological feed of sentences with research cards inlined, and writes each
-  session to markdown. STT engines: whisper.cpp (vendored) and Apple
-  SpeechAnalyzer (macOS 26+).
+  session to markdown. STT is Apple SpeechAnalyzer (macOS 26+), on-device.
 - **Sidecar** (`sidecar/`): Node 22 + TypeScript + Claude Agent SDK. Watches the
   transcript, decides what is worth researching (questions, topics, claims —
   including questions about the user's own notes), researches in parallel
@@ -36,13 +35,6 @@ sys ──┘                                                ├─ Swift app (U
 ## Setup
 
 ```sh
-# whisper.cpp (vendored, built once)
-git clone --depth 1 https://github.com/ggml-org/whisper.cpp vendor/whisper.cpp
-cmake -S vendor/whisper.cpp -B vendor/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release
-cmake --build vendor/whisper.cpp/build -j
-sh vendor/whisper.cpp/models/download-ggml-model.sh large-v3-turbo
-sh App/setup.sh            # symlinks whisper headers into the CWhisper shim
-
 # sidecar
 cd sidecar && npm install --include=dev && npm run build
 
@@ -58,14 +50,12 @@ Recording permissions (attributed to the launching terminal).
 ## Build a release
 
 `App/package.sh` assembles a self-contained, ad-hoc-signed `Advisor.app` —
-release build plus the whisper dylibs (in `Frameworks/`, rpath-fixed), the Node
-runtime, and the built sidecar. Node is **not** required on the target Mac.
+release build plus the Node runtime and the built sidecar. Node is **not**
+required on the target Mac.
 
 **On the build machine** (Apple Silicon), you need:
 
-- the dev setup above completed once — in particular whisper.cpp built at
-  `vendor/whisper.cpp/build` (the script aborts if it's missing);
-- the Xcode toolchain (`swift`, `codesign`, `install_name_tool`);
+- the Xcode toolchain (`swift`, `codesign`);
 - an arm64 `node` on `PATH` — its binary is copied into the bundle.
 
 **Build:**
@@ -75,8 +65,8 @@ cd App && sh package.sh        # → App/dist/Advisor.app
 ```
 
 The script runs a release `swift build`, builds the sidecar (`npm install` +
-`tsc`), assembles the `.app`, strips the dev build-tree rpaths, and ad-hoc
-signs it. Re-run it any time; it rebuilds `dist/Advisor.app` from scratch.
+`tsc`), assembles the `.app`, and ad-hoc signs it. Re-run it any time; it
+rebuilds `dist/Advisor.app` from scratch.
 
 **Install on another Mac** (macOS 26+, Apple Silicon):
 
@@ -91,12 +81,6 @@ signs it. Re-run it any time; it rebuilds `dist/Advisor.app` from scratch.
 4. Launch. First run prompts for Microphone and Screen & System Audio
    Recording permissions.
 
-The whisper model is **not** bundled — the shipped app defaults to Apple
-SpeechAnalyzer, which needs no model. To use whisper instead, drop a
-`ggml-*.bin` at
-`~/Library/Application Support/Advisor/models/ggml-large-v3-turbo.bin` or point
-`ADVISOR_WHISPER_MODEL` at one, then pick whisper in Preferences.
-
 ## Use
 
 Click **Listen**. Words appear live in grey as they're spoken, replaced by
@@ -108,8 +92,7 @@ actions the assistant triggers automatically, gated by the same preference
 toggles, with the resulting card anchored under that line. Once a card has
 finished, a follow-up box appears on it — ask a question about the card and the
 answer is appended in place, so a card becomes a short thread. The menu also lets
-you copy the text or add words to the STT dictionary (whisper engine only —
-Apple has no vocabulary hook). The **mic** button mutes the local microphone
+you copy the text. The **mic** button mutes the local microphone
 while the session keeps running — system audio is still captured and
 transcribed; tap again to unmute. `Float` keeps the window on top. Sessions are
 saved as markdown under
@@ -121,7 +104,6 @@ saved as markdown under
 agent count, connector action permissions, trigger sensitivity
 (conservative/balanced/eager) and per-kind toggles, the agent backend (one
 provider + model shared by the classifier, research, and manual-query lanes),
-STT engine (Apple/whisper),
 system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
 next session start. The toolbar keeps only in-session controls: Listen, pause,

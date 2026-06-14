@@ -117,7 +117,6 @@ struct AgentBackendView: View {
 
 struct PreferencesView: View {
     @State private var config = AdvisorConfig.load()
-    @AppStorage("sttEngine") private var sttEngine = STTEngine.apple.rawValue
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("captureSystem") private var captureSystem = true
 
@@ -145,17 +144,12 @@ struct PreferencesView: View {
             }
 
             Section("Transcription") {
-                Picker("Engine", selection: $sttEngine) {
-                    Text("Apple speech (recommended)").tag(STTEngine.apple.rawValue)
-                    Text("Whisper").tag(STTEngine.whisper.rawValue)
-                }
                 Toggle("Capture system audio", isOn: $captureSystem)
                 TextField("Locale", text: $config.sttLocale)
                     .frame(maxWidth: 160)
-                Text("Apple speech locale, e.g. en_GB. Engine and locale apply on next Listen.")
+                Text("Apple speech locale, e.g. en_GB. Locale applies on next Listen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                DictionaryView(vocabulary: .shared)
             }
 
             Text("Agent settings apply at the start of the next session.")

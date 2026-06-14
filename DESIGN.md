@@ -11,8 +11,8 @@ Two processes on one machine:
 ┌─────────────────────────── Swift app ────────────────────────────┐
 │                                                                  │
 │  AudioCapture ──► Transcription ──► SessionStore (markdown)      │
-│   mic: AVAudioEngine   whisper.cpp        │                      │
-│   sys: ScreenCaptureKit  (Metal, VAD)     ▼                      │
+│   mic: AVAudioEngine   Apple              │                      │
+│   sys: ScreenCaptureKit  SpeechAnalyzer   ▼                      │
 │                            │         OverlayUI (NSPanel)         │
 │                            │              ▲                      │
 │                            ▼              │ cards/results        │
@@ -35,7 +35,7 @@ The Swift app owns everything realtime and visual; the sidecar owns everything t
 
 **AudioCapture.** Two concurrent sources: mic via `AVAudioEngine` tap; system audio via `ScreenCaptureKit` (`SCStream` audio-only, macOS 13+). Each resampled to 16 kHz mono PCM into a ring buffer, tagged `me` (mic) / `them` (system). Echo risk (own voice on both channels during calls): suppress `mic` segments that overlap >80 % in time with near-identical `sys` text; revisit if insufficient.
 
-**Transcription.** whisper.cpp via C bindings, Metal. Energy/Silero VAD segments speech; each segment (cap ~6 s, 0.5 s overlap) transcribed off the audio thread, one decode queue per source. Model: `small` to start; `large-v3-turbo` if M0 spike shows headroom. Emits `Utterance{id, source, text, t0, t1}`.
+**Transcription.** Apple SpeechAnalyzer/SpeechTranscriber (macOS 26), on-device. True streaming with built-in endpointing — no hand-rolled VAD — one analyzer per source (mic/system). Emits `Utterance{id, source, text, t0, t1}`. (Originally whisper.cpp; see the dated sections below for the switch and removal.)
 
 **SidecarManager.** Spawns the Node sidecar and supervises it: on a crash it restarts with exponential backoff (1/2/4/8 s, capped 8 s, ≤5 attempts; a crash that follows a >60 s healthy run resets the budget, so only a tight loop exhausts it), then replays the session context the running conversation depends on — `session_start` plus the lane/auto config (not the utterance history; the classifier session is gone, so new utterances resume in a fresh sidecar session). A deliberate `stop()` is distinguished from a crash and cancels any pending restart. Sends to a dead sidecar surface on the status line rather than failing silently; budget exhausted → status asks the user to stop and start listening again. Transport: newline-delimited JSON over stdin/stdout. Chosen over WebSocket: no port management, lifecycle tied to parent, trivially debuggable. Logs on stderr.
 
@@ -161,11 +161,11 @@ A card carries an app-only `replying` flag (never on the wire): while a follow-u
 
 ## Packaging as a distributable .app (2026-06-13)
 
-The dev build is a bare SwiftPM executable that locates the sidecar and whisper model by `#filePath`-derived `repoRoot`, and links the whisper dylibs by absolute rpath into `vendor/whisper.cpp/build`. None of that survives leaving the checkout. `App/package.sh` now assembles a self-contained `Advisor.app`; `AppResources` resolves resources from `Bundle.main` when packaged and falls back to `repoRoot` in a dev checkout, so one binary runs either way.
+The dev build is a bare SwiftPM executable that locates the sidecar by `#filePath`-derived `repoRoot`. That doesn't survive leaving the checkout. `App/package.sh` now assembles a self-contained `Advisor.app`; `AppResources` resolves resources from `Bundle.main` when packaged and falls back to `repoRoot` in a dev checkout, so one binary runs either way.
 
-Decisions (single-user, few-machine distribution — not the App Store): **bundle the Node runtime** (the ~127 MB arm64 `node` binary, copied into `Contents/Resources`) so the target needs no Node install; the Agent SDK's own child processes reuse it via `process.execPath`. **Ad-hoc signed, not notarised** (`codesign -s -`) — first launch needs right-click ▸ Open. **Whisper model not bundled** — the shipped app defaults to Apple SpeechAnalyzer (no model), with whisper optional via Application Support or `ADVISOR_WHISPER_MODEL`; bundling 1.5 GB for the non-default engine wasn't worth it.
+Decisions (single-user, few-machine distribution — not the App Store): **bundle the Node runtime** (the ~127 MB arm64 `node` binary, copied into `Contents/Resources`) so the target needs no Node install; the Agent SDK's own child processes reuse it via `process.execPath`. **Ad-hoc signed, not notarised** (`codesign -s -`) — first launch needs right-click ▸ Open. STT is Apple SpeechAnalyzer, so there are no model files or native dylibs to ship — the bundle is just the executable, Node, and the built sidecar.
 
-The whisper dylibs (whisper + 5 ggml variants incl. Metal, whose shaders are embedded so no runtime `.metallib` is needed) are flattened into `Contents/Frameworks`; `@loader_path` resolves their inter-dependencies and `@executable_path/../Frameworks` resolves the main link. The script strips the absolute build-tree rpaths so the bundle is self-contained on any Mac. Verified: smoke test loads whisper from a copy in `/tmp` with dev rpaths gone; the bundled Node boots the bundled sidecar with no system Node on `PATH`. The sidecar still needs the user's Claude Code login on the target.
+(Originally the bundle also flattened the whisper + ggml/Metal dylibs into `Contents/Frameworks` with rpath surgery; removed with whisper — see the dated section below.) The bundled Node boots the bundled sidecar with no system Node on `PATH`. The sidecar still needs the user's Claude Code login on the target.
 
 ## Codex as an alternative provider (2026-06-13)
 
@@ -189,6 +189,12 @@ First real-use complaint: 60 s+ from a spoken question to a useful card. Instrum
 - **Cold-spawn warmed off the critical path.** The Agent SDK boots a CLI subprocess on the first `run()` of each session (~5–10 s; classifier Haiku measured cold 5.7–9.4 s). It was paid serially on the first question by both the classifier and the lead research lane. `session_start` now fires fire-and-forget warm-ups (`warmClassifier()` + a trivial run on `researchLanes[0]`) so the first real question skips both boots.
 
 Remaining floor is STT finalisation (~8–12 s, app-side, separate) plus the unavoidable local-gather time. The ≤5 s aspiration in the latency budget above remains aspirational for agentic answers.
+
+## Whisper removed (2026-06-14)
+
+Whisper.cpp dropped entirely; Apple SpeechAnalyzer is now the only STT engine. In real use Apple won on every axis that mattered (streaming endpointing, no noise hallucination, near-vanishing echo), and the whisper path carried real cost: a vendored CMake/Metal build, the `CWhisper` C shim and header symlinks (`setup.sh`), ~6 native dylibs flattened into the bundle with rpath surgery, a 1.5 GB model to source, and the whole VAD `Segmenter` + decode-queue machinery. Removing it deleted `WhisperTranscriber`, `Segmenter`, `CWhisper`, `setup.sh`, the `--smoke` headless test (whisper-only), the `STTEngine` enum and its Preferences picker, and the `ADVISOR_WHISPER_MODEL` / model-path plumbing in `AppResources`.
+
+The vocabulary/dictionary feature went with it: its sole purpose was biasing whisper's `initial_prompt`, and Apple's path has no equivalent hook — so `VocabularyStore`, the Dictionary preferences pane, and the right-click "Add to dictionary" submenu are gone. Supersedes the "STT engine switch" and "STT tuning findings" sections above. The historical reasoning there is kept as the record of how the engine choice evolved.
 
 ## Revisit as it grows
 
