@@ -133,6 +133,11 @@ struct AuthModeView: View {
     /// editable field appears only when there's no key yet or the user taps Change.
     @State private var editing = false
 
+    /// Result of the most recent key test, shown inline; failures also raise an alert.
+    private enum TestState: Equatable { case idle, testing, valid, failed(String) }
+    @State private var testState: TestState = .idle
+    @State private var alertMessage: String?
+
     private var keychainKey: Keychain.Key { provider == "codex" ? .openai : .anthropic }
     private var providerLabel: String { provider == "codex" ? "OpenAI" : "Anthropic" }
     private var loginLabel: String { provider == "codex" ? "Codex CLI login" : "Claude Code login" }
@@ -147,6 +152,43 @@ struct AuthModeView: View {
     private func reload() {
         apiKey = Keychain.read(keychainKey) ?? ""
         editing = apiKey.isEmpty
+        testState = .idle
+    }
+
+    private func test() async {
+        let key = apiKey
+        testState = .testing
+        let outcome = await AuthValidator.validate(provider: provider, key: key)
+        // The field may have changed while the request was in flight; ignore a
+        // stale result so the inline state always reflects the current key.
+        guard key == apiKey else { return }
+        switch outcome {
+        case .valid:
+            testState = .valid
+        case .invalid:
+            testState = .failed("\(providerLabel) rejected this API key.")
+            alertMessage = "\(providerLabel) rejected this API key. Check it and try again."
+        case .error(let detail):
+            testState = .failed("Couldn't verify the key.")
+            alertMessage = "Couldn't verify the \(providerLabel) API key: \(detail)"
+        }
+    }
+
+    @ViewBuilder private var testControl: some View {
+        switch testState {
+        case .idle:
+            Button("Test") { Task { await test() } }
+                .disabled(apiKey.isEmpty)
+        case .testing:
+            ProgressView().controlSize(.small)
+        case .valid:
+            Label("Valid", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .labelStyle(.titleAndIcon)
+        case .failed:
+            Button("Retry") { Task { await test() } }
+                .disabled(apiKey.isEmpty)
+        }
     }
 
     var body: some View {
@@ -157,16 +199,32 @@ struct AuthModeView: View {
             }
             if authMode == "apiKey" {
                 if editing {
-                    TextField("\(providerLabel) API key", text: $apiKey)
-                        .multilineTextAlignment(.trailing)
-                        .onSubmit { editing = apiKey.isEmpty }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(providerLabel) API key")
+                        HStack {
+                            TextField("Paste your \(providerLabel) API key", text: $apiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(minWidth: 280)
+                                .onSubmit {
+                                    editing = apiKey.isEmpty
+                                    if !apiKey.isEmpty { Task { await test() } }
+                                }
+                            testControl
+                        }
+                    }
                 } else {
                     LabeledContent("\(providerLabel) API key") {
                         HStack {
                             Text(redacted).foregroundStyle(.secondary)
-                            Button("Change") { apiKey = ""; editing = true }
+                            testControl
+                            Button("Change") { apiKey = ""; editing = true; testState = .idle }
                         }
                     }
+                }
+                if case .failed(let summary) = testState {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(Color.red)
                 }
                 Text("Stored in your macOS Keychain, never in config.json. Talks to \(providerLabel) directly. Applies on the next session.")
                     .font(.caption)
@@ -175,7 +233,20 @@ struct AuthModeView: View {
         }
         .onAppear { reload() }
         .onChange(of: provider) { _, _ in reload() }
-        .onChange(of: apiKey) { _, new in Keychain.save(keychainKey, new) }
+        .onChange(of: apiKey) { _, new in
+            Keychain.save(keychainKey, new)
+            testState = .idle
+        }
+        .alert(
+            "API key problem",
+            isPresented: Binding(
+                get: { alertMessage != nil },
+                set: { if !$0 { alertMessage = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(alertMessage ?? "")
+        }
     }
 }
 
