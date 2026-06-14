@@ -26,10 +26,11 @@ sh package.sh        # → dist/Advisor.app (self-contained, ad-hoc signed)
 
 The app icon source is `Resources/AppIcon.iconset/` (master: `AppIcon-1024.png`);
 `package.sh` compiles it to `AppIcon.icns` via `iconutil` and `Info.plist`
-references it through `CFBundleIconFile`/`CFBundleIconName`. To re-skin, tweak the
-knobs (palette, waveform, squircle) at the top of `Resources/make-icon.py`, run
-`python3 Resources/make-icon.py` to regenerate the iconset, then repackage —
-no app code change needed.
+references it through `CFBundleIconFile`/`CFBundleIconName`. To re-skin, edit the
+self-contained `Resources/icon-master.html` (palette, waveform, squircle tokens
+documented inline), re-export the PNG sizes into `AppIcon.iconset/` using the
+Apple naming convention (`icon_16x16.png` … `icon_512x512@2x.png`), then
+repackage — no app code change needed.
 
 ## Layout
 
