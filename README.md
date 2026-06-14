@@ -93,7 +93,9 @@ actions the assistant triggers automatically, gated by the same preference
 toggles, with the resulting card anchored under that line. Once a card has
 finished, a follow-up box appears on it — ask a question about the card and the
 answer is appended in place, so a card becomes a short thread. The menu also lets
-you copy the text. The **mic** button mutes the local microphone
+you copy the text. Each card can be collapsed/expanded or dismissed (fact-checks
+start collapsed); dismissing a card that's still researching cancels its lane.
+The **mic** button in the record cluster mutes the local microphone
 while the session keeps running — system audio is still captured and
 transcribed; tap again to unmute. `Float` keeps the window on top. Sessions are
 saved as markdown under
@@ -107,11 +109,13 @@ agent count, connector action permissions, trigger sensitivity
 provider + model shared by the classifier, research, and manual-query lanes),
 system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
-next session start. The toolbar keeps only in-session controls: Listen, pause,
-mic mute, mic device, Auto cards, Float. Below it sits an optional **session
-prompt** box (who's present, the topic, what to focus on): fill it before Listen
-or edit it live during the session to steer the agents — each edit applies to
-the next card. It clears when the session stops.
+next session start. The toolbar keeps only in-session controls: the record
+cluster (waveform, timer, pause/stop, mic mute), audio source, **Context**, Auto
+cards, Float, Sessions (idle collapses the cluster to a single Listen pill). The
+**Context** chip opens a **session prompt** popover (who's present, the topic,
+what to focus on): fill it before Listen or edit it live during the session to
+steer the agents — each edit applies to the next card. It clears when the
+session stops.
 
 Every agent lane (classifier, research, query) shares one backend — **Claude**
 (Agent SDK) by default, or **Codex** (`@openai/codex-sdk`) — picked in
@@ -127,7 +131,10 @@ Codex CLI). On a machine with no CLI login, switch **Authentication** to *API
 key* in Preferences and paste an Anthropic or OpenAI key (whichever matches the
 selected provider). The key is stored in your macOS Keychain — never in
 `config.json` — and injected into the sidecar's environment at launch
-(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). Note that API-key usage is billed to
+(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). Preferences validates the key directly
+against the provider's models endpoint when you enter it, showing inline status
+and an alert on rejection, so an invalid key surfaces immediately rather than as
+a mid-session research error. Note that API-key usage is billed to
 that key, not your subscription. Changing it applies on the next Listen.
 
 Advisor itself knows nothing about your notes: the research agents load your

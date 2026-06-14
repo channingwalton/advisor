@@ -219,6 +219,40 @@ it takes precedence over a stored OAuth login). Codex needs an explicit pass —
 `sidecar/src/config.ts`, because the sidecar acts purely on the injected env.
 Supersedes the "no API key" lines in the packaging and Codex sections above.
 
+**Key validation at entry (2026-06-14).** An invalid key previously failed
+silently — it surfaced only as an "Invalid API key" research-lane error
+mid-session. `AuthValidator` now tests a key directly against the provider's
+models endpoint (Anthropic `x-api-key`, OpenAI bearer) when entered in
+Preferences, showing inline status and an alert on rejection. The key field is a
+visible rounded-border input.
+
+## Listening view redesign (2026-06-14)
+
+The Listening view was rebuilt to a high-fidelity handoff spec, keeping
+behaviour but introducing the app's first design-token layer (`Theme.swift`:
+semantic light+dark colour tokens via dynamic `NSColor`s, plus spacing/radius/
+type-scale metrics). Decomposed into components: `ListeningToolbar` (record
+cluster — waveform + timer + pause/stop + mic mute — audio-source menu, Context
+chip, Auto-cards switch, Float, Sessions; idle collapses to a single Listen
+pill), `AskBar` (sparkle input + ⌘↵), and `ListeningCardView` (type/verdict
+pill, Researching state, collapse/expand + dismiss, themed Markdown body,
+trigger-quote + sources footer, follow-up input). The transcript is a centred
+812 pt column with a day divider and flowing paragraphs that group consecutive
+utterances, breaking only on a >1 s gap or an injected card, with a blinking
+interim line.
+
+Card-model changes: `isExpanded` (fact-checks collapse by default),
+`triggerQuote` (derived from the anchor utterance), `sources` and `verdict`
+(parsed when the sidecar emits them; absent for now); `toggleCard`/`dismissCard`
+on the store. Pause now freezes the session timer (`sessionStart` shifted
+forward by paused durations so elapsed excludes pauses); dismissing an in-flight
+card cancels its research; the session note re-writes only on output-bearing
+card changes. The session-prompt box moved from a fixed strip below the toolbar
+into the Context-chip popover; mic mute moved into the record cluster.
+
+The summarise control (a transient AskBar action) was removed shortly after —
+post-meeting summaries remain out of scope (REQUIREMENTS).
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
