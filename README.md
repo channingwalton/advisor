@@ -165,5 +165,4 @@ path. On **Codex** the sandbox is coarser (see above) — no per-call policy.
 
 Overlapping simultaneous speakers on a mixed mono feed cannot be fully
 transcribed by any single-stream STT. The trigger classifier and research
-agents consume Claude Max subscription allowance; the cost ticker shows
-API-equivalent value, not money billed.
+agents consume Claude Max subscription allowance.

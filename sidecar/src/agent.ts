@@ -137,7 +137,6 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
 
 export interface TaskResult {
   text: string;
-  costUsd: number;
   /// Set when the turn failed/timed out/ended without a clean answer, so the
   /// caller can surface the reason instead of a generic "no answer" message.
   error?: string;
@@ -224,9 +223,6 @@ export function mcpPermission(toolName: string, allowMcpActions: boolean): "allo
 export class AgentSession implements Agent {
   private input?: AsyncQueue<SDKUserMessage>;
   private pending: PendingTask[] = [];
-  /// total_cost_usd on result messages is cumulative per session; track the
-  /// last value so each task reports its delta.
-  private lastCostUsd = 0;
   private firstRunAfterSpawn = false;
 
   constructor(private readonly opts: AgentSessionOptions) {}
@@ -285,7 +281,7 @@ export class AgentSession implements Agent {
           // Stop the abandoned turn: without this it runs on (up to maxTurns),
           // burning cost off the books and queueing behind the next task.
           void this.interrupt();
-          res({ text: p.buffer, costUsd: 0, error: "timed out" });
+          res({ text: p.buffer, error: "timed out" });
         }
       }, timeoutMs)
     );
@@ -389,9 +385,6 @@ export class AgentSession implements Agent {
             }
           } else if (msg.type === "result") {
             const p = this.pending.shift();
-            const cumulative = "total_cost_usd" in msg ? (msg.total_cost_usd ?? 0) : 0;
-            const delta = Math.max(0, cumulative - this.lastCostUsd);
-            this.lastCostUsd = cumulative;
             if (p) {
               const finalText = msg.subtype === "success" ? msg.result : p.buffer;
               log(`${this.opts.name}: run done +${Date.now() - p.t0}ms (cold=${p.cold}) final: ${JSON.stringify((finalText ?? "").slice(0, 400))}`);
@@ -400,7 +393,6 @@ export class AgentSession implements Agent {
               p.settled = true;
               p.resolve({
                 text: msg.subtype === "success" ? msg.result : p.buffer,
-                costUsd: delta,
                 error: msg.subtype === "success" ? undefined : msg.subtype,
               });
             }
@@ -410,11 +402,10 @@ export class AgentSession implements Agent {
         log(`${this.opts.name}: session died: ${err}`);
       } finally {
         if (this.input === q) this.input = undefined;
-        this.lastCostUsd = 0;
         for (const p of this.pending.splice(0)) {
           if (!p.settled) {
             p.settled = true;
-            p.resolve({ text: p.buffer, costUsd: 0, error: "agent session ended" });
+            p.resolve({ text: p.buffer, error: "agent session ended" });
           }
         }
       }

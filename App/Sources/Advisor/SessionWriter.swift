@@ -74,7 +74,6 @@ final class SessionWriter {
         var md = "---\n"
         md += "started: \(iso.string(from: started))\n"
         if let ended { md += "ended: \(iso.string(from: ended))\n" }
-        md += String(format: "cost_usd: %.4f\n", store.costUsd)
         md += "---\n\n# Transcript\n\n"
         for u in store.utterances {
             var line = "- \(time.string(from: u.time)) \(u.text)"

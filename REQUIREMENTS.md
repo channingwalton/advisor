@@ -42,7 +42,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - N1. **Latency:** best efforts; ~2–5 s after the triggering utterance is the aspiration, not a hard requirement (relaxed 2026-06-11).
 - N2. **Platform:** macOS only (Apple Silicon).
 - N3. **Privacy:** STT runs on-device (Apple SpeechAnalyzer by default, or whisper.cpp on Apple Silicon); only text leaves the machine. Listening must be explicitly user-initiated.
-- N4. **Cost:** STT is local (free); LLM cost per listening-hour must be tolerable for daily personal use — track and display.
+- N4. **Cost:** STT is local (free); LLM cost per listening-hour must be tolerable for daily personal use.
 - N5. **Single user:** no auth, multi-tenancy, or deployment concerns.
 - N6. **Reliability:** capture pipeline must not drop audio during long sessions (1 h+).
 

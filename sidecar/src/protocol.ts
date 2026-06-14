@@ -55,7 +55,6 @@ export type Outbound =
       state: CardState;
     }
   | { type: "card_update"; id: string; body: string; state: CardState }
-  | { type: "usage"; sessionCostUsd: number }
   | { type: "error"; fatal: boolean; message: string };
 
 export function send(msg: Outbound): void {

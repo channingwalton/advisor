@@ -317,8 +317,6 @@ final class SidecarManager {
                     store.cards[idx].replying = false
                 }
             }
-        case "usage":
-            if let cost = obj["sessionCostUsd"] as? Double { store.costUsd = cost }
         case "error":
             store.status = "sidecar: \(obj["message"] as? String ?? "error")"
         default:

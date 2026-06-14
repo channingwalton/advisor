@@ -172,7 +172,6 @@ export async function warmClassifier(): Promise<void> {
 
 export interface ClassifyResult {
   triggers: Trigger[];
-  costUsd: number;
 }
 
 export async function classify(window: string, covered: string[]): Promise<ClassifyResult> {
@@ -182,13 +181,13 @@ Transcript window (newest last):
 ${window}
 
 JSON:`;
-  const { text, costUsd } = await ensureSession().run(prompt, undefined, 30_000);
-  if (!text) return { triggers: [], costUsd };
+  const { text } = await ensureSession().run(prompt, undefined, 30_000);
+  if (!text) return { triggers: [] };
 
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) {
     log(`classifier returned no JSON: ${text.slice(0, 200)}`);
-    return { triggers: [], costUsd };
+    return { triggers: [] };
   }
   try {
     const parsed = JSON.parse(match[0]) as { triggers?: Trigger[] };
@@ -196,9 +195,9 @@ JSON:`;
     const triggers = (parsed.triggers ?? [])
       .filter((t) => t.kind && t.subject && t.query && enabled[t.kind])
       .slice(0, MAX_TRIGGERS_PER_PASS);
-    return { triggers, costUsd };
+    return { triggers };
   } catch (err) {
     log(`classifier JSON parse failed: ${err}`);
-    return { triggers: [], costUsd };
+    return { triggers: [] };
   }
 }

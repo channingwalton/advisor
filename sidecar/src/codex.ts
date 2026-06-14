@@ -78,8 +78,7 @@ export class CodexAgentSession implements Agent {
     const finish = (resolve: (r: TaskResult) => void, error?: string): void => {
       if (settled) return;
       settled = true;
-      // subscription auth: no per-task USD cost
-      resolve({ text: joined(), costUsd: 0, error });
+      resolve({ text: joined(), error });
     };
 
     const turn = new Promise<TaskResult>((resolve) => {

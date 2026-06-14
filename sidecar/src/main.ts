@@ -80,13 +80,6 @@ const cursors = new Map<string, number>();
 let busy = false; // user queries (priority lane)
 let cardCounter = 0;
 let auto = true;
-let sessionCostUsd = 0;
-
-function addCost(c: number): void {
-  if (c <= 0) return;
-  sessionCostUsd += c;
-  send({ type: "usage", sessionCostUsd: Number(sessionCostUsd.toFixed(4)) });
-}
 
 /// Persistent sessions remember earlier messages, so send only new transcript.
 function transcriptDelta(lane: string): string {
@@ -110,12 +103,11 @@ async function runCard(
   send({ type: "card", id: cardId, trigger: triggerId, kind, title, body: "…", state: "pending" });
   try {
     const prompt = sessionContextPrefix(sessionContext) + transcriptDelta(lane.name) + task;
-    const { text, costUsd, error } = await lane.session.run(prompt, (body) => {
+    const { text, error } = await lane.session.run(prompt, (body) => {
       if (!cancelledCards.has(cardId)) {
         send({ type: "card_update", id: cardId, body, state: "streaming" });
       }
     });
-    addCost(costUsd);
     if (!cancelledCards.has(cardId)) {
       const outcome = cardOutcome(text, error);
       send({ type: "card_update", id: cardId, body: outcome.body, state: outcome.state });
@@ -164,10 +156,9 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
     const task =
       sessionContextPrefix(sessionContext) +
       replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
-    const { text, costUsd, error } = await lane.session.run(task, (body) => {
+    const { text, error } = await lane.session.run(task, (body) => {
       send({ type: "card_update", id: msg.cardId, body: header + body, state: "streaming" });
     });
-    addCost(costUsd);
     const outcome = cardOutcome(text, error);
     send({ type: "card_update", id: msg.cardId, body: header + outcome.body, state: outcome.state });
   } catch (err) {
@@ -259,9 +250,8 @@ async function runClassify(): Promise<void> {
     if (!window) return;
     log(`classify start (window ${window.length} chars)`);
     const ct0 = Date.now();
-    const { triggers, costUsd } = await classify(window, coveredSubjects());
+    const { triggers } = await classify(window, coveredSubjects());
     log(`classify ${Date.now() - ct0}ms → ${triggers.length} trigger(s)`);
-    addCost(costUsd);
     log(`classify → ${triggers.length} trigger(s)`);
     for (const t of triggers) {
       const key = normalise(t.subject);
@@ -306,7 +296,6 @@ function handle(msg: Inbound): void {
       cursors.clear();
       covered.clear();
       researchQueue.length = 0;
-      sessionCostUsd = 0;
       // Seed the live session prompt; the app may update it mid-session.
       sessionContext = msg.context ?? "";
       // Re-read preferences and rebuild sessions so prompt/model changes apply.

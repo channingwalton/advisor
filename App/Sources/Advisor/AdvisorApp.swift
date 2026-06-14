@@ -196,11 +196,6 @@ struct TranscriptView: View {
                     .font(.caption)
                     .foregroundStyle(fatalError == nil ? .secondary : Color.red)
                 Spacer()
-                if store.costUsd > 0 {
-                    Text(String(format: "$%.2f", store.costUsd))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
                 Button("Sessions") {
                     if let writer { NSWorkspace.shared.open(writer.sessionsDirectory) }
                 }
@@ -536,7 +531,6 @@ struct TranscriptView: View {
         } else {
             store.utterances = []
             store.cards = []
-            store.costUsd = 0
             let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
             sidecar?.sendSessionStart(UUID().uuidString, context: ctx)
             writer?.start()

@@ -25,8 +25,6 @@ final class TranscriptStore: ObservableObject {
     @Published var status = "idle"
     /// Cards from the sidecar, newest first.
     @Published var cards: [Card] = []
-    /// Cumulative LLM cost for the current session (USD).
-    @Published var costUsd: Double = 0
     /// Live in-progress speech (volatile STT results), per source.
     @Published var volatile: [Source: String] = [:]
 }
