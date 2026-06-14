@@ -29,8 +29,8 @@ sys ──┘                                                ├─ Swift app (U
 - **Sidecar** (`sidecar/`): Node 22 + TypeScript + Claude Agent SDK. Watches the
   transcript, decides what is worth researching (questions, topics, claims —
   including questions about the user's own notes), researches in parallel
-  persistent sessions, and streams answer cards back. Uses the local Claude
-  Code login (subscription), not an API key.
+  persistent sessions, and streams answer cards back. Uses your local CLI
+  login (Claude Code subscription, or Codex CLI), never an API key.
 
 ## Setup
 

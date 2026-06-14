@@ -1,5 +1,21 @@
 import Foundation
 
+/// A fact-check outcome. Drives the verdict badge colour/glyph. Optional on a
+/// card because the sidecar does not emit a verdict yet — `factcheck` cards
+/// render a neutral pill until it does (see DESIGN.md / handoff Open Questions).
+enum Verdict: String, Equatable {
+    case verified, needsContext, misleading
+}
+
+/// A source link shown in a card footer. The sidecar does not emit these yet
+/// (research lanes cite inline in the body markdown); the row stays hidden when
+/// `sources` is empty, and lights up if/when the protocol carries them.
+struct Citation: Identifiable, Equatable {
+    var id: String { url }
+    let label: String
+    let url: String
+}
+
 struct Card: Identifiable, Equatable {
     let id: String
     let created: Date
@@ -11,10 +27,25 @@ struct Card: Identifiable, Equatable {
     /// session writer footnote-link the card to its transcript line. Nil for
     /// Ask-box/query cards with no anchor.
     var triggerId: String?
+    /// The transcript phrase that spawned the card, shown in the footer
+    /// (`↳ "…"`). Derived from `triggerId` → utterance text on ingest.
+    var triggerQuote: String?
+    /// Source links for the footer. Empty until the sidecar emits them.
+    var sources: [Citation] = []
+    /// Fact-check outcome, when known. Nil for non-factcheck cards and for
+    /// factcheck cards before the sidecar emits a verdict.
+    var verdict: Verdict?
+    /// Whether the card is expanded. Long cards collapse to their header so they
+    /// don't bury the live transcript; fact-checks default collapsed.
+    var isExpanded: Bool = true
     /// True while a follow-up the user typed into this card is being answered.
     /// App-only (never from the protocol): suppresses the cancel button and the
     /// reply field so a card can't take a second follow-up mid-answer.
     var replying: Bool = false
+
+    /// Maps the streaming `state` onto the spec's research lifecycle: a card is
+    /// "researching" (spinner) until its first terminal state.
+    var isResearching: Bool { state == "pending" || state == "streaming" }
 }
 
 /// Spawns and supervises the Node sidecar; NDJSON over stdio.
@@ -269,6 +300,16 @@ final class SidecarManager {
 
     // MARK: inbound
 
+    /// Decodes a protocol `sources` value (array of `{label,url}`) defensively;
+    /// any malformed entry is skipped. The sidecar does not emit this yet.
+    private static func parseSources(_ raw: Any?) -> [Citation] {
+        guard let arr = raw as? [[String: Any]] else { return [] }
+        return arr.compactMap { entry in
+            guard let url = entry["url"] as? String, !url.isEmpty else { return nil }
+            return Citation(label: entry["label"] as? String ?? url, url: url)
+        }
+    }
+
     private func consume(_ data: Data) {
         buffer.append(data)
         while let nl = buffer.firstIndex(of: 0x0A) {
@@ -291,24 +332,34 @@ final class SidecarManager {
             // into the feed under that line rather than at research-completion
             // time (10–30s later). Fall back to now for query cards / unknown ids.
             let triggerId = obj["trigger"] as? String
-            let created =
-                triggerId
-                .flatMap { trigger in store.utterances.first { $0.id.uuidString == trigger } }?
-                .time ?? Date()
+            let anchor = triggerId.flatMap { trigger in
+                store.utterances.first { $0.id.uuidString == trigger }
+            }
+            let kind = obj["kind"] as? String ?? "query"
             store.cards.append(
                 Card(
                     id: id,
-                    created: created,
-                    kind: obj["kind"] as? String ?? "query",
+                    created: anchor?.time ?? Date(),
+                    kind: kind,
                     title: obj["title"] as? String ?? "",
                     body: obj["body"] as? String ?? "",
                     state: obj["state"] as? String ?? "pending",
-                    triggerId: triggerId))
+                    triggerId: triggerId,
+                    triggerQuote: anchor?.text,
+                    sources: Self.parseSources(obj["sources"]),
+                    verdict: (obj["verdict"] as? String).flatMap(Verdict.init(rawValue:)),
+                    // Fact-checks default collapsed so they don't bury the
+                    // transcript; everything else opens expanded.
+                    isExpanded: kind != "factcheck"))
         case "card_update":
             guard let id = obj["id"] as? String,
                 let idx = store.cards.firstIndex(where: { $0.id == id })
             else { return }
             if let body = obj["body"] as? String { store.cards[idx].body = body }
+            if let sources = obj["sources"] { store.cards[idx].sources = Self.parseSources(sources) }
+            if let verdict = (obj["verdict"] as? String).flatMap(Verdict.init(rawValue:)) {
+                store.cards[idx].verdict = verdict
+            }
             if let state = obj["state"] as? String {
                 store.cards[idx].state = state
                 // A follow-up answer reaching a terminal state re-enables the

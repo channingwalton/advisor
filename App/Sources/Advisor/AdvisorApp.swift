@@ -1,5 +1,4 @@
 import AppKit
-import MarkdownUI
 import SwiftUI
 
 // Repo root, derived from this source file's compile-time location so the
@@ -71,6 +70,11 @@ struct TranscriptView: View {
     @State private var triggers = AdvisorConfig.Triggers()
     @State private var autoCards = true
     @State private var pinned = false
+    /// When the current session started — drives the toolbar timer. Nil when idle.
+    /// Shifted forward by each pause's duration so the timer excludes pauses.
+    @State private var sessionStart: Date?
+    /// When paused, the moment of pausing — freezes the timer. Nil when running.
+    @State private var pausedAt: Date?
     @State private var writer: SessionWriter?
     @State private var spaceMonitor: Any?
     @AppStorage("agentLanes") private var agentLanes = 3
@@ -78,112 +82,53 @@ struct TranscriptView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                if store.listening {
-                    Button {
-                        if store.paused { recorder?.resume() } else { recorder?.pause() }
-                    } label: {
-                        Image(systemName: store.paused ? "play.fill" : "pause.fill")
-                    }
-                    .help(store.paused ? "Resume (Space)" : "Pause (Space)")
-                    Button {
-                        recorder?.setMicMuted(!store.micMuted)
-                    } label: {
-                        Image(systemName: store.micMuted ? "mic.slash.fill" : "mic.fill")
-                    }
-                    .help(store.micMuted ? "Unmute mic" : "Mute mic (system audio keeps recording)")
-                    Button {
-                        Task { await toggle() }
-                    } label: {
-                        Image(systemName: "stop.fill")
-                    }
-                    .help("Stop (Esc)")
-                    .keyboardShortcut(.escape, modifiers: [])
-                } else {
-                    Button {
-                        Task { await toggle() }
-                    } label: {
-                        Image(systemName: "play.fill")
-                    }
-                    .help("Listen (Space)")
-                }
-                Picker("Mic", selection: $selectedDevice) {
-                    ForEach(devices) { d in
-                        Text(d.label).tag(Optional(d))
-                    }
-                }
-                .frame(maxWidth: 230)
-                .disabled(store.listening)
-                .onChange(of: selectedDevice) { _, d in
-                    if let d { micDeviceName = d.name }
-                }
-                Toggle("Auto cards", isOn: $autoCards)
-                    .toggleStyle(.checkbox)
-                    .onChange(of: autoCards) { _, on in sidecar?.sendAuto(on) }
-                Toggle("Float", isOn: $pinned)
-                    .toggleStyle(.checkbox)
-                    .onChange(of: pinned) { _, on in
-                        guard let window = NSApp.windows.first(where: \.isVisible) else { return }
-                        window.level = on ? .floating : .normal
-                        window.collectionBehavior =
-                            on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
-                    }
-                Circle()
-                    .fill(store.listening ? (store.paused ? .orange : .red) : .gray)
-                    .frame(width: 10, height: 10)
-                Text(fatalError ?? store.status)
-                    .font(.caption)
-                    .foregroundStyle(fatalError == nil ? .secondary : Color.red)
-                Spacer()
-                Button("Sessions") {
+            ListeningToolbar(
+                store: store,
+                sessionStart: sessionStart,
+                pausedAt: pausedAt,
+                selectedDevice: $selectedDevice,
+                devices: devices,
+                captureSystem: captureSystem,
+                sessionContext: $sessionContext,
+                autoCards: $autoCards,
+                pinned: $pinned,
+                onPlay: { Task { await toggle() } },
+                onPauseResume: { if store.paused { resumeSession() } else { pauseSession() } },
+                onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
+                onStop: { Task { await toggle() } },
+                onSessions: {
                     if let writer { NSWorkspace.shared.open(writer.sessionsDirectory) }
                 }
-                .controlSize(.small)
-            }
-            .padding(10)
-            // TextEditor (not TextField) so Return inserts a newline rather than
-            // committing — the session prompt is multi-line and edited live.
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $sessionContext)
-                    .font(.body)
-                    .frame(height: 56)
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
-                    .onChange(of: sessionContext) { _, new in
-                        // Push live edits to the running agents; pre-session text
-                        // rides along on session_start instead.
-                        if store.listening {
-                            sidecar?.sendSessionContext(
-                                new.trimmingCharacters(in: .whitespacesAndNewlines))
-                        }
-                    }
-                if sessionContext.isEmpty {
-                    Text("Session prompt (optional): who's here, what it's about, what to focus on — editable during the session…")
-                        .font(.body)
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 8)
-                        .padding(.leading, 5)
-                        .allowsHitTesting(false)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 10)
-            Divider()
-            feedPane
-            Divider()
-            HStack {
-                TextField("Ask about the conversation…", text: $queryText)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(submitQuery)
-                Button("Ask", action: submitQuery)
-                    .disabled(queryText.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            .padding(10)
+            )
+            statusLine
+            transcriptArea
+            AskBar(
+                text: $queryText,
+                suggestions: Self.askSuggestions,
+                onSubmit: submitQuery,
+                onPick: { queryText = $0 }
+            )
         }
+        .background(Theme.surfaceWindow)
         .task { setup() }
         .onAppear(perform: installSpaceMonitor)
         .onDisappear {
             if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
             spaceMonitor = nil
+        }
+        .onChange(of: selectedDevice) { _, d in if let d { micDeviceName = d.name } }
+        .onChange(of: sessionContext) { _, new in
+            // Push live edits to the running agents; pre-session text rides along
+            // on session_start instead.
+            if store.listening {
+                sidecar?.sendSessionContext(new.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        .onChange(of: autoCards) { _, on in sidecar?.sendAuto(on) }
+        .onChange(of: pinned) { _, on in
+            guard let window = NSApp.windows.first(where: \.isVisible) else { return }
+            window.level = on ? .floating : .normal
+            window.collectionBehavior = on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
         }
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
             // Preference toggles for triggers must reflect in the right-click
@@ -191,8 +136,46 @@ struct TranscriptView: View {
             triggers = AdvisorConfig.load().triggers
         }
         .onChange(of: store.utterances) { _, _ in writer?.noteChanged() }
-        .onChange(of: store.cards) { _, _ in writer?.noteChanged() }
+        // Only re-write the session note when output-bearing fields change — not
+        // on pure UI toggles like expand/collapse (which also mutate store.cards).
+        .onChange(of: cardsWriterKey) { _, _ in writer?.noteChanged() }
         .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }
+    }
+
+    static let askSuggestions = [
+        "Summarize the last 5 minutes",
+        "Which of these is production-ready?",
+        "Draft a follow-up question",
+    ]
+
+    /// Crash/error feedback, shown as a slim line under the toolbar only when
+    /// there's something worth surfacing — normal idle/ready chatter is hidden.
+    @ViewBuilder private var statusLine: some View {
+        let text = fatalError ?? store.status
+        if shouldShowStatus(text) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(store.listening
+                        ? (store.paused ? Color.orange : Theme.recordRed) : Theme.textMuted)
+                    .frame(width: 7, height: 7)
+                Text(text)
+                    .font(.system(size: 11))
+                    .foregroundStyle(fatalError == nil ? Theme.textSecondary : Theme.factRed)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, Theme.Metric.contentSidePad)
+            .padding(.vertical, 5)
+            .background(Theme.surfaceTitlebar)
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 0.5) }
+        }
+    }
+
+    private func shouldShowStatus(_ s: String) -> Bool {
+        if fatalError != nil { return true }
+        let l = s.lowercased()
+        return ["fail", "crash", "error", "denied", "permission", "stopped", "exhausted", "restart"]
+            .contains { l.contains($0) }
     }
 
     private enum FeedItem: Identifiable {
@@ -229,92 +212,158 @@ struct TranscriptView: View {
             }
     }
 
-    private var feedPane: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if feed.isEmpty {
-                        Text("Click Listen — the conversation and answer cards appear here.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(feed) { item in
-                        switch item {
-                        case .utterance(let u):
-                            SelectableTranscriptText(
-                                text: u.text,
-                                toolTip: u.time.formatted(date: .omitted, time: .standard),
-                                actions: transcriptActions,
-                                onAction: { kind, selection in
-                                    sidecar?.sendAction(
-                                        kind, text: selection, triggerId: u.id.uuidString)
-                                }
-                            )
-                            .id(item.id)
-                        case .card(let card):
-                            cardView(card)
-                                .id(item.id)
-                        }
-                    }
-                    // Live in-progress speech, replaced by final sentences above.
-                    ForEach(Array(store.volatile.keys), id: \.self) { source in
-                        if let text = store.volatile[source], !text.isEmpty {
-                            Text(text)
-                                .italic()
-                                .foregroundStyle(.tertiary)
-                                .id("volatile-\(source.rawValue)")
-                        }
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .onChange(of: feed.count) { _, _ in
-                if let last = feed.last { proxy.scrollTo(last.id, anchor: .bottom) }
+    /// A run of consecutive utterances rendered as one flowing paragraph.
+    private struct Paragraph: Identifiable {
+        let id: String
+        let text: String
+        let toolTip: String
+        /// Last utterance in the run — manual right-click cards anchor here.
+        let anchorId: String
+    }
+
+    private enum RenderItem: Identifiable {
+        case paragraph(Paragraph)
+        case card(Card)
+
+        var id: String {
+            switch self {
+            case .paragraph(let p): "p-\(p.id)"
+            case .card(let c): "c-\(c.id)"
             }
         }
     }
 
-    private func cardView(_ card: Card) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(card.kind)
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(kindColour(card.kind).opacity(0.2), in: Capsule())
-                Text(card.title).font(.headline)
-                Spacer()
-                if card.state == "pending" || card.state == "streaming" {
-                    ProgressView().controlSize(.small)
-                    if !card.replying {
-                        Button {
-                            sidecar?.sendCancel(card.id)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .help("Skip this card")
-                    }
-                } else if card.state == "failed" {
-                    Text("failed").font(.caption2).foregroundStyle(.red)
-                } else if card.state == "cancelled" {
-                    Text("cancelled").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            Markdown(card.body)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            // Threaded follow-up: a finished card takes a follow-up question,
-            // answered in place (appended below the answer). Hidden while a
-            // reply is in flight so a card can't take two at once.
-            if card.state == "done" && !card.replying {
-                CardReplyField { reply in submitReply(card, reply) }
+    /// The feed collapsed for display: consecutive utterances join into a single
+    /// paragraph so the transcript reads as prose. A new paragraph starts when
+    /// the gap to the previous line exceeds 1s, or when a card interrupts.
+    private var renderItems: [RenderItem] {
+        var items: [RenderItem] = []
+        var buf: [Utterance] = []
+        func flush() {
+            guard let first = buf.first, let last = buf.last else { return }
+            items.append(
+                .paragraph(
+                    Paragraph(
+                        id: first.id.uuidString,
+                        text: buf.map(\.text).joined(separator: " "),
+                        toolTip: first.time.formatted(date: .omitted, time: .standard),
+                        anchorId: last.id.uuidString)))
+            buf.removeAll()
+        }
+        for item in feed {
+            switch item {
+            case .utterance(let u):
+                if let last = buf.last, u.time.timeIntervalSince(last.time) > 1 { flush() }
+                buf.append(u)
+            case .card(let c):
+                flush()
+                items.append(.card(c))
             }
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        flush()
+        return items
+    }
+
+    /// Changes whenever a final line or card is added — the auto-scroll trigger
+    /// (a growing paragraph keeps its id, so id-based scrolling alone misses it).
+    private var scrollKey: String { "\(store.utterances.count)|\(store.cards.count)" }
+
+    /// Centered transcript column (max-width 812): day divider, flowing
+    /// paragraphs, inline cards, then the live interim line.
+    private var transcriptArea: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
+                    dayDivider
+                    if renderItems.isEmpty && interimText.isEmpty {
+                        Text("Press Listen — the conversation and answer cards appear here.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 40)
+                    }
+                    ForEach(renderItems) { item in
+                        switch item {
+                        case .paragraph(let p):
+                            SelectableTranscriptText(
+                                text: p.text,
+                                toolTip: p.toolTip,
+                                actions: transcriptActions,
+                                onAction: { kind, selection in
+                                    sidecar?.sendAction(
+                                        kind, text: selection, triggerId: p.anchorId)
+                                }
+                            )
+                            .id(item.id)
+                        case .card(let card):
+                            ListeningCardView(
+                                card: card,
+                                onToggleExpand: { store.toggleCard(card.id) },
+                                onDismiss: {
+                                    // Cancel the underlying research so a dismissed
+                                    // in-flight card doesn't keep a lane busy.
+                                    if card.isResearching { sidecar?.sendCancel(card.id) }
+                                    store.dismissCard(card.id)
+                                },
+                                onCancel: { sidecar?.sendCancel(card.id) },
+                                onReply: { submitReply(card, $0) }
+                            )
+                            .id(item.id)
+                        }
+                    }
+                    interimLine
+                }
+                .frame(maxWidth: Theme.Metric.contentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .padding(.top, Theme.Metric.contentTopPad)
+                .padding(.horizontal, Theme.Metric.contentSidePad)
+                .padding(.bottom, Theme.Metric.contentBottomPad)
+            }
+            .onChange(of: scrollKey) { _, _ in
+                if let last = renderItems.last {
+                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var dayDivider: some View {
+        if !feed.isEmpty || store.listening {
+            let when = store.utterances.first?.time ?? Date()
+            Text(
+                "Today · \(when.formatted(date: .omitted, time: .shortened)) · on-device transcription"
+            )
+            .font(.system(size: 10.5))
+            .foregroundStyle(Theme.textMuted)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    /// Signature of the card fields the session writer actually renders, so a
+    /// rewrite is triggered by content/lifecycle changes but not by expand/
+    /// collapse. Card add/remove changes the array length, also caught here.
+    private var cardsWriterKey: [String] {
+        store.cards.map {
+            "\($0.id)|\($0.state)|\($0.title)|\($0.body)|\($0.verdict?.rawValue ?? "")|\($0.sources.count)"
+        }
+    }
+
+    /// The in-progress (not-yet-finalised) speech across sources.
+    private var interimText: String {
+        store.volatile.values.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    @ViewBuilder private var interimLine: some View {
+        let text = interimText
+        if !text.isEmpty {
+            HStack(alignment: .bottom, spacing: 2) {
+                Text(text)
+                    .font(.system(size: Theme.Metric.transcriptSize))
+                    .foregroundStyle(Theme.textTertiary)
+                BlinkingCaret()
+            }
+            .id("interim")
+        }
     }
 
     /// Send a follow-up about `card`. Optimistically appends the question to the
@@ -355,15 +404,6 @@ struct TranscriptView: View {
             actions.append(TranscriptAction(title: "Fact check", kind: "factcheck"))
         }
         return actions
-    }
-
-    private func kindColour(_ kind: String) -> Color {
-        switch kind {
-        case "answer": .blue
-        case "context": .green
-        case "factcheck": .orange
-        default: .purple
-        }
     }
 
     private func setup() {
@@ -419,12 +459,30 @@ struct TranscriptView: View {
             if !store.listening {
                 Task { await toggle() }
             } else if store.paused {
-                recorder?.resume()
+                resumeSession()
             } else {
-                recorder?.pause()
+                pauseSession()
             }
             return nil
         }
+    }
+
+    /// Pause capture and freeze the timer at this moment.
+    private func pauseSession() {
+        guard store.listening, !store.paused else { return }
+        pausedAt = Date()
+        recorder?.pause()
+    }
+
+    /// Resume capture; shift `sessionStart` forward by the paused span so the
+    /// timer continues from where it froze.
+    private func resumeSession() {
+        guard let pausedAt else { recorder?.resume(); return }
+        if let start = sessionStart {
+            sessionStart = start.addingTimeInterval(Date().timeIntervalSince(pausedAt))
+        }
+        self.pausedAt = nil
+        recorder?.resume()
     }
 
     private func submitQuery() {
@@ -441,9 +499,13 @@ struct TranscriptView: View {
             sidecar?.sendSessionEnd()
             writer?.end()
             sessionContext = "" // blank slate for the next session
+            sessionStart = nil
+            pausedAt = nil
         } else {
             store.utterances = []
             store.cards = []
+            sessionStart = Date()
+            pausedAt = nil
             let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
             sidecar?.sendSessionStart(UUID().uuidString, context: ctx)
             writer?.start()
@@ -452,28 +514,20 @@ struct TranscriptView: View {
     }
 }
 
-/// Follow-up input shown on a finished card. Owns its own draft text so each
-/// card edits independently; clears on submit.
-private struct CardReplyField: View {
-    let onSubmit: (String) -> Void
-    @State private var text = ""
+/// A thin caret that blinks at the end of the live interim transcript line.
+struct BlinkingCaret: View {
+    @State private var on = true
 
     var body: some View {
-        HStack(spacing: 6) {
-            TextField("Ask a follow-up…", text: $text)
-                .textFieldStyle(.roundedBorder)
-                .font(.callout)
-                .onSubmit(submit)
-            Button("Send", action: submit)
-                .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
-        }
-    }
-
-    private func submit() {
-        let t = text.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty else { return }
-        onSubmit(t)
-        text = ""
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Theme.accent)
+            .frame(width: 2.5, height: 17)
+            .opacity(on ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                    on = false
+                }
+            }
     }
 }
 
@@ -514,8 +568,19 @@ struct SelectableTranscriptText: NSViewRepresentable {
 
     func updateNSView(_ tv: ActionTextView, context: Context) {
         if tv.string != text { tv.string = text }
-        tv.font = .preferredFont(forTextStyle: .body)
-        tv.textColor = .labelColor
+        // Transcript body type: 14.5 pt, line-height 1.68, semantic body colour.
+        let font = NSFont.systemFont(ofSize: Theme.Metric.transcriptSize)
+        let para = NSMutableParagraphStyle()
+        para.lineSpacing = Theme.Metric.transcriptLineSpacing
+        tv.font = font
+        tv.textColor = Theme.nsTextBody
+        tv.defaultParagraphStyle = para
+        // isRichText is false, so style the storage directly — typingAttributes
+        // alone won't reflow already-set text (and height measurement reads the
+        // storage's paragraph style).
+        let range = NSRange(location: 0, length: (tv.string as NSString).length)
+        tv.textStorage?.addAttributes(
+            [.font: font, .foregroundColor: Theme.nsTextBody, .paragraphStyle: para], range: range)
         tv.toolTip = toolTip
         tv.menuActions = actions
         tv.onAction = onAction

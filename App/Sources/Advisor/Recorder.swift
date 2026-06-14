@@ -27,6 +27,17 @@ final class TranscriptStore: ObservableObject {
     @Published var cards: [Card] = []
     /// Live in-progress speech (volatile STT results), per source.
     @Published var volatile: [Source: String] = [:]
+
+    /// Expand/collapse a card in place.
+    func toggleCard(_ id: String) {
+        guard let idx = cards.firstIndex(where: { $0.id == id }) else { return }
+        cards[idx].isExpanded.toggle()
+    }
+
+    /// Remove a card from the stream.
+    func dismissCard(_ id: String) {
+        cards.removeAll { $0.id == id }
+    }
 }
 
 /// Wires capture → Apple speech transcription → dedup → store.
