@@ -104,9 +104,7 @@ struct TranscriptView: View {
             transcriptArea
             AskBar(
                 text: $queryText,
-                suggestions: Self.askSuggestions,
-                onSubmit: submitQuery,
-                onPick: { queryText = $0 }
+                onSubmit: submitQuery
             )
         }
         .background(Theme.surfaceWindow)
@@ -141,12 +139,6 @@ struct TranscriptView: View {
         .onChange(of: cardsWriterKey) { _, _ in writer?.noteChanged() }
         .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }
     }
-
-    static let askSuggestions = [
-        "Summarize the last 5 minutes",
-        "Which of these is production-ready?",
-        "Draft a follow-up question",
-    ]
 
     /// Crash/error feedback, shown as a slim line under the toolbar only when
     /// there's something worth surfacing — normal idle/ready chatter is hidden.

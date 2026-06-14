@@ -1,24 +1,15 @@
 import SwiftUI
 
-/// Bottom Ask bar: a row of suggestion chips over an input (sparkle glyph +
-/// placeholder + ⌘↵ hint) and a solid Ask button. ⌘↵ or Return submits.
+/// Bottom Ask bar: an input (sparkle glyph + placeholder + ⌘↵ hint) and a
+/// solid Ask button. ⌘↵ or Return submits.
 struct AskBar: View {
     @Binding var text: String
-    let suggestions: [String]
     let onSubmit: () -> Void
-    let onPick: (String) -> Void
 
     @FocusState private var focused: Bool
 
     var body: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                ForEach(suggestions, id: \.self) { s in
-                    SuggestionChip(label: s) { onPick(s) }
-                }
-                Spacer(minLength: 0)
-            }
-            .focusEffectDisabled()
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkle").font(.system(size: 13))
@@ -49,32 +40,6 @@ struct AskBar: View {
         .padding(.vertical, 12)
         .background(Theme.surfaceTitlebar)
         .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 0.5) }
-    }
-}
-
-/// A pill suggestion that fills the Ask input when tapped.
-struct SuggestionChip: View {
-    let label: String
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    hovering ? Theme.surfaceCardInset : Theme.surfaceCard,
-                    in: RoundedRectangle(cornerRadius: Theme.Metric.chipRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Metric.chipRadius)
-                        .stroke(Theme.hairline, lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
 
