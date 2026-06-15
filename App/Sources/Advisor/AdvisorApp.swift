@@ -227,7 +227,7 @@ struct TranscriptView: View {
 
     /// The feed collapsed for display: consecutive utterances join into a single
     /// paragraph so the transcript reads as prose. A new paragraph starts when
-    /// the gap to the previous line exceeds 1s, or when a card interrupts.
+    /// the gap to the previous line exceeds 2s, or when a card interrupts.
     private var renderItems: [RenderItem] {
         var items: [RenderItem] = []
         var buf: [Utterance] = []
@@ -245,7 +245,7 @@ struct TranscriptView: View {
         for item in feed {
             switch item {
             case .utterance(let u):
-                if let last = buf.last, u.time.timeIntervalSince(last.time) > 1 { flush() }
+                if let last = buf.last, u.time.timeIntervalSince(last.time) > 2 { flush() }
                 buf.append(u)
             case .card(let c):
                 flush()
@@ -560,7 +560,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
 
     func updateNSView(_ tv: ActionTextView, context: Context) {
         if tv.string != text { tv.string = text }
-        // Transcript body type: 14.5 pt, line-height 1.68, semantic body colour.
+        // Transcript body type: 14.5 pt, line-height 1.2, semantic body colour.
         let font = NSFont.systemFont(ofSize: Theme.Metric.transcriptSize)
         let para = NSMutableParagraphStyle()
         para.lineSpacing = Theme.Metric.transcriptLineSpacing

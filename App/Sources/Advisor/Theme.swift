@@ -100,9 +100,9 @@ enum Theme {
         static let chipRadius: CGFloat = 14
         static let pillRadius: CGFloat = 6
 
-        static let paragraphSpacing: CGFloat = 18
+        static let paragraphSpacing: CGFloat = 6
         static let transcriptSize: CGFloat = 14.5
-        static let transcriptLineSpacing: CGFloat = 14.5 * 0.68  // line-height 1.68
+        static let transcriptLineSpacing: CGFloat = 14.5 * 0.2  // line-height 1.2
         static let cardBodySize: CGFloat = 13.5
     }
 
