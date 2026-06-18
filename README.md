@@ -104,6 +104,13 @@ embedded inline in the conversation just as the window shows them. The
 **Export** button (share icon) copies the current session note to a location you
 choose.
 
+The **History** button (clock icon) opens a browser over past sessions: pick one
+on the left to read its transcript on the right, then ask a question about it in
+the box at the bottom. The answer streams in below the transcript and, once
+finished, is appended to that session's note under a `# Follow-ups` heading, so
+the saved transcript grows with the questions you ask of it. (The session
+currently being recorded is read-only here until it has fully saved.)
+
 ## Preferences
 
 ⌘, opens settings: parallel
@@ -114,7 +121,8 @@ system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
 next session start. The toolbar keeps only in-session controls: the record
 cluster (waveform, timer, pause/stop, mic mute), audio source, **Context**, Auto
-cards, Float, Sessions (idle collapses the cluster to a single Listen pill). The
+cards, Float, Export, History, Sessions (idle collapses the cluster to a single
+Listen pill). The
 **Context** chip opens a **session prompt** popover (who's present, the topic,
 what to focus on): fill it before Listen or edit it live during the session to
 steer the agents — each edit applies to the next card. It clears when the

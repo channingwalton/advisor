@@ -42,6 +42,27 @@ enum SessionMarkdown {
         return md + "\n"
     }
 
+    /// A follow-up Q&A (asked from the history browser) as a blockquote "chat"
+    /// block, matching the inline card style: a bold `Q · question` header, the
+    /// answer markdown, then an `_Asked …_` footer. Every line is `>`-prefixed so
+    /// a multi-paragraph answer stays in the quote. Appended to the saved note.
+    static func followUpBlock(question: String, answer: String, asked: Date) -> String {
+        let stamp = DateFormatter()
+        stamp.locale = Locale(identifier: "en_US_POSIX")
+        stamp.calendar = Calendar(identifier: .gregorian)
+        stamp.dateFormat = "HH:mm:ss · yyyy-MM-dd"
+
+        var lines = ["**Q · \(question)**"]
+        let body = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty {
+            lines.append("")
+            lines += body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        }
+        lines.append("")
+        lines.append("_Asked \(stamp.string(from: asked))_")
+        return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
+    }
+
     /// The pill label shown in the window header — kind, or the verdict for a
     /// resolved fact-check.
     static func label(for card: Card) -> String {

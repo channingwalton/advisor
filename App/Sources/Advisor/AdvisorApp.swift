@@ -77,6 +77,7 @@ struct TranscriptView: View {
     /// When paused, the moment of pausing — freezes the timer. Nil when running.
     @State private var pausedAt: Date?
     @State private var writer: SessionWriter?
+    @State private var showHistory = false
     @State private var spaceMonitor: Any?
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("micDeviceName") private var micDeviceName = ""
@@ -97,6 +98,7 @@ struct TranscriptView: View {
                 onPauseResume: { if store.paused { resumeSession() } else { pauseSession() } },
                 onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
                 onStop: { Task { await toggle() } },
+                onHistory: { showHistory = true },
                 onSessions: {
                     if let writer { NSWorkspace.shared.open(writer.sessionsDirectory) }
                 },
@@ -111,6 +113,11 @@ struct TranscriptView: View {
             )
         }
         .background(Theme.surfaceWindow)
+        .sheet(isPresented: $showHistory) {
+            SessionHistoryView(
+                sidecar: sidecar,
+                liveFileURL: writer?.currentFileURL)
+        }
         .task { setup() }
         .onAppear(perform: installSpaceMonitor)
         .onDisappear {

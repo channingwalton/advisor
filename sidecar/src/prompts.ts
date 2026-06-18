@@ -42,6 +42,22 @@ export function buildResearchSystem(): string {
 ${RESEARCH_CORE}`;
 }
 
+/// Task for a question asked about a saved past transcript (the history
+/// browser). The transcript is self-contained ground truth — unlike live tasks
+/// there is no session context or rolling transcript delta — but tools may add
+/// or verify facts.
+export function documentQuestionTask(question: string, document: string): string {
+  return `The user is reading a saved transcript of a past conversation and has a question about it.
+Answer grounded in the transcript below; you may use web search and connectors to add or verify facts.
+Lead with the answer, be concise, and cite sources inline.
+
+<transcript>
+${document}
+</transcript>
+
+Question: ${question}`;
+}
+
 /// Prefix prepended to each research/query/reply task carrying the user's live
 /// session prompt. Read fresh at dispatch so mid-session edits take effect on
 /// the next task without rebuilding lanes. Blank/whitespace → no block.

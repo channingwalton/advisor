@@ -245,6 +245,34 @@ final class SidecarManager {
         send(["type": "query", "id": UUID().uuidString, "text": text])
     }
 
+    /// Pending document-question answer streams, keyed by request id. Registered
+    /// by `askDocument`, invoked as `document_answer` frames arrive, dropped on a
+    /// terminal state. Main-actor confined: `askDocument` and inbound handling
+    /// both run on the main actor.
+    @MainActor private var documentHandlers: [String: (String, String) -> Void] = [:]
+
+    /// Ask a question about a saved transcript (the history browser). `onUpdate`
+    /// is called with the streamed answer body and state
+    /// ("pending"|"streaming"|"done"|"failed"|"cancelled"); it fires no more
+    /// after the first terminal state. Returns the request id, or nil if the
+    /// sidecar is down (the message was dropped, so no answer is coming).
+    @MainActor
+    @discardableResult
+    func askDocument(
+        question: String, document: String, onUpdate: @escaping (String, String) -> Void
+    ) -> String? {
+        let id = UUID().uuidString
+        documentHandlers[id] = onUpdate
+        let sent = send([
+            "type": "ask_document", "id": id, "question": question, "document": document,
+        ])
+        if !sent {
+            documentHandlers[id] = nil
+            return nil
+        }
+        return id
+    }
+
     /// Manual right-click action on selected transcript text. `action` is the
     /// card kind ("answer" | "context" | "factcheck"); `triggerId` anchors the
     /// resulting card under the utterance the selection came from.
@@ -387,6 +415,14 @@ final class SidecarManager {
                 if state == "done" || state == "failed" || state == "cancelled" {
                     store.cards[idx].replying = false
                 }
+            }
+        case "document_answer":
+            guard let id = obj["id"] as? String, let handler = documentHandlers[id] else { return }
+            let body = obj["body"] as? String ?? ""
+            let state = obj["state"] as? String ?? "streaming"
+            handler(body, state)
+            if state == "done" || state == "failed" || state == "cancelled" {
+                documentHandlers[id] = nil
             }
         case "error":
             store.status = "sidecar: \(obj["message"] as? String ?? "error")"

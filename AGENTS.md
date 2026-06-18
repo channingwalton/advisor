@@ -16,7 +16,7 @@ check them before re-litigating a decision.
   Audio capture (mic + ScreenCaptureKit system audio), on-device STT via
   Apple SpeechAnalyzer, echo dedup, chronological feed UI (selectable
   transcript lines with a right-click action menu), session markdown writer,
-  preferences.
+  a history browser over past sessions (read + ask-and-append), preferences.
 - `sidecar/` — Node 22 + TypeScript + Claude Agent SDK. Trigger classifier
   (persistent delta-fed session on the shared model), parallel research lanes,
   query lane, `canUseTool` sandbox. NDJSON over stdio to the app (protocol in

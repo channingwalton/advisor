@@ -60,6 +60,7 @@ Swift → sidecar:
 {"type":"utterance","id":"u123","source":"them","text":"...","t0":...,"t1":...}
 {"type":"query","id":"q7","text":"...","action":"answer|context|factcheck","triggerId":"u123"}
 {"type":"card_reply","cardId":"c9","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","transcript":"them: ...\nme: ..."}
+{"type":"ask_document","id":"d3","question":"...","document":"<the whole saved transcript note>"}
 {"type":"session_end"}
 ```
 
@@ -68,6 +69,7 @@ Sidecar → Swift:
 ```json
 {"type":"card","id":"c9","trigger":"u123","kind":"answer|context|factcheck|query","title":"...","body":"...","sources":[{"title":"...","url":"..."}],"state":"pending|streaming|done|failed","confidence":"high|medium|low"}
 {"type":"card_update","id":"c9","body":"...","state":"streaming"}
+{"type":"document_answer","id":"d3","body":"...","state":"pending|streaming|done|failed"}
 {"type":"error","fatal":false,"message":"..."}
 ```
 
@@ -271,6 +273,45 @@ chronologically by `created` time instead of in a trailing section. Nothing
 parses these files (write-only archival), so no migration — old notes keep their
 old format. `SessionMarkdown` is a pure function, covered by the project's first
 unit tests (`Tests/AdvisorTests`, swift-testing).
+
+### 2026-06-18 — Browse past transcripts + ask-and-append
+
+A **History** sheet (clock icon, left of Sessions) browses saved session notes:
+`SessionArchive` lists `~/Library/Application Support/Advisor/sessions/*.md`,
+parsing the `yyyy-MM-dd-HHmmss.md` name to a date (the filename formatter +
+on-disk location, previously private to `SessionWriter`, moved here so both share
+one source of truth). Master/detail — sessions left (newest first), the selected
+note rendered right via the existing `MarkdownUI` (no new dependency, no custom
+parser). Read-only browsing; an ask bar adds Q&A.
+
+**Asking runs on its own isolated path, not the live query lane.** The query lane
+is bound to live-session state (the rolling transcript-delta cursor, the session
+prompt, the single `busy` gate), so routing a question about a *saved* document
+through it would pollute the live conversation's context and serialise against
+live queries. Instead `ask_document` carries the whole note as a self-contained
+`document` and is answered by a **transient one-shot session** — the same pattern
+as `card_reply` (`makeLane("document")` then `reset()` in `finally`): no pool
+slot, no `busy` gate, no live-session state, parallel-safe, works mid-session.
+Streamed back as `document_answer` keyed by request id; `SidecarManager` routes
+each frame to a per-id handler registered by `askDocument` (kept out of the live
+`store.cards`) and drops it on a terminal state. Concurrent document questions
+are capped (2) like replies, so a burst can't fork unbounded SDK subprocesses.
+
+On `done` the answer is appended to the note under a one-time `# Follow-ups`
+heading as a `>`-quoted block matching the inline-card style
+(`SessionMarkdown.followUpBlock`), then the view reloads from disk — so the saved
+transcript grows with the questions asked of it.
+
+**Two-writer hazard, guarded.** `SessionWriter` rewrites its note wholesale (a
+2 s debounced re-render from the store) and keeps owning its `fileURL` after
+`end()` (late research cards still land in the file). A follow-up append to that
+same file would be clobbered by the next debounced rewrite. The History view
+therefore refuses to ask about **any file the live writer still owns**
+(`writer.currentFileURL`, not merely "while listening") — the just-ended session
+becomes askable once the next session starts or the app restarts. Residual
+limitations (accepted for a single-user local tool): an `ask_document` whose
+sidecar dies mid-stream leaks its handler and the view stays "asking" until the
+sheet is reopened (parity with `card_reply`); the list refreshes only on open.
 
 ## Revisit as it grows
 

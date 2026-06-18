@@ -11,34 +11,22 @@ final class SessionWriter {
     private var ended: Date?
     private var pendingWrite: DispatchWorkItem?
 
+    /// The note currently being written (set at session start). The history
+    /// browser excludes this while listening so a follow-up append isn't
+    /// clobbered by the live rewrite.
+    var currentFileURL: URL? { fileURL }
+
     init(store: TranscriptStore) {
         self.store = store
-        sessionsDirectory = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Advisor/sessions", isDirectory: true)
+        sessionsDirectory = SessionArchive.directory
         try? FileManager.default.createDirectory(
             at: sessionsDirectory, withIntermediateDirectories: true)
-    }
-
-    /// `yyyy-MM-dd-HHmmss` with calendar/locale pinned, so a session filename is
-    /// always Gregorian regardless of the user's system calendar (e.g.
-    /// Japanese/Buddhist). Shared by the auto-saved note and the export name.
-    private static let fileNameFormatter: DateFormatter = {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.calendar = Calendar(identifier: .gregorian)
-        fmt.dateFormat = "yyyy-MM-dd-HHmmss"
-        return fmt
-    }()
-
-    private static func fileName(for date: Date) -> String {
-        "\(fileNameFormatter.string(from: date)).md"
     }
 
     func start() {
         started = Date()
         ended = nil
-        fileURL = sessionsDirectory.appendingPathComponent(Self.fileName(for: started!))
+        fileURL = sessionsDirectory.appendingPathComponent(SessionArchive.fileName(for: started!))
         write()
     }
 
@@ -59,7 +47,7 @@ final class SessionWriter {
     /// session start time, `yyyy-MM-dd-HHmmss.md`).
     func suggestedFilename() -> String {
         fileURL?.lastPathComponent
-            ?? Self.fileName(for: started ?? store.utterances.first?.time ?? Date())
+            ?? SessionArchive.fileName(for: started ?? store.utterances.first?.time ?? Date())
     }
 
     /// Copy the current session note to `dest`. Export is just sharing the

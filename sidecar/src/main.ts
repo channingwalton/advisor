@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { Agent } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, loadConfig, modelArg } from "./config.js";
-import { buildResearchSystem, sessionContextPrefix } from "./prompts.js";
+import { buildResearchSystem, documentQuestionTask, sessionContextPrefix } from "./prompts.js";
 import { cardOutcome, boundedPush } from "./cards.js";
 import { Inbound, log, send, Source } from "./protocol.js";
 import {
@@ -172,6 +172,48 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
   } finally {
     lane.session.reset(); // dispose the transient session
     activeReplies--;
+  }
+}
+
+/// Answer a question about a saved past transcript (the history browser). Like
+/// runCardReply this runs on a transient one-shot session — no research-pool
+/// slot, no live-session state (the document is the whole context) — so it's
+/// parallel-safe and works mid-session. Streamed back as document_answer on the
+/// request id. Cap concurrent ones so a burst can't fork unbounded subprocesses.
+const MAX_CONCURRENT_DOC_QUESTIONS = 2;
+let activeDocQuestions = 0;
+
+async function runDocumentQuestion(msg: Extract<Inbound, { type: "ask_document" }>): Promise<void> {
+  if (activeDocQuestions >= MAX_CONCURRENT_DOC_QUESTIONS) {
+    send({
+      type: "document_answer",
+      id: msg.id,
+      body: "failed: too many questions in flight — wait for one to finish",
+      state: "failed",
+    });
+    return;
+  }
+  activeDocQuestions++;
+  const lane = makeLane("document");
+  send({ type: "document_answer", id: msg.id, body: "…", state: "pending" });
+  try {
+    const { text, error } = await lane.session.run(
+      documentQuestionTask(msg.question, msg.document),
+      (body) => send({ type: "document_answer", id: msg.id, body, state: "streaming" })
+    );
+    const outcome = cardOutcome(text, error);
+    send({ type: "document_answer", id: msg.id, body: outcome.body, state: outcome.state });
+  } catch (err) {
+    log(`document question error: ${err}`);
+    send({
+      type: "document_answer",
+      id: msg.id,
+      body: `error: ${err instanceof Error ? err.message : String(err)}`,
+      state: "failed",
+    });
+  } finally {
+    lane.session.reset(); // dispose the transient session
+    activeDocQuestions--;
   }
 }
 
@@ -373,6 +415,11 @@ function handle(msg: Inbound): void {
     case "card_reply":
       // Transient session, parallel-safe — no busy gate, no pool slot.
       void runCardReply(msg);
+      break;
+    case "ask_document":
+      // History-browser question about a saved transcript. Transient session,
+      // parallel-safe — no busy gate, no pool slot, no live-session state.
+      void runDocumentQuestion(msg);
       break;
     case "session_end":
       if (debounceTimer) clearTimeout(debounceTimer);

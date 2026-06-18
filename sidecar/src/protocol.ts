@@ -37,6 +37,12 @@ export type Inbound =
       replyText: string;
       transcript?: string;
     }
+  // Question asked about a saved past transcript, from the history browser. The
+  // document (the whole transcript note) and the question are self-contained, so
+  // it runs on a transient one-shot session with no live-session state (no
+  // session context, no transcript delta), streamed back as document_answer on
+  // the same id.
+  | { type: "ask_document"; id: string; question: string; document: string }
   | { type: "session_end" };
 
 export type CardState = "pending" | "streaming" | "done" | "failed" | "cancelled";
@@ -55,6 +61,8 @@ export type Outbound =
       state: CardState;
     }
   | { type: "card_update"; id: string; body: string; state: CardState }
+  // Streamed answer to an ask_document question, keyed by the request id.
+  | { type: "document_answer"; id: string; body: string; state: CardState }
   | { type: "error"; fatal: boolean; message: string };
 
 export function send(msg: Outbound): void {
