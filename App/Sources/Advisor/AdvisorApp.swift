@@ -480,9 +480,9 @@ struct TranscriptView: View {
         recorder?.resume()
     }
 
-    /// Save the current session as inline-card markdown via a save panel. The
-    /// content mirrors the window (cards embedded in the conversation) rather
-    /// than the footnote layout of the auto-saved note.
+    /// Share the current session note to a chosen location via a save panel.
+    /// The saved note is already in the window's inline-card format, so this
+    /// just copies the file.
     private func exportSession() {
         guard let writer, writer.hasExportContent else { return }
         let panel = NSSavePanel()
@@ -492,7 +492,7 @@ struct TranscriptView: View {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try writer.exportMarkdown().write(to: url, atomically: true, encoding: .utf8)
+            try writer.export(to: url)
         } catch {
             store.status = "export failed: \(error.localizedDescription)"
         }

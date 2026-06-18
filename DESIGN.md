@@ -41,7 +41,7 @@ The Swift app owns everything realtime and visual; the sidecar owns everything t
 
 **OverlayUI.** Non-activating `NSPanel` (`.floating`, `.nonactivatingPanel`) hosting SwiftUI: vertical card feed (newest top), collapsible live transcript drawer, query box, listening indicator. Menu-bar item: start/stop listening, open session history. Panel never takes key focus except when the query box is clicked.
 
-**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmmss.md` (second precision, so a same-minute restart can't overwrite the prior transcript): YAML frontmatter (start/end), transcript section, cards section (type, body, sources). Each card is emitted as a Markdown footnote whose `[^card-N]` reference rides the transcript line that triggered it (via the card's `trigger` utterance id), so Obsidian/GitHub render a bidirectional link between line and card; cards with no anchor (Ask-box/query) fall into an "Other cards" section. Written incrementally; transcripts only, no audio (decided). Vault is never written. A separate **Export** path (`SessionMarkdown.inline`, toolbar share button → save panel) renders the same session with cards embedded inline in the conversation — mirroring the window — instead of as footnotes: the auto-saved note optimises for Obsidian backlinks, the export for reading as it looked on screen.
+**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmmss.md` (second precision, so a same-minute restart can't overwrite the prior transcript): YAML frontmatter (start/end) then the conversation, with finished cards (`done`/`failed`) embedded inline as `>`-quoted "chat" blocks at their place in the stream — the same format the window shows (`SessionMarkdown.inline`). Written incrementally; transcripts only, no audio (decided). Vault is never written. The toolbar **Export** button (share icon → save panel) is just *share the current note*: it flushes and copies the on-disk file to a chosen location, byte-identical (`SessionWriter.export`).
 
 ### TS sidecar (Claude Agent SDK)
 
@@ -253,18 +253,24 @@ into the Context-chip popover; mic mute moved into the record cluster.
 The summarise control (a transient AskBar action) was removed shortly after —
 post-meeting summaries remain out of scope (REQUIREMENTS).
 
-### 2026-06-18 — Markdown export (inline cards)
+### 2026-06-18 — Markdown export + one session format (inline cards)
 
-A toolbar **Export** button (share icon, left of Sessions) saves the current
-session to a chosen file via `NSSavePanel`. The format (`SessionMarkdown.inline`)
-reuses the auto-saved note's content but **inlines the footnotes**: utterances
-and finished cards merge chronologically (a card sorts after an utterance at
-equal time, the same ordering the live feed uses), and each card renders as a
+A toolbar **Export** button (share icon, left of Sessions) shares the current
+session note via `NSSavePanel`. Rather than give export its own renderer, the
+**session note format was unified** on the inline layout (`SessionMarkdown.inline`):
+utterances and finished cards merge chronologically (a card sorts after an
+utterance at equal time, the same ordering the live feed uses), each card a
 `>`-quoted "chat" block — `LABEL · Title`, body, then a grounding/trigger-quote +
-sources footer — so the file reads like the window rather than the
-backlink-oriented footnote note. Only `done`/`failed` cards are included.
-`SessionMarkdown` is a pure function, covered by the project's first unit tests
-(`Tests/AdvisorTests`, swift-testing).
+sources footer — so the saved note reads like the window. Export is then trivial:
+flush + copy the on-disk file (`SessionWriter.export`).
+
+This **dropped the footnote format** (the prior `[^card-N]` line↔card backlinks
+for Obsidian/GitHub, plus the "Other cards" orphan section). Trade accepted: one
+format and far less code over backlink navigation; orphan/query cards now place
+chronologically by `created` time instead of in a trailing section. Nothing
+parses these files (write-only archival), so no migration — old notes keep their
+old format. `SessionMarkdown` is a pure function, covered by the project's first
+unit tests (`Tests/AdvisorTests`, swift-testing).
 
 ## Revisit as it grows
 

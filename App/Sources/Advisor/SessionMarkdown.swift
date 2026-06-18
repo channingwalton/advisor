@@ -2,11 +2,10 @@ import Foundation
 
 /// Renders a session as markdown that mirrors the window: the conversation with
 /// answer/context/fact-check cards embedded inline as "chat" blocks at their
-/// place in the stream — the export format. This differs from the auto-saved
-/// note (`SessionWriter.write`), which links cards as bottom-of-file footnotes
-/// for Obsidian backlinks; here the footnotes are inlined.
+/// place in the stream. The single session format — used both for the auto-saved
+/// note (`SessionWriter.write`) and the Export/share action.
 enum SessionMarkdown {
-    /// Inline export. Utterances and finished cards are merged chronologically
+    /// Utterances and finished cards are merged chronologically
     /// (a card sorts after an utterance at equal time, so it lands beneath its
     /// triggering line — the same ordering the live feed uses). Only `done`/
     /// `failed` cards are included; in-flight cards are skipped.

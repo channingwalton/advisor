@@ -55,18 +55,31 @@ final class SessionWriter {
             || store.cards.contains { $0.state == "done" || $0.state == "failed" }
     }
 
-    /// Markdown for export: the same content as the auto-saved note but with
-    /// cards embedded inline in the conversation (no footnotes), mirroring the
-    /// window. See `SessionMarkdown.inline`.
-    func exportMarkdown() -> String {
-        SessionMarkdown.inline(
-            utterances: store.utterances, cards: store.cards, started: started, ended: ended)
+    /// Suggested save filename for an export: the on-disk note's name (the
+    /// session start time, `yyyy-MM-dd-HHmmss.md`).
+    func suggestedFilename() -> String {
+        fileURL?.lastPathComponent
+            ?? Self.fileName(for: started ?? store.utterances.first?.time ?? Date())
     }
 
-    /// Suggested save filename for an export: the session's start time in the
-    /// same `yyyy-MM-dd-HHmmss` form as the auto-saved note.
-    func suggestedFilename() -> String {
-        Self.fileName(for: started ?? store.utterances.first?.time ?? Date())
+    /// Copy the current session note to `dest`. Export is just sharing the
+    /// transcript: the saved note and the export are byte-identical, so flush
+    /// any pending debounced write first, then copy the file (overwriting).
+    func export(to dest: URL) throws {
+        flush()
+        guard let fileURL else { return }
+        // Exporting onto the live note itself would delete the source mid-copy.
+        guard dest.standardizedFileURL != fileURL.standardizedFileURL else { return }
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.copyItem(at: fileURL, to: dest)
+    }
+
+    /// Write the note now, cancelling any pending debounced write.
+    func flush() {
+        pendingWrite?.cancel()
+        write()
     }
 
     /// Debounced rewrite; call whenever utterances or cards change.
@@ -77,66 +90,12 @@ final class SessionWriter {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
+    /// Render the note with cards embedded inline in the conversation (the same
+    /// format the window shows). See `SessionMarkdown.inline`.
     private func write() {
         guard let fileURL, let started else { return }
-        let iso = ISO8601DateFormatter()
-        let time = DateFormatter()
-        time.dateFormat = "HH:mm:ss"
-
-        // Cards anchored to a known transcript line become footnotes on that
-        // line (bidirectional link in Obsidian/GitHub); the rest go in a flat
-        // "Other cards" section.
-        let doneCards = store.cards.filter { $0.state == "done" || $0.state == "failed" }
-        var refsByUtterance: [UUID: [String]] = [:]
-        var footnotes: [(label: String, card: Card)] = []
-        var orphans: [Card] = []
-        for card in doneCards {
-            if let tid = card.triggerId,
-                let u = store.utterances.first(where: { $0.id.uuidString == tid }) {
-                let label = "card-\(footnotes.count + 1)"
-                refsByUtterance[u.id, default: []].append(label)
-                footnotes.append((label, card))
-            } else {
-                orphans.append(card)
-            }
-        }
-
-        var md = "---\n"
-        md += "started: \(iso.string(from: started))\n"
-        if let ended { md += "ended: \(iso.string(from: ended))\n" }
-        md += "---\n\n# Transcript\n\n"
-        for u in store.utterances {
-            var line = "- \(time.string(from: u.time)) \(u.text)"
-            if let refs = refsByUtterance[u.id] {
-                line += refs.map { "[^\($0)]" }.joined()
-            }
-            md += line + "\n"
-        }
-
-        if !footnotes.isEmpty {
-            md += "\n# Cards\n\n"
-            for (label, card) in footnotes {
-                md += footnote(label: label, card: card)
-            }
-        }
-
-        if !orphans.isEmpty {
-            md += "\n# Other cards\n\n"
-            for card in orphans {
-                md += "## [\(card.kind)] \(card.title)\n\n\(card.body)\n\n"
-            }
-        }
-
+        let md = SessionMarkdown.inline(
+            utterances: store.utterances, cards: store.cards, started: started, ended: ended)
         try? md.write(to: fileURL, atomically: true, encoding: .utf8)
-    }
-
-    /// Renders a card as a footnote definition. The body is indented 4 spaces
-    /// per line so multi-paragraph cards stay inside the footnote.
-    private func footnote(label: String, card: Card) -> String {
-        var out = "[^\(label)]: **[\(card.kind)] \(card.title)**\n\n"
-        for line in card.body.split(separator: "\n", omittingEmptySubsequences: false) {
-            out += line.isEmpty ? "\n" : "    \(line)\n"
-        }
-        return out + "\n"
     }
 }
