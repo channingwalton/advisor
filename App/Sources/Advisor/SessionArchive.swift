@@ -89,6 +89,45 @@ enum SessionArchive {
         return String(markdown[close.upperBound...].drop(while: { $0 == "\n" }))
     }
 
+    /// `markdown` with its `name:` frontmatter set to `name` (collapsed to one
+    /// line). An empty/blank `name` removes the key. Existing frontmatter keys and
+    /// the body are preserved; a note without frontmatter gains one. Pure, for
+    /// testability. Used to rename a *saved* session — the live note is renamed
+    /// through `SessionWriter` instead, to avoid the two-writer clobber.
+    static func settingName(_ name: String, in markdown: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        guard markdown.hasPrefix("---\n"),
+            let close = markdown.range(
+                of: "\n---\n",
+                range: markdown.index(markdown.startIndex, offsetBy: 4)..<markdown.endIndex)
+        else {
+            // No frontmatter: prepend one carrying just the name (nothing to do
+            // when clearing a name that was never set).
+            return trimmed.isEmpty ? markdown : "---\nname: \(trimmed)\n---\n\n" + markdown
+        }
+        let open = markdown.index(markdown.startIndex, offsetBy: 4)
+        var lines = markdown[open..<close.lowerBound]
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .filter { !$0.hasPrefix("name:") }
+        if !trimmed.isEmpty { lines.append("name: \(trimmed)") }
+        return "---\n" + lines.joined(separator: "\n") + markdown[close.lowerBound...]
+    }
+
+    /// Set (or clear) the `name:` frontmatter of `file` on disk. Returns false if
+    /// the write fails.
+    @discardableResult
+    static func setName(_ name: String, in file: SessionFile) -> Bool {
+        let updated = settingName(name, in: contents(of: file))
+        do {
+            try updated.write(to: file.url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// `existing` with a follow-up Q&A appended under a single `# Follow-ups`
     /// heading (added the first time only). Pure, for testability.
     static func appendingFollowUp(

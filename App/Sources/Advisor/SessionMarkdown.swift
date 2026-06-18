@@ -11,7 +11,7 @@ enum SessionMarkdown {
     /// `failed` cards are included; in-flight cards are skipped.
     static func inline(
         utterances: [Utterance], cards: [Card], started: Date?, ended: Date?,
-        context: String = ""
+        context: String = "", name: String = ""
     ) -> String {
         let iso = ISO8601DateFormatter()
         let time = DateFormatter()
@@ -36,6 +36,12 @@ enum SessionMarkdown {
         }
 
         var md = "---\n"
+        // An optional user-given label, taking precedence over `context` as the
+        // session's title in the browser. Collapsed to one line like `context`.
+        let nm = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !nm.isEmpty {
+            md += "name: \(nm.replacingOccurrences(of: "\n", with: " "))\n"
+        }
         if let started { md += "started: \(iso.string(from: started))\n" }
         if let ended { md += "ended: \(iso.string(from: ended))\n" }
         // The session context/prompt, collapsed to one line so it stays a simple

@@ -56,6 +56,58 @@ import Foundation
     #expect(SessionArchive.strippingFrontmatter(note) == note)
 }
 
+@Test func settingNameInsertsAndPreservesEverythingElse() {
+    let note = "---\nstarted: 2026-06-18T17:00:00Z\ncontext: Effects\n---\n\n"
+        + "# Transcript\n\n- 17:00:00 hi\n\n# Follow-ups\n\n> **Q · x**\n"
+    let out = SessionArchive.settingName("My talk", in: note)
+    #expect(SessionArchive.frontmatter(out)["name"] == "My talk")
+    #expect(SessionArchive.frontmatter(out)["context"] == "Effects") // other keys kept
+    #expect(SessionArchive.strippingFrontmatter(out).hasPrefix("# Transcript"))
+    #expect(out.contains("- 17:00:00 hi"))   // body kept
+    #expect(out.contains("> **Q · x**"))     // follow-ups kept
+}
+
+@Test func settingNameReplacesExisting() {
+    let note = "---\nname: Old\nstarted: 2026-06-18T17:00:00Z\n---\n\n# Transcript\n"
+    let out = SessionArchive.settingName("New", in: note)
+    #expect(SessionArchive.frontmatter(out)["name"] == "New")
+    #expect(!out.contains("name: Old"))
+}
+
+@Test func settingBlankNameRemovesKey() {
+    let note = "---\nname: Old\nstarted: 2026-06-18T17:00:00Z\n---\n\n# Transcript\n"
+    let out = SessionArchive.settingName("   ", in: note)
+    #expect(SessionArchive.frontmatter(out)["name"] == nil)
+    #expect(SessionArchive.frontmatter(out)["started"] == "2026-06-18T17:00:00Z")
+}
+
+@Test func settingNameAddsFrontmatterWhenAbsent() {
+    let note = "# Transcript\n\n- 17:00 hi\n"
+    let out = SessionArchive.settingName("Fresh", in: note)
+    #expect(out.hasPrefix("---\nname: Fresh\n---\n\n"))
+    #expect(SessionArchive.strippingFrontmatter(out) == note) // body untouched
+}
+
+@Test func setNameRoundTripsThroughDisk() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let url = dir.appendingPathComponent("2026-06-18-170000.md")
+    try "---\ncontext: Effects\n---\n\n# Transcript\n\n- 17:00:00 hi\n"
+        .write(to: url, atomically: true, encoding: .utf8)
+
+    let file = try #require(SessionArchive.list(in: dir).first)
+    #expect(SessionArchive.setName("Renamed", in: file))
+
+    let parsed = SessionDetail.parse(
+        contents: SessionArchive.contents(of: file), fallbackTitle: "x")
+    #expect(parsed.name == "Renamed")
+    #expect(parsed.title == "Renamed")
+    #expect(parsed.context == "Effects") // untouched
+}
+
 @Test func readsContentsOfSessionFile() throws {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")

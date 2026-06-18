@@ -12,6 +12,11 @@ final class TranscriptWindowContext: ObservableObject {
     /// Set once when the live view sets up; nil before then.
     var sidecar: SidecarManager?
 
+    /// The live session writer, used to rename the note it currently owns (the
+    /// live/just-finished session) without racing its debounced rewrite. Renaming
+    /// any other saved note goes straight to disk via `SessionArchive.setName`.
+    var writer: SessionWriter?
+
     /// The note the live `SessionWriter` currently owns (from session start until
     /// the next session starts). Asking about it is disabled: the writer's
     /// debounced full rewrite — which still fires post-stop as late research cards

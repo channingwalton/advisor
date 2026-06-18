@@ -11,6 +11,7 @@ struct ListeningToolbar: View {
     @Binding var selectedDevice: InputDevice?
     let devices: [InputDevice]
     let captureSystem: Bool
+    @Binding var sessionName: String
     @Binding var sessionContext: String
     @Binding var autoCards: Bool
     @Binding var pinned: Bool
@@ -25,6 +26,7 @@ struct ListeningToolbar: View {
     let onExport: () -> Void
 
     @State private var showFocus = false
+    @State private var showName = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -35,6 +37,7 @@ struct ListeningToolbar: View {
             }
             audioSourceButton
             Spacer(minLength: 8)
+            nameChip
             focusChip
             autoCardsToggle
             floatButton
@@ -171,6 +174,53 @@ struct ListeningToolbar: View {
     }
 
     // MARK: focus chip
+
+    /// The Name button's text: the session name (trimmed to keep the toolbar
+    /// tidy) when one is set, otherwise the "Name" placeholder.
+    private var nameLabel: String {
+        let name = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { return "Name" }
+        return name.count > 24 ? String(name.prefix(24)) + "…" : name
+    }
+
+    /// A dedicated control for the optional session name — kept distinct from
+    /// Context so it's where someone would look to name a session. Shows the name
+    /// once set; click to edit (live too).
+    private var nameChip: some View {
+        Button { showName.toggle() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "tag").font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                Text(nameLabel).font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(sessionName.isEmpty ? Theme.textBody : Theme.textStrong)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 34)
+            .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
+                    .stroke(Theme.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showName, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Name").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textStrong)
+                Text("An optional short label for this session. Editable during it.")
+                    .font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextField("e.g. Q3 board review", text: $sessionName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .padding(.horizontal, 8).frame(width: 280, height: 30)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.hairline, lineWidth: 0.5))
+                    .onSubmit { showName = false }
+            }
+            .padding(14)
+        }
+        .help("Session name")
+    }
 
     private var focusChip: some View {
         Button { showFocus.toggle() } label: {

@@ -89,6 +89,20 @@ private func makeCard(
     #expect(md.contains("[BBC](https://bbc.co.uk)"))
 }
 
+@Test func frontmatterCarriesName() {
+    let md = SessionMarkdown.inline(
+        utterances: [], cards: [], started: Date(timeIntervalSince1970: 0), ended: nil,
+        context: "ctx", name: "Board review\nextra")
+    // The optional name collapses to one frontmatter scalar, like context.
+    #expect(md.contains("name: Board review extra\n"))
+}
+
+@Test func omitsAbsentName() {
+    let md = SessionMarkdown.inline(
+        utterances: [], cards: [], started: Date(timeIntervalSince1970: 0), ended: nil)
+    #expect(!md.contains("name:"))
+}
+
 @Test func frontmatterCarriesStartedAndEnded() {
     let started = Date(timeIntervalSince1970: 1_000)
     let ended = Date(timeIntervalSince1970: 2_000)

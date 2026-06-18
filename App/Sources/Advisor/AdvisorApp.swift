@@ -91,6 +91,10 @@ struct TranscriptView: View {
     /// (sent on session_start) or edited live during the session (pushed via
     /// onChange). Cleared when the session stops.
     @State private var sessionContext = ""
+    /// The optional session name: a short label, distinct from the research
+    /// context. Filled before Listen (seeded into the writer at start) or edited
+    /// live; titles the session in the browser. Cleared when the session stops.
+    @State private var sessionName = ""
     @State private var triggers = AdvisorConfig.Triggers()
     @State private var autoCards = true
     @State private var pinned = false
@@ -114,6 +118,7 @@ struct TranscriptView: View {
                 selectedDevice: $selectedDevice,
                 devices: devices,
                 captureSystem: captureSystem,
+                sessionName: $sessionName,
                 sessionContext: $sessionContext,
                 autoCards: $autoCards,
                 pinned: $pinned,
@@ -150,6 +155,14 @@ struct TranscriptView: View {
                 let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
                 sidecar?.sendSessionContext(trimmed)
                 writer?.updateContext(trimmed)
+                writer?.noteChanged()
+            }
+        }
+        .onChange(of: sessionName) { _, new in
+            // The name is a local label, not research context — only the note's
+            // title tracks it (no sidecar push). Persisted on the next write.
+            if store.listening {
+                writer?.updateName(new.trimmingCharacters(in: .whitespacesAndNewlines))
                 writer?.noteChanged()
             }
         }
@@ -443,6 +456,9 @@ struct TranscriptView: View {
         // can answer questions about a saved session.
         TranscriptWindowContext.shared.sidecar = manager
         writer = SessionWriter(store: store)
+        // Share the writer too, so the Sessions browser can rename the live note
+        // through it rather than racing its rewrite.
+        TranscriptWindowContext.shared.writer = writer
         rebuildRecorder()
     }
 
@@ -543,6 +559,7 @@ struct TranscriptView: View {
             sidecar?.sendSessionEnd()
             writer?.end()
             sessionContext = "" // blank slate for the next session
+            sessionName = ""
             sessionStart = nil
             pausedAt = nil
         } else {
@@ -551,8 +568,9 @@ struct TranscriptView: View {
             sessionStart = Date()
             pausedAt = nil
             let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
+            let nm = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
             sidecar?.sendSessionStart(UUID().uuidString, context: ctx)
-            writer?.start(context: ctx)
+            writer?.start(context: ctx, name: nm)
             // A transcript window opened on this note must disable asking until
             // the live writer is done with it.
             TranscriptWindowContext.shared.liveFileURL = writer?.currentFileURL

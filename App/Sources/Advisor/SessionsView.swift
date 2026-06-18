@@ -237,7 +237,7 @@ struct SessionsView: View {
             let contents = SessionArchive.contents(of: file)
             let detail = SessionDetail.parse(
                 contents: contents, fallbackTitle: Self.rowTitle(file.date))
-            let haystack = ([detail.title, detail.gist]
+            let haystack = ([detail.title, detail.name, detail.context, detail.gist]
                 + detail.cards.map(\.title)
                 + detail.blocks.compactMap { if case .paragraph(let t) = $0 { t } else { nil } })
                 .joined(separator: " ").lowercased()
@@ -326,6 +326,10 @@ private struct SessionDetailPane: View {
     @State private var answerState = "" // "" idle, else pending|streaming|done|failed
     @State private var askNote = ""
 
+    // Rename state.
+    @State private var renaming = false
+    @State private var renameText = ""
+
     private var isAsking: Bool { answerState == "pending" || answerState == "streaming" }
     /// Asking the still-being-written live note is disabled (the writer's
     /// debounced rewrite would clobber an appended follow-up).
@@ -364,6 +368,10 @@ private struct SessionDetailPane: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
                 Menu {
+                    Button("Rename…") {
+                        renameText = detail.name
+                        renaming = true
+                    }
                     Button("Export…", action: exportSession)
                     Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([file.url])
@@ -379,6 +387,26 @@ private struct SessionDetailPane: View {
             }
             Text(metaLine).font(.system(size: 12.5)).foregroundStyle(Theme.textSecondary)
         }
+        .alert("Rename session", isPresented: $renaming) {
+            TextField("Session name", text: $renameText)
+            Button("Save", action: saveName)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Give this session a name. Leave blank to fall back to its context.")
+        }
+    }
+
+    /// Persist the renamed title. The live/just-finished note is renamed through
+    /// its writer (so the rewrite carries the name); any other note is edited on
+    /// disk directly. Either way, reload the browser from disk.
+    private func saveName() {
+        let new = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isLive, let writer = ctx.writer {
+            writer.renameOwnedNote(new)
+        } else {
+            SessionArchive.setName(new, in: file)
+        }
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
     private var metaLine: String {

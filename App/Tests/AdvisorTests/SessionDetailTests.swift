@@ -38,6 +38,32 @@ context: Effect systems research talk
     #expect(d.gist == "OCaml is adopting effect systems.")
 }
 
+@Test func nameOverridesContextAsTitle() {
+    let named = """
+    ---
+    name: Weekly sync
+    started: 2026-06-18T17:00:00Z
+    context: Effect systems research talk
+    ---
+
+    # Transcript
+
+    - 17:00:00 hi
+    """
+    let d = SessionDetail.parse(contents: named, fallbackTitle: "fallback")
+    #expect(d.title == "Weekly sync")
+    #expect(d.name == "Weekly sync")
+    // Context stays exposed even when a name overrides the title, so search can
+    // still match it.
+    #expect(d.context == "Effect systems research talk")
+}
+
+@Test func unnamedSessionExposesEmptyName() {
+    let d = SessionDetail.parse(contents: note, fallbackTitle: "fallback")
+    #expect(d.name == "")
+    #expect(d.title == "Effect systems research talk") // still context-titled
+}
+
 @Test func missingContextFallsBackToTitle() {
     let bare = "---\nstarted: 2026-06-18T17:00:00Z\n---\n\n# Transcript\n\n- 17:00:00 hi"
     let d = SessionDetail.parse(contents: bare, fallbackTitle: "Thu 18 Jun, 5:00 PM")

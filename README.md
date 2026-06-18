@@ -87,7 +87,9 @@ rebuilds `dist/Advisor.app` from scratch.
 Click **Listen**. Words appear live in grey as they're spoken, replaced by
 finalised sentences; cards appear inline when the assistant decides something
 is worth answering, checking, or explaining — or when you ask via the query
-box. Transcript text is selectable; **right-click** a selection (or the whole
+box. The **Context** button (before or during a session) holds an optional
+**name** — a short label that titles the session in the browser — and a context
+prompt that steers the assistant. Transcript text is selectable; **right-click** a selection (or the whole
 sentence) to run **Answer / Context / Fact check** on it directly — the same
 actions the assistant triggers automatically, gated by the same preference
 toggles, with the resulting card anchored under that line. Once a card has
@@ -107,10 +109,13 @@ choose.
 The **History** button (clock icon) opens the **Sessions** browser — a master/
 detail window over past sessions. The left sidebar lists sessions grouped by day
 (Today / Yesterday / Earlier this week / …) with search and an All / This week
-filter; each row shows the session's title (the context you typed before Listen,
-or the date), a gist, duration and card count. Selecting one shows it on the
-right: title and meta, the questions you asked, and the transcript rendered like
-the live window (with the cards Advisor surfaced inline, as in the live view).
+filter; each row shows the session's title (its name if you gave it one, else the
+context you typed before Listen, else the date), a gist, duration and card count.
+Selecting one shows it on the right: title and meta, the questions you asked, and
+the transcript rendered like the live window (with the cards Advisor surfaced
+inline, as in the live view). Give a session a name with the `…` menu → **Rename**
+(top right of the detail) — a short label for an easier-to-scan list; leave it
+blank to fall back to the context.
 Ask a question about the selected session in the box at the bottom: the answer
 streams in and, once finished, is appended to that session's note under a
 `# Follow-ups` heading, so the saved transcript grows with

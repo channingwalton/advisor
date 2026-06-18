@@ -10,6 +10,7 @@ final class SessionWriter {
     private var started: Date?
     private var ended: Date?
     private var context = ""
+    private var name = ""
     /// True between `start()` and `end()`. Gates `updateContext` so a context
     /// change arriving after stop (the toolbar clears the prompt, but
     /// `store.listening` flips asynchronously) can't blank the saved title; late
@@ -29,10 +30,11 @@ final class SessionWriter {
             at: sessionsDirectory, withIntermediateDirectories: true)
     }
 
-    func start(context: String = "") {
+    func start(context: String = "", name: String = "") {
         started = Date()
         ended = nil
         self.context = context
+        self.name = name
         sessionActive = true
         fileURL = sessionsDirectory.appendingPathComponent(SessionArchive.fileName(for: started!))
         write()
@@ -45,6 +47,25 @@ final class SessionWriter {
     func updateContext(_ text: String) {
         guard sessionActive else { return }
         context = text
+    }
+
+    /// Update the optional session name mid-session (the name field is editable
+    /// while listening); persisted on the next write. Gated on `sessionActive`
+    /// like `updateContext`, so the toolbar blanking the field on stop can't wipe
+    /// the saved name. `inline` trims/collapses it, so the raw text is fine here.
+    func updateName(_ text: String) {
+        guard sessionActive else { return }
+        name = text
+    }
+
+    /// Rename the note this writer still owns (the live or just-finished session,
+    /// whose `fileURL` it keeps until the next session starts) and write it out
+    /// now. Used by the Sessions browser: a direct frontmatter write would be
+    /// clobbered by a late rewrite when a research card finishes, so renaming the
+    /// owned note must go through the writer. Not gated — it runs post-stop.
+    func renameOwnedNote(_ text: String) {
+        name = text
+        flush()
     }
 
     func end() {
@@ -103,7 +124,7 @@ final class SessionWriter {
         guard let fileURL, let started else { return }
         let md = SessionMarkdown.inline(
             utterances: store.utterances, cards: store.cards, started: started, ended: ended,
-            context: context)
+            context: context, name: name)
         try? md.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 }

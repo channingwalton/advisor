@@ -304,6 +304,24 @@ Listen, now persisted to the note's frontmatter (`SessionMarkdown.inline` writes
 `context:`, collapsed to one line; `SessionWriter` carries it, updatable
 mid-session), with a date fallback for untitled/old notes.
 
+**Optionally naming a session.** A session can be given an explicit `name:`
+(frontmatter), which wins over `context` as the browser title — context steers
+research and is often verbose or empty, so a short label keeps the list scannable
+(`SessionDetail` precedence: name → context → date). Set two ways: **before/during
+a live session** from the toolbar's Context popover (a Name field beside the
+context box — seeded into the writer at `start`, edited live via `updateName`,
+gated on `sessionActive` like context so the stop-time blank can't wipe it), or
+**after the fact** from the Sessions detail (the `…` menu → Rename). Two write
+paths mirror the two-writer split: the **live/just-finished note** (still owned by
+`SessionWriter`) is renamed *through* the writer (browser rename calls
+`renameOwnedNote`, which sets the name and flushes; live edits ride the normal
+debounced write) — a direct frontmatter write would be clobbered when a late
+research card finishes; **any other saved note** is edited on disk via
+`SessionArchive.setName` (a pure `settingName` frontmatter editor that inserts/
+replaces/removes the key while preserving body and follow-ups). The browser
+reaches the live writer through `TranscriptWindowContext`, the same bridge it uses
+for the live sidecar.
+
 **Rendered like the live window, not as raw markdown.** The saved format is a
 timestamped bullet list with `>`-quoted cards, so rendering it via `MarkdownUI`
 read nothing like the live feed. `TranscriptDoc` reconstructs display blocks —

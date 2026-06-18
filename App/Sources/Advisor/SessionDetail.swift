@@ -22,6 +22,12 @@ struct AskedQuestion: Equatable {
 /// category/topics/summary/people).
 struct SessionDetail: Equatable {
     let title: String
+    /// The user-given session name (`name:` frontmatter), or "" if unnamed. The
+    /// rename field pre-fills from this; `title` uses it when present.
+    let name: String
+    /// The research context (`context:` frontmatter), or "". Kept distinct from
+    /// `title` so search still matches it even when a `name` overrides the title.
+    let context: String
     let gist: String
     let started: Date?
     let ended: Date?
@@ -40,6 +46,7 @@ struct SessionDetail: Equatable {
     static func parse(contents: String, fallbackTitle: String) -> SessionDetail {
         let fm = SessionArchive.frontmatter(contents)
         let iso = ISO8601DateFormatter()
+        let name = fm["name"]?.trimmingCharacters(in: .whitespaces) ?? ""
         let context = fm["context"]?.trimmingCharacters(in: .whitespaces) ?? ""
         let blocks = TranscriptDoc.blocks(from: SessionArchive.strippingFrontmatter(contents))
 
@@ -59,8 +66,12 @@ struct SessionDetail: Equatable {
             if case .paragraph(let t) = block { t } else { nil }
         }.first ?? ""
 
+        // A user-given name wins; otherwise the research context; otherwise date.
+        let title = !name.isEmpty ? name : (context.isEmpty ? fallbackTitle : context)
         return SessionDetail(
-            title: context.isEmpty ? fallbackTitle : context,
+            title: title,
+            name: name,
+            context: context,
             gist: truncated(firstParagraph, max: 90),
             started: fm["started"].flatMap(iso.date(from:)),
             ended: fm["ended"].flatMap(iso.date(from:)),
