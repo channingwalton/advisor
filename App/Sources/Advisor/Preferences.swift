@@ -32,12 +32,15 @@ struct AdvisorConfig: Codable, Equatable {
     /// The sidecar acts purely on the injected env var, so this is not mirrored in
     /// sidecar/src/config.ts — like sttLocale.
     var authMode = "subscription"
+    /// App-side only: window appearance — "system" (default, follow macOS),
+    /// "light" or "dark". Drives `NSApp.appearance`; not seen by the sidecar.
+    var appearance = "system"
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
-        case provider, model, sttLocale, authMode
+        case provider, model, sttLocale, authMode, appearance
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -53,6 +56,7 @@ struct AdvisorConfig: Codable, Equatable {
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
         authMode = try c.decodeIfPresent(String.self, forKey: .authMode) ?? "subscription"
+        appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? "system"
     }
 
     static var fileURL: URL {
@@ -280,6 +284,15 @@ struct PreferencesView: View {
                 Toggle("Answer questions", isOn: $config.triggers.question)
                 Toggle("Surface background context", isOn: $config.triggers.context)
                 Toggle("Fact-check claims", isOn: $config.triggers.factcheck)
+            }
+
+            Section("Appearance") {
+                Picker("Theme", selection: $config.appearance) {
+                    Text("System").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
             }
 
             Section("Transcription") {

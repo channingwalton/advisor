@@ -350,6 +350,17 @@ whose sidecar dies mid-stream leaks its handler and the pane stays "asking"
 (parity with `card_reply`); the list refreshes on open and on
 `.advisorSessionsChanged` (posted when a session starts or ends).
 
+## Appearance preference (2026-06-18)
+
+Light/dark/system picker in Preferences (issue #3). `config.appearance`
+("system"|"light"|"dark") is App-side only — deliberately absent from the
+sidecar config (like `sttLocale`/`authMode`), since appearance is pure UI.
+`AppDelegate` sets `NSApp.appearance` (nil for "system", `.aqua`/`.darkAqua`
+otherwise) at launch and again on every `.advisorConfigChanged` post, so the
+change lands without a relaunch. The Theme's colours are already dynamic
+NSColors resolved against `NSApp.effectiveAppearance`, so forcing the app
+appearance drives the whole UI for free — no per-view `.preferredColorScheme`.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

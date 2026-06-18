@@ -123,7 +123,7 @@ here until it has fully saved.)
 agent count, connector action permissions, trigger sensitivity
 (conservative/balanced/eager) and per-kind toggles, the agent backend (one
 provider + model shared by the classifier, research, and manual-query lanes),
-system-audio capture, and STT locale. Stored in
+appearance (system/light/dark), system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
 next session start. The toolbar keeps only in-session controls: the record
 cluster (waveform, timer, pause/stop, mic mute), audio source, **Context**, Auto

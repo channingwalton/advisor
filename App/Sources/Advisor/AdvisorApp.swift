@@ -26,6 +26,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        applyAppearance(AdvisorConfig.load().appearance)
+        // Reapply when the appearance preference changes, without a relaunch.
+        NotificationCenter.default.addObserver(
+            forName: .advisorConfigChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.applyAppearance(AdvisorConfig.load().appearance)
+        }
+    }
+
+    /// Force the app's appearance from the saved preference. "system" clears the
+    /// override so the app follows macOS; the Theme's dynamic colours resolve
+    /// against `NSApp.effectiveAppearance`, so this drives the whole UI.
+    private func applyAppearance(_ value: String) {
+        switch value {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
     }
 
     /// On Cmd-Q, AppKit calls `exit()`, which runs C++ static destructors.
