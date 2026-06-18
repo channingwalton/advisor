@@ -1,0 +1,22 @@
+import Foundation
+
+/// Shared handles the past-transcript window needs but can't receive as params:
+/// it is a sibling `WindowGroup` scene, not a child of `TranscriptView`, so the
+/// live `sidecar` and the note the live writer still owns are passed through a
+/// process-wide holder the live view populates and the window observes.
+@MainActor
+final class TranscriptWindowContext: ObservableObject {
+    static let shared = TranscriptWindowContext()
+
+    /// The live sidecar, used to answer questions about a saved transcript.
+    /// Set once when the live view sets up; nil before then.
+    var sidecar: SidecarManager?
+
+    /// The note the live `SessionWriter` currently owns (from session start until
+    /// the next session starts). Asking about it is disabled: the writer's
+    /// debounced full rewrite — which still fires post-stop as late research cards
+    /// finish — would clobber an appended follow-up.
+    @Published var liveFileURL: URL?
+
+    private init() {}
+}

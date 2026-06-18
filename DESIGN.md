@@ -274,15 +274,48 @@ parses these files (write-only archival), so no migration — old notes keep the
 old format. `SessionMarkdown` is a pure function, covered by the project's first
 unit tests (`Tests/AdvisorTests`, swift-testing).
 
-### 2026-06-18 — Browse past transcripts + ask-and-append
+### 2026-06-18 — Sessions browser (master/detail) + ask-and-append
 
-A **History** sheet (clock icon, left of Sessions) browses saved session notes:
-`SessionArchive` lists `~/Library/Application Support/Advisor/sessions/*.md`,
-parsing the `yyyy-MM-dd-HHmmss.md` name to a date (the filename formatter +
-on-disk location, previously private to `SessionWriter`, moved here so both share
-one source of truth). Master/detail — sessions left (newest first), the selected
-note rendered right via the existing `MarkdownUI` (no new dependency, no custom
-parser). Read-only browsing; an ask bar adds Q&A.
+The **History** button (clock icon) opens the **Sessions** window (`SessionsView`,
+a single `Window(id: "sessions")` with `.hiddenTitleBar`) — a master/detail
+browser over saved notes, per `design_handoff_advisor/SESSIONS.md`. `SessionArchive`
+lists `~/Library/Application Support/Advisor/sessions/*.md`, parsing the
+`yyyy-MM-dd-HHmmss.md` name to a date (the filename formatter + on-disk location,
+previously private to `SessionWriter`, moved here so both share one source of
+truth). Left: search + an All / This week filter + a date-grouped list (Today /
+Yesterday / Earlier this week / This month / Earlier); each row shows title, gist,
+time, duration and card count, with the selected row a white card + blue accent
+bar. Right: the selected session — title, meta line, the questions asked of it,
+and the full transcript (cards inline, as in the live feed) — plus the ask bar.
+(Starting a recording stays in the Listening window's toolbar, not duplicated
+here.)
+
+**Scope: layout + real data only.** Everything rendered comes from the saved
+notes. The handoff's AI-derived fields (category badge, topic chips, summary,
+people, action items) and star / Resume are deliberately **not** built yet — they
+need new generation, protocol changes and per-session storage. Two deviations from
+the handoff, both deliberate: (1) the handoff wants Sessions and Listening as two
+destinations of *one* window (`NavigationSplitView`); fully merging them safely
+means hoisting the recorder/sidecar/writer lifecycle out of `TranscriptView` (it
+rebuilds on `.task`, so a naïve swap would respawn the sidecar each visit), a large
+refactor — Sessions is its own window for now (the handoff allows "your existing
+navigation"). (2) Titles come from the **session context** the user types before
+Listen, now persisted to the note's frontmatter (`SessionMarkdown.inline` writes
+`context:`, collapsed to one line; `SessionWriter` carries it, updatable
+mid-session), with a date fallback for untitled/old notes.
+
+**Rendered like the live window, not as raw markdown.** The saved format is a
+timestamped bullet list with `>`-quoted cards, so rendering it via `MarkdownUI`
+read nothing like the live feed. `TranscriptDoc` reconstructs display blocks —
+the inverse of `SessionMarkdown.inline`: consecutive transcript lines join into
+flowing paragraphs (new paragraph when the inter-line gap exceeds 2 s, matching
+the live feed's collapsing; blank lines between entries do **not** split, since
+`inline` blank-separates every entry), blockquotes become cards. Paragraphs render
+through the same `SelectableTranscriptText` the live view uses (no AI actions);
+card blocks render in live card chrome. `SessionDetail.parse` layers on top,
+splitting the card blocks into "surfaced cards" vs "you asked" (a `Q ·` label) and
+deriving title/gist/timing. Pure parsers, unit-tested (`TranscriptDocTests`,
+`SessionDetailTests`).
 
 **Asking runs on its own isolated path, not the live query lane.** The query lane
 is bound to live-session state (the rolling transcript-delta cursor, the session
@@ -305,13 +338,17 @@ transcript grows with the questions asked of it.
 **Two-writer hazard, guarded.** `SessionWriter` rewrites its note wholesale (a
 2 s debounced re-render from the store) and keeps owning its `fileURL` after
 `end()` (late research cards still land in the file). A follow-up append to that
-same file would be clobbered by the next debounced rewrite. The History view
+same file would be clobbered by the next debounced rewrite. The detail pane
 therefore refuses to ask about **any file the live writer still owns**
 (`writer.currentFileURL`, not merely "while listening") — the just-ended session
-becomes askable once the next session starts or the app restarts. Residual
-limitations (accepted for a single-user local tool): an `ask_document` whose
-sidecar dies mid-stream leaks its handler and the view stays "asking" until the
-sheet is reopened (parity with `card_reply`); the list refreshes only on open.
+becomes askable once the next session starts or the app restarts. Because the
+Sessions window is a sibling scene (not a child of the live view), it can't
+receive the sidecar/owned-file as params; `TranscriptWindowContext` (a
+`@MainActor` shared holder the live view populates) carries both across scenes.
+Residual limitations (accepted for a single-user local tool): an `ask_document`
+whose sidecar dies mid-stream leaks its handler and the pane stays "asking"
+(parity with `card_reply`); the list refreshes on open and on
+`.advisorSessionsChanged` (posted when a session starts or ends).
 
 ## Revisit as it grows
 

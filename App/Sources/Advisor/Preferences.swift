@@ -4,6 +4,9 @@ extension Notification.Name {
     /// Posted when Preferences saves config.json, so live views (e.g. the
     /// right-click action menu) can reload without an app relaunch.
     static let advisorConfigChanged = Notification.Name("advisorConfigChanged")
+    /// Posted when a session note is created or finalised, so the Sessions
+    /// browser refreshes its list without being reopened.
+    static let advisorSessionsChanged = Notification.Name("advisorSessionsChanged")
 }
 
 /// Mirrors sidecar/src/config.ts — written to Application Support/Advisor/config.json.

@@ -49,6 +49,11 @@ struct AdvisorApp: App {
             TranscriptView(store: store)
                 .frame(minWidth: 420, minHeight: 480)
         }
+        // The Sessions browser — a single shared master/detail window.
+        Window("Sessions", id: "sessions") {
+            SessionsView()
+        }
+        .windowStyle(.hiddenTitleBar)
         Settings {
             PreferencesView()
         }
@@ -77,8 +82,8 @@ struct TranscriptView: View {
     /// When paused, the moment of pausing — freezes the timer. Nil when running.
     @State private var pausedAt: Date?
     @State private var writer: SessionWriter?
-    @State private var showHistory = false
     @State private var spaceMonitor: Any?
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("micDeviceName") private var micDeviceName = ""
 
@@ -98,7 +103,7 @@ struct TranscriptView: View {
                 onPauseResume: { if store.paused { resumeSession() } else { pauseSession() } },
                 onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
                 onStop: { Task { await toggle() } },
-                onHistory: { showHistory = true },
+                onHistory: { openWindow(id: "sessions") },
                 onSessions: {
                     if let writer { NSWorkspace.shared.open(writer.sessionsDirectory) }
                 },
@@ -113,11 +118,6 @@ struct TranscriptView: View {
             )
         }
         .background(Theme.surfaceWindow)
-        .sheet(isPresented: $showHistory) {
-            SessionHistoryView(
-                sidecar: sidecar,
-                liveFileURL: writer?.currentFileURL)
-        }
         .task { setup() }
         .onAppear(perform: installSpaceMonitor)
         .onDisappear {
@@ -127,9 +127,12 @@ struct TranscriptView: View {
         .onChange(of: selectedDevice) { _, d in if let d { micDeviceName = d.name } }
         .onChange(of: sessionContext) { _, new in
             // Push live edits to the running agents; pre-session text rides along
-            // on session_start instead.
+            // on session_start instead. Also keep the note's title in sync.
             if store.listening {
-                sidecar?.sendSessionContext(new.trimmingCharacters(in: .whitespacesAndNewlines))
+                let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+                sidecar?.sendSessionContext(trimmed)
+                writer?.updateContext(trimmed)
+                writer?.noteChanged()
             }
         }
         .onChange(of: autoCards) { _, on in sidecar?.sendAuto(on) }
@@ -418,6 +421,9 @@ struct TranscriptView: View {
         manager.start()
         manager.sendLanes(agentLanes)
         sidecar = manager
+        // Share the sidecar with past-transcript windows (sibling scenes) so they
+        // can answer questions about a saved session.
+        TranscriptWindowContext.shared.sidecar = manager
         writer = SessionWriter(store: store)
         rebuildRecorder()
     }
@@ -528,7 +534,10 @@ struct TranscriptView: View {
             pausedAt = nil
             let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
             sidecar?.sendSessionStart(UUID().uuidString, context: ctx)
-            writer?.start()
+            writer?.start(context: ctx)
+            // A transcript window opened on this note must disable asking until
+            // the live writer is done with it.
+            TranscriptWindowContext.shared.liveFileURL = writer?.currentFileURL
             await recorder.start(device: selectedDevice, captureSystem: captureSystem)
         }
     }

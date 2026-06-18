@@ -10,7 +10,8 @@ enum SessionMarkdown {
     /// triggering line — the same ordering the live feed uses). Only `done`/
     /// `failed` cards are included; in-flight cards are skipped.
     static func inline(
-        utterances: [Utterance], cards: [Card], started: Date?, ended: Date?
+        utterances: [Utterance], cards: [Card], started: Date?, ended: Date?,
+        context: String = ""
     ) -> String {
         let iso = ISO8601DateFormatter()
         let time = DateFormatter()
@@ -37,6 +38,12 @@ enum SessionMarkdown {
         var md = "---\n"
         if let started { md += "started: \(iso.string(from: started))\n" }
         if let ended { md += "ended: \(iso.string(from: ended))\n" }
+        // The session context/prompt, collapsed to one line so it stays a simple
+        // frontmatter scalar — used as the session's title in the browser.
+        let ctx = context.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !ctx.isEmpty {
+            md += "context: \(ctx.replacingOccurrences(of: "\n", with: " "))\n"
+        }
         md += "---\n\n# Transcript\n\n"
         md += entries.map(\.text).joined(separator: "\n\n")
         return md + "\n"

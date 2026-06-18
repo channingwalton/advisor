@@ -9,6 +9,12 @@ final class SessionWriter {
     private var fileURL: URL?
     private var started: Date?
     private var ended: Date?
+    private var context = ""
+    /// True between `start()` and `end()`. Gates `updateContext` so a context
+    /// change arriving after stop (the toolbar clears the prompt, but
+    /// `store.listening` flips asynchronously) can't blank the saved title; late
+    /// post-stop rewrites for finishing cards keep the retained context.
+    private var sessionActive = false
     private var pendingWrite: DispatchWorkItem?
 
     /// The note currently being written (set at session start). The history
@@ -23,16 +29,29 @@ final class SessionWriter {
             at: sessionsDirectory, withIntermediateDirectories: true)
     }
 
-    func start() {
+    func start(context: String = "") {
         started = Date()
         ended = nil
+        self.context = context
+        sessionActive = true
         fileURL = sessionsDirectory.appendingPathComponent(SessionArchive.fileName(for: started!))
         write()
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+    }
+
+    /// Update the session context mid-session (the prompt is editable while
+    /// listening); persisted on the next write so the title stays current.
+    /// Ignored once the session has ended — see `sessionActive`.
+    func updateContext(_ text: String) {
+        guard sessionActive else { return }
+        context = text
     }
 
     func end() {
         ended = Date()
+        sessionActive = false
         write()
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
         // fileURL stays set: cards finishing after stop still land in the file.
     }
 
@@ -83,7 +102,8 @@ final class SessionWriter {
     private func write() {
         guard let fileURL, let started else { return }
         let md = SessionMarkdown.inline(
-            utterances: store.utterances, cards: store.cards, started: started, ended: ended)
+            utterances: store.utterances, cards: store.cards, started: started, ended: ended,
+            context: context)
         try? md.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 }

@@ -104,12 +104,18 @@ embedded inline in the conversation just as the window shows them. The
 **Export** button (share icon) copies the current session note to a location you
 choose.
 
-The **History** button (clock icon) opens a browser over past sessions: pick one
-on the left to read its transcript on the right, then ask a question about it in
-the box at the bottom. The answer streams in below the transcript and, once
-finished, is appended to that session's note under a `# Follow-ups` heading, so
-the saved transcript grows with the questions you ask of it. (The session
-currently being recorded is read-only here until it has fully saved.)
+The **History** button (clock icon) opens the **Sessions** browser — a master/
+detail window over past sessions. The left sidebar lists sessions grouped by day
+(Today / Yesterday / Earlier this week / …) with search and an All / This week
+filter; each row shows the session's title (the context you typed before Listen,
+or the date), a gist, duration and card count. Selecting one shows it on the
+right: title and meta, the questions you asked, and the transcript rendered like
+the live window (with the cards Advisor surfaced inline, as in the live view).
+Ask a question about the selected session in the box at the bottom: the answer
+streams in and, once finished, is appended to that session's note under a
+`# Follow-ups` heading, so the saved transcript grows with
+the questions you ask of it. (The session currently being recorded is read-only
+here until it has fully saved.)
 
 ## Preferences
 

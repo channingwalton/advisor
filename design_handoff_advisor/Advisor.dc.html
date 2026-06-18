@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: #e8e8ec; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; }
+  @keyframes adv-bar { 0%,100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
+  @keyframes adv-pulse { 0% { box-shadow: 0 0 0 0 rgba(255,69,58,0.45); } 70% { box-shadow: 0 0 0 7px rgba(255,69,58,0); } 100% { box-shadow: 0 0 0 0 rgba(255,69,58,0); } }
+  @keyframes adv-caret { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+  @keyframes adv-spin { to { transform: rotate(360deg); } }
+  @keyframes adv-cardin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .adv-scroll::-webkit-scrollbar { width: 9px; }
+  .adv-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); border-radius: 5px; border: 2px solid #fbfbfd; }
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 36px; background: radial-gradient(120% 120% at 50% 0%, #ececf1 0%, #e2e2e8 100%);">
+<div style="width: 1040px; height: 864px; background: #fbfbfd; border-radius: 13px; overflow: hidden; box-shadow: 0 28px 70px -18px rgba(20,22,40,0.42), 0 2px 6px rgba(20,22,40,0.10); border: 0.5px solid rgba(0,0,0,0.14); display: flex; flex-direction: column;">
+
+  <!-- ===== TITLE BAR ===== -->
+  <div style="height: 52px; flex: 0 0 52px; display: flex; align-items: center; padding: 0 18px; background: linear-gradient(#fdfdff, #f4f4f8); border-bottom: 0.5px solid rgba(0,0,0,0.09); position: relative;">
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12);"></span>
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #febc2e; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12);"></span>
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #28c840; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12);"></span>
+    </div>
+    <div style="position: absolute; left: 0; right: 0; margin: 0 auto; width: max-content; display: flex; align-items: center; gap: 9px; pointer-events: none;">
+      <span style="font-size: 13.5px; font-weight: 600; color: #3a3a42; letter-spacing: 0.1px;">Advisor</span>
+      <span style="width: 1px; height: 13px; background: rgba(0,0,0,0.12);"></span>
+      <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #ff453a; font-weight: 500;">
+        <span style="width: 7px; height: 7px; border-radius: 50%; background: #ff453a; animation: adv-pulse 1.8s infinite;"></span>
+        Listening · 18:24
+      </span>
+    </div>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 7px;">
+      <button style="height: 26px; padding: 0 11px; border-radius: 7px; border: 0.5px solid rgba(0,0,0,0.10); background: #fff; font-size: 12px; color: #44454e; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; box-shadow: 0 1px 1.5px rgba(0,0,0,0.05);" style-hover="background:#f4f4f8;">
+        <span style="width: 11px; height: 11px; border: 1.6px solid #8a8b95; border-radius: 3px; display: inline-block;"></span>Sessions
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== TOOLBAR ===== -->
+  <div style="height: 60px; flex: 0 0 60px; display: flex; align-items: center; gap: 14px; padding: 0 18px; background: #fbfbfd; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
+    <div style="display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border-radius: 11px; background: linear-gradient(#fff, #fbfbfd); border: 0.5px solid rgba(255,69,58,0.28); box-shadow: 0 1px 2px rgba(0,0,0,0.05), inset 0 0 0 1px rgba(255,69,58,0.05);">
+      <span style="display: inline-flex; align-items: flex-end; gap: 2.5px; height: 16px;">
+        <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite;"></span>
+        <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite 0.15s;"></span>
+        <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite 0.3s;"></span>
+        <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite 0.45s;"></span>
+        <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite 0.6s;"></span>
+      </span>
+      <span style="font-size: 12.5px; font-weight: 600; color: #d8362d; font-variant-numeric: tabular-nums; letter-spacing: 0.2px;">18:24</span>
+      <button title="Pause" style="width: 30px; height: 30px; border-radius: 8px; border: 0.5px solid rgba(0,0,0,0.08); background: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 1.5px rgba(0,0,0,0.06);" style-hover="background:#f3f3f7;">
+        <span style="display: inline-flex; gap: 3px;"><span style="width: 3px; height: 11px; background: #5a5b65; border-radius: 1.5px;"></span><span style="width: 3px; height: 11px; background: #5a5b65; border-radius: 1.5px;"></span></span>
+      </button>
+      <button title="Stop" style="width: 30px; height: 30px; border-radius: 8px; border: none; background: #ff453a; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(255,69,58,0.4);" style-hover="background:#f5392f;">
+        <span style="width: 10px; height: 10px; background: #fff; border-radius: 2.5px;"></span>
+      </button>
+    </div>
+
+    <button style="display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px 0 11px; border-radius: 9px; border: 0.5px solid rgba(0,0,0,0.09); background: #fff; cursor: pointer; box-shadow: 0 1px 1.5px rgba(0,0,0,0.04);" style-hover="background:#f6f6fa;">
+      <span style="width: 16px; height: 16px; border-radius: 5px 5px 7px 7px; border: 1.6px solid #7c7d88; position: relative; display: inline-block;"><span style="position: absolute; left: 50%; bottom: -4px; transform: translateX(-50%); width: 7px; height: 3px; border: 1.6px solid #7c7d88; border-top: none; border-radius: 0 0 5px 5px;"></span></span>
+      <span style="display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15;">
+        <span style="font-size: 12px; font-weight: 600; color: #33343c;">Studio Display Mic</span>
+        <span style="font-size: 10px; color: #9596a0;">+ system audio</span>
+      </span>
+      <span style="display: inline-flex; flex-direction: column; gap: 1px; margin-left: 2px; color: #b3b4bd;"><span style="font-size: 7px; line-height: 6px;">▲</span><span style="font-size: 7px; line-height: 6px;">▼</span></span>
+    </button>
+
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+      <div style="display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 9px; background: #eef1fb; border: 0.5px solid rgba(58,92,224,0.18);">
+        <span style="font-size: 10.5px; font-weight: 700; color: #3a5ce0; letter-spacing: 0.4px; text-transform: uppercase;">Focus</span>
+        <span style="font-size: 12px; color: #3b4254; font-weight: 500; white-space: nowrap;">Effect systems · research talk</span>
+        <span style="font-size: 11px; color: #8a93b5; cursor: pointer;">Edit</span>
+      </div>
+      <div style="display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px 0 10px; border-radius: 9px; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); box-shadow: 0 1px 1.5px rgba(0,0,0,0.04);">
+        <span style="font-size: 12px; font-weight: 500; color: #44454e;">Auto cards</span>
+        <span style="width: 32px; height: 19px; border-radius: 10px; background: #3a5ce0; position: relative; display: inline-block;"><span style="position: absolute; top: 1.5px; right: 1.5px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25);"></span></span>
+      </div>
+      <button title="Float" style="width: 34px; height: 34px; border-radius: 9px; border: 0.5px solid rgba(0,0,0,0.09); background: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 1.5px rgba(0,0,0,0.04);" style-hover="background:#f6f6fa;">
+        <span style="width: 15px; height: 11px; border: 1.6px solid #7c7d88; border-radius: 3px; display: inline-block; position: relative;"><span style="position: absolute; right: 1.5px; bottom: 1.5px; width: 6px; height: 4px; background: #7c7d88; border-radius: 1px;"></span></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== TRANSCRIPT + INLINE CARDS ===== -->
+  <div class="adv-scroll" style="flex: 1; overflow-y: auto; min-height: 0; background: #fbfbfd;">
+    <div style="max-width: 812px; margin: 0 auto; padding: 26px 28px 40px;">
+
+      <div style="text-align: center; font-size: 10.5px; color: #aeafb8; margin: 0 0 22px; font-weight: 500; letter-spacing: 0.3px;">Today · 6:22 PM · on-device transcription</div>
+
+      <!-- transcript turn -->
+      <div style="margin-bottom: 18px; font-size: 14.5px; line-height: 1.68; color: #3a3b44;">OCaml is adopting effect systems in a big way. But <mark style="background: #eae6fb; color: #6044c0; border-radius: 3px; padding: 0 2px;">Koka</mark> — Daan Leijen's language — has been a bit of a laboratory for exploring effect systems, which is pretty interesting. And there's also a language called <mark style="background: #eae6fb; color: #6044c0; border-radius: 3px; padding: 0 2px;">Granule</mark>, more of a research project, predominantly by Dominic Orchard and his collaborators. So I don't think the world of algebraic effects has settled down yet.</div>
+
+      <!-- ===== CARD C1: CONTEXT (expanded, researching) ===== -->
+      <sc-if value="{{ showC1 }}" hint-placeholder-val="{{ true }}">
+      <div style="margin: 0 0 22px; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 14px; box-shadow: 0 5px 18px -8px rgba(20,22,40,0.18), 0 1px 2px rgba(0,0,0,0.04); overflow: hidden; animation: adv-cardin 0.4s ease both;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 13px 15px 0;">
+          <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #6044c0; background: #eee9fb; padding: 3px 8px; border-radius: 6px;"><span style="width: 5px; height: 5px; border-radius: 50%; background: #6044c0;"></span>CONTEXT</span>
+          <span style="font-size: 15px; font-weight: 650; color: #2a2b33;">OCaml effect systems</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #9596a0; margin-left: 2px;"><span style="width: 11px; height: 11px; border-radius: 50%; border: 1.6px solid #dcdce3; border-top-color: #9596a0; display: inline-block; animation: adv-spin 0.7s linear infinite;"></span>Researching</span>
+          <span style="margin-left: auto; display: inline-flex; gap: 3px;">
+            <button onClick="{{ toggleC1 }}" title="Collapse" style="width: 26px; height: 26px; border-radius: 7px; border: none; background: transparent; cursor: pointer; color: #b0b1bb; display: inline-flex; align-items: center; justify-content: center; font-size: 13px;" style-hover="background:#f1f1f5;color:#5a5b65;">⌃</button>
+            <button onClick="{{ dismissC1 }}" title="Dismiss" style="width: 26px; height: 26px; border-radius: 7px; border: none; background: transparent; cursor: pointer; color: #b0b1bb; display: inline-flex; align-items: center; justify-content: center; font-size: 15px;" style-hover="background:#f1f1f5;color:#5a5b65;">×</button>
+          </span>
+        </div>
+        <div style="padding: 11px 16px 4px;">
+          <div style="font-size: 13.5px; line-height: 1.58; color: #44454f;"><strong>OCaml effect handlers</strong> were added in <strong>OCaml 5.0 (Dec 2022)</strong>, alongside the new multicore runtime.</div>
+          <div style="display: flex; gap: 9px; margin: 10px 0 0;"><span style="flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: #c3b8e8; margin-top: 8px;"></span><div style="font-size: 13.5px; line-height: 1.58; color: #44454f;"><strong>Control mechanism, not type-tracked.</strong> Effects are <em>unchecked</em> — there's no effect system in the types. You declare <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: #f1f0f6; color: #6e54b8; padding: 1px 5px; border-radius: 4px;">type _ Effect.t += E</code>, call <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: #f1f0f6; color: #6e54b8; padding: 1px 5px; border-radius: 4px;">perform E</code>, and install a handler that captures a delimited continuation.</div></div>
+          <div style="display: flex; gap: 9px; margin: 9px 0 0;"><span style="flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: #c3b8e8; margin-top: 8px;"></span><div style="font-size: 13.5px; line-height: 1.58; color: #44454f;"><strong>Why they added them: concurrency.</strong> Schedulers, lightweight threads and async IO in user-land without callback colouring — this underpins <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: #f1f0f6; color: #6e54b8; padding: 1px 5px; border-radius: 4px;">Eio</code>.</div></div>
+          <div style="display: flex; gap: 9px; margin: 9px 0 0;"><span style="flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: #c3b8e8; margin-top: 8px;"></span><div style="font-size: 13.5px; line-height: 1.58; color: #44454f;"><strong>Relation to multicore.</strong> Domains give parallelism; effects give cooperative concurrency. Direct-style code, no <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: #f1f0f6; color: #6e54b8; padding: 1px 5px; border-radius: 4px;">&gt;&gt;=</code>.</div></div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 11px 16px; margin-top: 6px; border-top: 0.5px solid rgba(0,0,0,0.06);">
+          <span style="font-size: 11px; color: #9a9ba4;">↳</span>
+          <span style="font-size: 11px; color: #8a8b95; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">"OCaml is adopting effect systems in a big way"</span>
+          <span style="margin-left: auto; display: inline-flex; gap: 10px; white-space: nowrap;">
+            <a style="font-size: 11px; color: #3a5ce0; text-decoration: none;" href="#">OCaml manual</a>
+            <a style="font-size: 11px; color: #3a5ce0; text-decoration: none;" href="#">Eio</a>
+          </span>
+        </div>
+        <div style="display: flex; gap: 8px; padding: 0 12px 12px;">
+          <div style="flex: 1; display: flex; align-items: center; height: 34px; padding: 0 12px; background: #f7f7fa; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 9px; font-size: 12.5px; color: #a9aab3;">Ask a follow-up about OCaml effects…</div>
+          <button style="height: 34px; padding: 0 15px; border-radius: 9px; border: 0.5px solid rgba(0,0,0,0.10); background: #fff; font-size: 12.5px; font-weight: 600; color: #6a6b75; cursor: pointer;" style-hover="background:#f4f4f8;">Send</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ===== CARD C2: ANSWER (expanded) ===== -->
+      <sc-if value="{{ showC2 }}" hint-placeholder-val="{{ true }}">
+      <div style="margin: 0 0 22px; background: #fff; border: 0.5px solid rgba(58,92,224,0.22); border-radius: 14px; box-shadow: 0 5px 18px -8px rgba(58,92,224,0.22), 0 1px 2px rgba(0,0,0,0.04); overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 13px 15px 0;">
+          <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #3a5ce0; background: #e7ecfd; padding: 3px 8px; border-radius: 6px;"><span style="width: 5px; height: 5px; border-radius: 50%; background: #3a5ce0;"></span>ANSWER</span>
+          <span style="font-size: 12px; color: #8a93b5;">replying to <strong style="color: #5a6788; font-weight: 600;">your question</strong></span>
+          <span style="margin-left: auto; display: inline-flex; gap: 3px;">
+            <button onClick="{{ toggleC2 }}" title="Collapse" style="width: 26px; height: 26px; border-radius: 7px; border: none; background: transparent; cursor: pointer; color: #b0b1bb; display: inline-flex; align-items: center; justify-content: center; font-size: 13px;" style-hover="background:#f1f1f5;color:#5a5b65;">⌃</button>
+            <button onClick="{{ dismissC2 }}" title="Dismiss" style="width: 26px; height: 26px; border-radius: 7px; border: none; background: transparent; cursor: pointer; color: #b0b1bb; display: inline-flex; align-items: center; justify-content: center; font-size: 15px;" style-hover="background:#f1f1f5;color:#5a5b65;">×</button>
+          </span>
+        </div>
+        <div style="padding: 11px 16px 4px;">
+          <div style="font-size: 14.5px; font-weight: 650; color: #2a2b33; line-height: 1.45; margin-bottom: 7px;">Koka tracks effects in the type system; OCaml 5 doesn't.</div>
+          <div style="font-size: 13.5px; line-height: 1.58; color: #44454f;">Both have handlers — the difference is whether the compiler knows about effects:</div>
+          <div style="display: flex; gap: 9px; margin: 10px 0 0;"><span style="flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: #aebbf0; margin-top: 8px;"></span><div style="font-size: 13.5px; line-height: 1.58; color: #44454f;"><strong>Koka</strong> — row-based effect typing: every function's type lists which effects it may perform, e.g. <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: #eaeefb; color: #3a5ce0; padding: 1px 5px; border-radius: 4px;">&lt;console,exn&gt;</code>. Pure functions have empty rows.</div></div>
+          <div style="display: flex; gap: 9px; margin: 9px 0 0;"><span style="flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: #aebbf0; margin-top: 8px;"></span><div style="font-size: 13.5px; line-height: 1.58; color: #44454f;"><strong>OCaml 5</strong> — effects are <em>untyped</em>: handlers exist, but the type system won't warn you an effect is unhandled. A typed version was prototyped, then cut to ship.</div></div>
+          <div style="font-size: 13.5px; line-height: 1.58; color: #44454f; margin-top: 10px;">So OCaml shipped the runtime <em>mechanism</em>; Koka is the research vehicle for the <em>type discipline</em>.</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 11px 16px; margin-top: 6px; border-top: 0.5px solid rgba(0,0,0,0.06);">
+          <span style="font-size: 11px; color: #8a8b95;">Grounded in the live conversation</span>
+          <span style="margin-left: auto; display: inline-flex; gap: 10px; white-space: nowrap;">
+            <a style="font-size: 11px; color: #3a5ce0; text-decoration: none;" href="#">Koka docs</a>
+            <a style="font-size: 11px; color: #3a5ce0; text-decoration: none;" href="#">OCaml 5 notes</a>
+          </span>
+        </div>
+        <div style="display: flex; gap: 8px; padding: 0 12px 12px;">
+          <div style="flex: 1; display: flex; align-items: center; height: 34px; padding: 0 12px; background: #f5f7fe; border: 0.5px solid rgba(58,92,224,0.16); border-radius: 9px; font-size: 12.5px; color: #9aa3c4;">Ask a follow-up…</div>
+          <button style="height: 34px; padding: 0 15px; border-radius: 9px; border: none; background: #3a5ce0; font-size: 12.5px; font-weight: 600; color: #fff; cursor: pointer; box-shadow: 0 1px 3px rgba(58,92,224,0.3);" style-hover="background:#3350cf;">Send</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <div style="margin-bottom: 18px; font-size: 14.5px; line-height: 1.68; color: #3a3b44;">Right, and the performance story matters here. Koka compiles handlers with this evidence-passing translation and a reference-counting scheme so the runtime cost stays low.</div>
+
+      <!-- ===== CARD C3: FACT-CHECK (collapsed) ===== -->
+      <sc-if value="{{ showC3 }}" hint-placeholder-val="{{ true }}">
+      <div style="margin: 0 0 13px; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 14px; box-shadow: 0 3px 12px -8px rgba(20,22,40,0.14), 0 1px 2px rgba(0,0,0,0.04); overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 12px 13px 12px 15px;">
+          <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #2f8d5b; background: #e6f4ec; padding: 3px 8px; border-radius: 6px;"><span style="width: 12px; height: 12px; border-radius: 50%; background: #2f8d5b; color: #fff; font-size: 8px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800;">✓</span>VERIFIED</span>
+          <span style="font-size: 13.5px; font-weight: 600; color: #34353d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">Koka's reference-counting scheme is called "Perceus"</span>
+          <span style="margin-left: auto; display: inline-flex; gap: 3px; flex: 0 0 auto;">
+            <button onClick="{{ toggleC3 }}" title="Expand" style="width: 26px; height: 26px; border-radius: 7px; border: none; background: transparent; cursor: pointer; color: #b0b1bb; display: inline-flex; align-items: center; justify-content: center; font-size: 13px;" style-hover="background:#f1f1f5;color:#5a5b65;">⌄</button>
+            <button onClick="{{ dismissC3 }}" title="Dismiss" style="width: 26px; height: 26px; border-radius: 7px; border: none; background: transparent; cursor: pointer; color: #b0b1bb; display: inline-flex; align-items: center; justify-content: center; font-size: 15px;" style-hover="background:#f1f1f5;color:#5a5b65;">×</button>
+          </span>
+        </div>
+        <sc-if value="{{ openC3 }}" hint-placeholder-val="{{ false }}">
+        <div style="padding: 0 16px 13px;">
+          <div style="font-size: 13.5px; line-height: 1.58; color: #44454f;"><strong>Perceus</strong> (Precise Reference Counting with Reuse and Specialization) is Koka's compile-time memory management pass. Combined with evidence passing, it makes algebraic-effect handlers cheap enough for production use — the claim checks out.</div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 11px; padding-top: 11px; border-top: 0.5px solid rgba(0,0,0,0.06);">
+            <span style="font-size: 11px; color: #9a9ba4;">↳</span>
+            <span style="font-size: 11px; color: #8a8b95; font-style: italic;">"a reference-counting scheme so the runtime cost stays low"</span>
+            <a style="margin-left: auto; font-size: 11px; color: #3a5ce0; text-decoration: none;" href="#">Perceus paper (2021)</a>
+          </div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- ===== CARD C4: CONTEXT Granule (collapsed) ===== -->
+      <sc-if value="{{ showC4 }}" hint-placeholder-val="{{ true }}">
+      <div style="margin: 0 0 22px; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 14px; box-shadow: 0 3px 12px -8px rgba(20,22,40,0.14), 0 1px 2px rgba(0,0,0,0.04); overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 12px 13px 12px 15px;">
+          <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #6044c0; background: #eee9fb; padding: 3px 8px; border-radius: 6px;"><span style="width: 5px; height: 5px; border-radius: 50%; background: #6044c0;"></span>CONTEXT</span>
+          <span style="font-size: 13.5px; font-weight: 600; color: #34353d;">Granule language</span>
+          <span style="font-size: 12.5px; color: #9a9ba4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">— graded modal types, by Dominic Orchard</span>
+          <span style="margin-left: auto; display: inline-flex; gap: 3px; flex: 0 0 auto;">
+            <button onClick="{{ toggleC4 }}" title="Expand" style="width: 26px; height: 26px; border-radius: 7px; border: none; background: transparent; cursor: pointer; color: #b0b1bb; display: inline-flex; align-items: center; justify-content: center; font-size: 13px;" style-hover="background:#f1f1f5;color:#5a5b65;">⌄</button>
+            <button onClick="{{ dismissC4 }}" title="Dismiss" style="width: 26px; height: 26px; border-radius: 7px; border: none; background: transparent; cursor: pointer; color: #b0b1bb; display: inline-flex; align-items: center; justify-content: center; font-size: 15px;" style-hover="background:#f1f1f5;color:#5a5b65;">×</button>
+          </span>
+        </div>
+        <sc-if value="{{ openC4 }}" hint-placeholder-val="{{ false }}">
+        <div style="padding: 0 16px 13px;">
+          <div style="font-size: 13.5px; line-height: 1.58; color: #44454f;"><strong>Granule</strong> (≈2017) is a functional research language built on a linear λ-calculus with <strong>graded modal types</strong> — it tracks <em>how</em> values are used (how many times, under what resources), not just their type. It's a vehicle for exploring the effect/coeffect design space rather than a production language.</div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 11px; padding-top: 11px; border-top: 0.5px solid rgba(0,0,0,0.06);">
+            <span style="font-size: 11px; color: #9a9ba4;">↳</span>
+            <span style="font-size: 11px; color: #8a8b95; font-style: italic;">"a language called Granule"</span>
+            <a style="margin-left: auto; font-size: 11px; color: #3a5ce0; text-decoration: none;" href="#">Granule project</a>
+          </div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- interim / live line -->
+      <div style="font-size: 14.5px; line-height: 1.68; color: #80818b;">So between row-typed effects, untyped handlers and graded types, there are really three different design philosophies<span style="display: inline-block; width: 7px; height: 16px; background: #3a5ce0; border-radius: 1px; margin-left: 3px; vertical-align: -3px; animation: adv-caret 1s steps(1) infinite;"></span></div>
+
+    </div>
+  </div>
+
+  <!-- ===== ASK BAR ===== -->
+  <div style="flex: 0 0 auto; padding: 11px 18px 14px; background: linear-gradient(#fbfbfd, #f5f5f8); border-top: 0.5px solid rgba(0,0,0,0.08);">
+    <div style="display: flex; gap: 7px; margin-bottom: 9px;">
+      <span style="font-size: 11.5px; color: #5e5f69; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); padding: 5px 11px; border-radius: 14px; cursor: pointer; box-shadow: 0 1px 1.5px rgba(0,0,0,0.03);">Summarize the last 5 minutes</span>
+      <span style="font-size: 11.5px; color: #5e5f69; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); padding: 5px 11px; border-radius: 14px; cursor: pointer; box-shadow: 0 1px 1.5px rgba(0,0,0,0.03);">Which of these is production-ready?</span>
+      <span style="font-size: 11.5px; color: #5e5f69; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); padding: 5px 11px; border-radius: 14px; cursor: pointer; box-shadow: 0 1px 1.5px rgba(0,0,0,0.03);">Draft a follow-up question</span>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <div style="flex: 1; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; background: #fff; border: 0.5px solid rgba(0,0,0,0.13); border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <span style="width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; color: #3a5ce0;">✦</span>
+        <span style="font-size: 14px; color: #a9aab3;">Ask anything about this conversation — or beyond it…</span>
+        <span style="margin-left: auto; display: inline-flex; gap: 3px; font-size: 11px; color: #b6b7c0;"><span style="border: 0.5px solid rgba(0,0,0,0.12); border-radius: 4px; padding: 1px 5px; background: #f7f7fa;">⌘</span><span style="border: 0.5px solid rgba(0,0,0,0.12); border-radius: 4px; padding: 1px 5px; background: #f7f7fa;">↵</span></span>
+      </div>
+      <button style="height: 44px; padding: 0 22px; border-radius: 12px; border: none; background: #3a5ce0; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 6px rgba(58,92,224,0.32);" style-hover="background:#3350cf;">Ask</button>
+    </div>
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { open: { C1: true, C2: true, C3: false, C4: false }, gone: {} };
+  renderVals() {
+    const s = this.state;
+    const out = {};
+    ['C1', 'C2', 'C3', 'C4'].forEach((id) => {
+      out['show' + id] = !s.gone[id];
+      out['open' + id] = !!s.open[id];
+      out['closed' + id] = !s.open[id];
+      out['toggle' + id] = () => this.setState((p) => ({ open: { ...p.open, [id]: !p.open[id] } }));
+      out['dismiss' + id] = () => this.setState((p) => ({ gone: { ...p.gone, [id]: true } }));
+    });
+    return out;
+  }
+}
+</script>
+</body>
+</html>

@@ -59,6 +59,24 @@ enum SessionArchive {
         (try? String(contentsOf: file.url, encoding: .utf8)) ?? ""
     }
 
+    /// Parses the leading `---` … `---` frontmatter into `key: value` pairs
+    /// (the format `SessionMarkdown.inline` writes: `started`, `ended`,
+    /// `context`). Empty when there's no frontmatter block.
+    static func frontmatter(_ markdown: String) -> [String: String] {
+        guard markdown.hasPrefix("---\n") else { return [:] }
+        let afterOpen = markdown.index(markdown.startIndex, offsetBy: 4)
+        guard let close = markdown.range(of: "\n---\n", range: afterOpen..<markdown.endIndex)
+        else { return [:] }
+        var out: [String: String] = [:]
+        for line in markdown[afterOpen..<close.lowerBound].split(separator: "\n") {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = line[..<colon].trimmingCharacters(in: .whitespaces)
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if !key.isEmpty { out[key] = value }
+        }
+        return out
+    }
+
     /// The note body with any leading YAML frontmatter (`---` … `---`) removed,
     /// for display. Without this, markdown reads the `started:`/`ended:` lines
     /// closed by `---` as a setext heading and renders them huge. The session
