@@ -379,6 +379,47 @@ change lands without a relaunch. The Theme's colours are already dynamic
 NSColors resolved against `NSApp.effectiveAppearance`, so forcing the app
 appearance drives the whole UI for free — no per-view `.preferredColorScheme`.
 
+## Sessions as the main window (2026-06-19, issue #4)
+
+The app now opens on the **Sessions** browser, not the live feed. `SessionsView`
+is the first scene — a `Window(id: "sessions")` with `.defaultLaunchBehavior(.presented)`
+— and its title bar carries a **New** button that opens the recording window. The
+recording window (`TranscriptView`) is a separate `Window(id: "recording")`
+(`.defaultLaunchBehavior(.suppressed)`, `.restorationBehavior(.disabled)`); being a
+`Window` (not a `WindowGroup`) makes it single-instance for free — New just brings
+the existing one forward, satisfying "only one recording window at a time".
+
+This forced the **service-lifecycle hoist** the 2026-06-18 Sessions-browser entry
+deferred. The sidecar and writer can no longer live in `TranscriptView.setup()`:
+if the recording window is the only thing that starts them, the Sessions browser
+couldn't answer questions about saved transcripts before a recording window ever
+opened. A new `AppServices` (`@MainActor ObservableObject`, the `@StateObject` in
+`AdvisorApp`) owns the **app-lifetime** trio — `store`, `sidecar`, `writer` —
+constructed in its `init` (so the `@StateObject`-can't-reference-another-`@StateObject`
+rule never bites) and started once from the Sessions scene's `.task`. It publishes
+`sidecar`/`writer` into the existing `TranscriptWindowContext` bridge, so
+`SessionsView` is unchanged. The **`Recorder`** (the audio device) stays
+window-owned — built on demand by the recording window — and `AppServices` holds it
+only `weak`, purely so the terminate cleanup (`onTerminate`, registered once in
+`start()`) can stop it before `_exit(0)`.
+
+**Close = clean stop.** Closing the recording window mid-session ends *that*
+session — `onDisappear` runs the stop branch (stop audio, `session_end`,
+`writer.end()`) but never `sidecar.stop()`, so the shared sidecar survives. It then
+clears the app-lifetime store so a reopened window starts blank.
+
+**The store-clear hazard, guarded.** Clearing the *shared* store while the writer
+still owned its just-saved note was a data-loss trap: `SessionWriter` rewrites the
+note wholesale from the store, and `end()` keeps `fileURL` (late cards land in the
+file), so the app-terminate flush — or the store-clear's own debounced rewrite —
+would serialise the emptied store over the saved note. The fix is
+`SessionWriter.releaseNote()`: on window close (after the final `end()` flush) it
+nils `fileURL`/`started`, so `write()`'s existing `guard let fileURL, let started`
+no-ops every later rewrite. `liveFileURL` is dropped at the same point, so the
+finished note is handed off to disk-based management (the browser renames/queries
+it via `SessionArchive`, not the now-detached writer) — which also releases the
+two-writer ask-lock immediately on close instead of waiting for the next session.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

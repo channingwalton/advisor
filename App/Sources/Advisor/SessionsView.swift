@@ -21,6 +21,7 @@ private struct LoadedSession: Identifiable, Equatable {
 /// The handoff's AI-derived bits (category badge, topic chips, summary, people,
 /// action items) and star/Resume are deliberately not rendered yet.
 struct SessionsView: View {
+    @Environment(\.openWindow) private var openWindow
     @State private var sessions: [LoadedSession] = []
     @State private var selection: URL?
     @State private var query = ""
@@ -69,6 +70,14 @@ struct SessionsView: View {
             Text("Sessions").font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity)
+        // Title stays centred; "New" opens the single recording window (or brings
+        // the existing one forward).
+        .overlay(alignment: .trailing) {
+            Button { openWindow(id: "recording") } label: {
+                Label("New", systemImage: "plus")
+            }
+            .help("Start a new recording")
+        }
         .padding(.horizontal, 14)
         .frame(height: 52)
         .background(Theme.surfaceTitlebar)

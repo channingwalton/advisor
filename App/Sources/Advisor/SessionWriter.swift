@@ -76,6 +76,21 @@ final class SessionWriter {
         // fileURL stays set: cards finishing after stop still land in the file.
     }
 
+    /// Detach from the note this writer owns so no later `write()` can touch it.
+    /// Used when the recording window closes and its shared store is cleared for
+    /// reuse: the note is already flushed by `end()`, and zeroing `fileURL`/
+    /// `started` makes `write()`'s guard no-op any stray rewrite — both the
+    /// store-clear's change notification and the app-terminate flush — which would
+    /// otherwise serialise the emptied store over the saved note. The next
+    /// `start()` re-establishes them.
+    func releaseNote() {
+        pendingWrite?.cancel()
+        fileURL = nil
+        started = nil
+        ended = nil
+        sessionActive = false
+    }
+
     /// True when there is something worth exporting — any transcript line, or a
     /// finished card. Drives the toolbar's Export button enabled state.
     var hasExportContent: Bool {

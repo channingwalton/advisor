@@ -60,18 +60,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct AdvisorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var store = TranscriptStore()
+    @StateObject private var services = AppServices()
+    @AppStorage("agentLanes") private var agentLanes = 3
 
     var body: some Scene {
-        WindowGroup("Advisor") {
-            TranscriptView(store: store)
-                .frame(minWidth: 420, minHeight: 480)
-        }
-        // The Sessions browser — a single shared master/detail window.
+        // The Sessions browser is the main window: it opens at launch and is a
+        // single shared master/detail window. Starting `services` here (not in
+        // the recording window) keeps the sidecar alive so saved transcripts can
+        // be queried with no recording window open.
         Window("Sessions", id: "sessions") {
             SessionsView()
+                .task { services.start(lanes: agentLanes) }
         }
         .windowStyle(.hiddenTitleBar)
+        .defaultLaunchBehavior(.presented)
+        // The recording window — single-instance by virtue of being a `Window`
+        // (not a `WindowGroup`): the Sessions "New" button opens it, and
+        // re-opening just brings the existing one forward. Never auto-opens.
+        Window("Recording", id: "recording") {
+            TranscriptView(services: services)
+                .frame(minWidth: 420, minHeight: 480)
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
         Settings {
             PreferencesView()
         }
@@ -79,14 +90,21 @@ struct AdvisorApp: App {
 }
 
 struct TranscriptView: View {
+    /// Launch-lifetime services (store, sidecar, writer) shared with the Sessions
+    /// window. The recording window owns only the `Recorder` it builds on appear.
+    let services: AppServices
     @ObservedObject var store: TranscriptStore
     @State private var recorder: Recorder?
     @State private var fatalError: String?
     @State private var devices: [InputDevice] = []
     @State private var selectedDevice: InputDevice?
     @AppStorage("captureSystem") private var captureSystem = true
-    @State private var sidecar: SidecarManager?
     @State private var queryText = ""
+
+    init(services: AppServices) {
+        self.services = services
+        _store = ObservedObject(wrappedValue: services.store)
+    }
     /// The session prompt: optional free-text context. Filled before Listen
     /// (sent on session_start) or edited live during the session (pushed via
     /// onChange). Cleared when the session stops.
@@ -103,7 +121,6 @@ struct TranscriptView: View {
     @State private var sessionStart: Date?
     /// When paused, the moment of pausing — freezes the timer. Nil when running.
     @State private var pausedAt: Date?
-    @State private var writer: SessionWriter?
     @State private var spaceMonitor: Any?
     @Environment(\.openWindow) private var openWindow
     @AppStorage("agentLanes") private var agentLanes = 3
@@ -128,9 +145,9 @@ struct TranscriptView: View {
                 onStop: { Task { await toggle() } },
                 onHistory: { openWindow(id: "sessions") },
                 onSessions: {
-                    if let writer { NSWorkspace.shared.open(writer.sessionsDirectory) }
+                    NSWorkspace.shared.open(services.writer.sessionsDirectory)
                 },
-                canExport: writer?.hasExportContent ?? false,
+                canExport: services.writer.hasExportContent,
                 onExport: exportSession
             )
             statusLine
@@ -146,6 +163,23 @@ struct TranscriptView: View {
         .onDisappear {
             if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
             spaceMonitor = nil
+            // Closing the recording window cleanly ends an in-progress session
+            // (stops audio, flushes the note, signals the sidecar) but leaves the
+            // shared sidecar running so the Sessions browser keeps working.
+            if store.listening { stopSession() }
+            services.recorder = nil
+            // Detach the writer from the just-saved note and drop the live lock
+            // BEFORE clearing the shared store, so neither the store-clear's change
+            // notification nor the app-terminate flush can rewrite the note from an
+            // emptied store. The note is already on disk; the Sessions browser now
+            // treats it as a normal saved note (renamed/queried via disk).
+            services.writer.releaseNote()
+            TranscriptWindowContext.shared.liveFileURL = nil
+            // The store is app-lifetime (owned by AppServices); clear the rendered
+            // session so reopening the recording window starts blank.
+            store.utterances = []
+            store.cards = []
+            store.volatile = [:]
         }
         .onChange(of: selectedDevice) { _, d in if let d { micDeviceName = d.name } }
         .onChange(of: sessionContext) { _, new in
@@ -153,22 +187,25 @@ struct TranscriptView: View {
             // on session_start instead. Also keep the note's title in sync.
             if store.listening {
                 let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
-                sidecar?.sendSessionContext(trimmed)
-                writer?.updateContext(trimmed)
-                writer?.noteChanged()
+                services.sidecar.sendSessionContext(trimmed)
+                services.writer.updateContext(trimmed)
+                services.writer.noteChanged()
             }
         }
         .onChange(of: sessionName) { _, new in
             // The name is a local label, not research context — only the note's
             // title tracks it (no sidecar push). Persisted on the next write.
             if store.listening {
-                writer?.updateName(new.trimmingCharacters(in: .whitespacesAndNewlines))
-                writer?.noteChanged()
+                services.writer.updateName(new.trimmingCharacters(in: .whitespacesAndNewlines))
+                services.writer.noteChanged()
             }
         }
-        .onChange(of: autoCards) { _, on in sidecar?.sendAuto(on) }
+        .onChange(of: autoCards) { _, on in services.sidecar.sendAuto(on) }
         .onChange(of: pinned) { _, on in
-            guard let window = NSApp.windows.first(where: \.isVisible) else { return }
+            // Prefer the key window (the recording window, since its toolbar holds
+            // the pin toggle) now that the Sessions window is also on screen.
+            guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible)
+            else { return }
             window.level = on ? .floating : .normal
             window.collectionBehavior = on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
         }
@@ -177,11 +214,11 @@ struct TranscriptView: View {
             // action menu immediately, not only after a relaunch.
             triggers = AdvisorConfig.load().triggers
         }
-        .onChange(of: store.utterances) { _, _ in writer?.noteChanged() }
+        .onChange(of: store.utterances) { _, _ in services.writer.noteChanged() }
         // Only re-write the session note when output-bearing fields change — not
         // on pure UI toggles like expand/collapse (which also mutate store.cards).
-        .onChange(of: cardsWriterKey) { _, _ in writer?.noteChanged() }
-        .onChange(of: agentLanes) { _, n in sidecar?.sendLanes(n) }
+        .onChange(of: cardsWriterKey) { _, _ in services.writer.noteChanged() }
+        .onChange(of: agentLanes) { _, n in services.sidecar.sendLanes(n) }
     }
 
     /// Crash/error feedback, shown as a slim line under the toolbar only when
@@ -326,7 +363,7 @@ struct TranscriptView: View {
                                 toolTip: p.toolTip,
                                 actions: transcriptActions,
                                 onAction: { kind, selection in
-                                    sidecar?.sendAction(
+                                    services.sidecar.sendAction(
                                         kind, text: selection, triggerId: p.anchorId)
                                 }
                             )
@@ -338,10 +375,10 @@ struct TranscriptView: View {
                                 onDismiss: {
                                     // Cancel the underlying research so a dismissed
                                     // in-flight card doesn't keep a lane busy.
-                                    if card.isResearching { sidecar?.sendCancel(card.id) }
+                                    if card.isResearching { services.sidecar.sendCancel(card.id) }
                                     store.dismissCard(card.id)
                                 },
-                                onCancel: { sidecar?.sendCancel(card.id) },
+                                onCancel: { services.sidecar.sendCancel(card.id) },
                                 onReply: { submitReply(card, $0) }
                             )
                             .id(item.id)
@@ -411,9 +448,9 @@ struct TranscriptView: View {
         // Send first: if the sidecar is down the message is dropped, so skip the
         // optimistic edit — otherwise the card would spin forever with no answer
         // coming and no cancel button (hidden while replying).
-        let sent = sidecar?.sendCardReply(
+        let sent = services.sidecar.sendCardReply(
             cardId: card.id, kind: card.kind, title: card.title,
-            base: base, replyText: reply, transcript: recentTranscript()) ?? false
+            base: base, replyText: reply, transcript: recentTranscript())
         guard sent else { return }
         store.cards[idx].body = base + "\n\n---\n\n**You:** \(reply)\n\n…"
         store.cards[idx].replying = true
@@ -448,42 +485,26 @@ struct TranscriptView: View {
         // Sticky mic: restore the previously chosen device by name.
         selectedDevice =
             devices.first { $0.name == micDeviceName } ?? AudioDevices.preferred(devices)
-        let manager = SidecarManager(store: store)
-        manager.start()
-        manager.sendLanes(agentLanes)
-        sidecar = manager
-        // Share the sidecar with past-transcript windows (sibling scenes) so they
-        // can answer questions about a saved session.
-        TranscriptWindowContext.shared.sidecar = manager
-        writer = SessionWriter(store: store)
-        // Share the writer too, so the Sessions browser can rename the live note
-        // through it rather than racing its rewrite.
-        TranscriptWindowContext.shared.writer = writer
+        // The sidecar/writer are owned by AppServices (started at launch); this
+        // window only builds the audio recorder.
         rebuildRecorder()
     }
 
-    /// Capture the live sidecar/recorder/writer so `applicationShouldTerminate`
-    /// can shut them down cleanly before `_exit`. Re-run whenever any is rebuilt.
-    private func registerTerminationCleanup() {
-        AppDelegate.shared?.onTerminate = { [sidecar, recorder, writer] in
-            recorder?.stop() // stops audio engine + ScreenCaptureKit stream
-            sidecar?.stop() // closes stdin so the node child exits
-            writer?.end() // synchronous final flush
-        }
-    }
-
     private func rebuildRecorder() {
-        guard let manager = sidecar else { return }
+        let manager = services.sidecar
         do {
-            recorder = try Recorder(
+            let built = try Recorder(
                 store: store, locale: AdvisorConfig.load().sttLocale)
-            recorder?.onUtterance = { manager.sendUtterance($0) }
+            built.onUtterance = { manager.sendUtterance($0) }
+            recorder = built
+            // Hand the recorder to AppServices so termination cleanup can stop
+            // the audio engine before `_exit`.
+            services.recorder = built
             store.status = "ready — Apple speech"
             fatalError = nil
         } catch {
             fatalError = "\(error)"
         }
-        registerTerminationCleanup()
     }
 
     /// Space toggles play/pause/resume globally, except while editing a text
@@ -531,7 +552,8 @@ struct TranscriptView: View {
     /// The saved note is already in the window's inline-card format, so this
     /// just copies the file.
     private func exportSession() {
-        guard let writer, writer.hasExportContent else { return }
+        let writer = services.writer
+        guard writer.hasExportContent else { return }
         let panel = NSSavePanel()
         panel.title = "Export Session"
         panel.nameFieldStringValue = writer.suggestedFilename()
@@ -548,20 +570,27 @@ struct TranscriptView: View {
     private func submitQuery() {
         let text = queryText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
-        sidecar?.sendQuery(text)
+        services.sidecar.sendQuery(text)
         queryText = ""
+    }
+
+    /// End the current session cleanly: stop audio, signal the sidecar, flush the
+    /// note. Leaves the shared sidecar running. Called from `toggle()`'s stop
+    /// branch and from `onDisappear` when the window closes mid-session.
+    private func stopSession() {
+        recorder?.stop()
+        services.sidecar.sendSessionEnd()
+        services.writer.end()
+        sessionContext = "" // blank slate for the next session
+        sessionName = ""
+        sessionStart = nil
+        pausedAt = nil
     }
 
     private func toggle() async {
         guard let recorder else { return }
         if store.listening {
-            recorder.stop()
-            sidecar?.sendSessionEnd()
-            writer?.end()
-            sessionContext = "" // blank slate for the next session
-            sessionName = ""
-            sessionStart = nil
-            pausedAt = nil
+            stopSession()
         } else {
             store.utterances = []
             store.cards = []
@@ -569,11 +598,11 @@ struct TranscriptView: View {
             pausedAt = nil
             let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
             let nm = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
-            sidecar?.sendSessionStart(UUID().uuidString, context: ctx)
-            writer?.start(context: ctx, name: nm)
+            services.sidecar.sendSessionStart(UUID().uuidString, context: ctx)
+            services.writer.start(context: ctx, name: nm)
             // A transcript window opened on this note must disable asking until
             // the live writer is done with it.
-            TranscriptWindowContext.shared.liveFileURL = writer?.currentFileURL
+            TranscriptWindowContext.shared.liveFileURL = services.writer.currentFileURL
             await recorder.start(device: selectedDevice, captureSystem: captureSystem)
         }
     }

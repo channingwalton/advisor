@@ -84,7 +84,12 @@ rebuilds `dist/Advisor.app` from scratch.
 
 ## Use
 
-Click **Listen**. Words appear live in grey as they're spoken, replaced by
+Advisor opens on the **Sessions** browser — your past sessions (see below). Click
+**New** (top right) to open a recording window; only one recording window exists
+at a time, so clicking New again just brings it forward.
+
+In the recording window, click **Listen**. Words appear live in grey as they're
+spoken, replaced by
 finalised sentences; cards appear inline when the assistant decides something
 is worth answering, checking, or explaining — or when you ask via the query
 box. The **Context** button (before or during a session) holds an optional
@@ -106,7 +111,8 @@ embedded inline in the conversation just as the window shows them. The
 **Export** button (share icon) copies the current session note to a location you
 choose.
 
-The **History** button (clock icon) opens the **Sessions** browser — a master/
+The **Sessions** browser is the app's main window (it opens at launch; the
+recording window's **History** button, clock icon, brings it forward) — a master/
 detail window over past sessions. The left sidebar lists sessions grouped by day
 (Today / Yesterday / Earlier this week / …) with search and an All / This week
 filter; each row shows the session's title (its name if you gave it one, else the
