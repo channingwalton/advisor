@@ -20,16 +20,25 @@ final class SessionWriter {
             at: sessionsDirectory, withIntermediateDirectories: true)
     }
 
-    func start() {
-        started = Date()
-        ended = nil
+    /// `yyyy-MM-dd-HHmmss` with calendar/locale pinned, so a session filename is
+    /// always Gregorian regardless of the user's system calendar (e.g.
+    /// Japanese/Buddhist). Shared by the auto-saved note and the export name.
+    private static let fileNameFormatter: DateFormatter = {
         let fmt = DateFormatter()
-        // Pin the calendar/locale so the filename is always Gregorian yyyy-MM-dd
-        // regardless of the user's system calendar (e.g. Japanese/Buddhist).
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.calendar = Calendar(identifier: .gregorian)
         fmt.dateFormat = "yyyy-MM-dd-HHmmss"
-        fileURL = sessionsDirectory.appendingPathComponent("\(fmt.string(from: started!)).md")
+        return fmt
+    }()
+
+    private static func fileName(for date: Date) -> String {
+        "\(fileNameFormatter.string(from: date)).md"
+    }
+
+    func start() {
+        started = Date()
+        ended = nil
+        fileURL = sessionsDirectory.appendingPathComponent(Self.fileName(for: started!))
         write()
     }
 
@@ -37,6 +46,27 @@ final class SessionWriter {
         ended = Date()
         write()
         // fileURL stays set: cards finishing after stop still land in the file.
+    }
+
+    /// True when there is something worth exporting — any transcript line, or a
+    /// finished card. Drives the toolbar's Export button enabled state.
+    var hasExportContent: Bool {
+        !store.utterances.isEmpty
+            || store.cards.contains { $0.state == "done" || $0.state == "failed" }
+    }
+
+    /// Markdown for export: the same content as the auto-saved note but with
+    /// cards embedded inline in the conversation (no footnotes), mirroring the
+    /// window. See `SessionMarkdown.inline`.
+    func exportMarkdown() -> String {
+        SessionMarkdown.inline(
+            utterances: store.utterances, cards: store.cards, started: started, ended: ended)
+    }
+
+    /// Suggested save filename for an export: the session's start time in the
+    /// same `yyyy-MM-dd-HHmmss` form as the auto-saved note.
+    func suggestedFilename() -> String {
+        Self.fileName(for: started ?? store.utterances.first?.time ?? Date())
     }
 
     /// Debounced rewrite; call whenever utterances or cards change.

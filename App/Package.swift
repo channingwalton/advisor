@@ -26,5 +26,10 @@ let package = Package(
                 ])
             ]
         ),
+        .testTarget(
+            name: "AdvisorTests",
+            dependencies: ["Advisor"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

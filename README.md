@@ -99,7 +99,10 @@ The **mic** button in the record cluster mutes the local microphone
 while the session keeps running — system audio is still captured and
 transcribed; tap again to unmute. `Float` keeps the window on top. Sessions are
 saved as markdown under
-`~/Library/Application Support/Advisor/sessions/` (`Sessions` button).
+`~/Library/Application Support/Advisor/sessions/` (`Sessions` button). The
+**Export** button (share icon) saves the current session to a markdown file you
+choose — the same content, but with cards embedded inline in the conversation
+(as the window shows them) rather than as footnotes.
 
 ## Preferences
 

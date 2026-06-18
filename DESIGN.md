@@ -41,7 +41,7 @@ The Swift app owns everything realtime and visual; the sidecar owns everything t
 
 **OverlayUI.** Non-activating `NSPanel` (`.floating`, `.nonactivatingPanel`) hosting SwiftUI: vertical card feed (newest top), collapsible live transcript drawer, query box, listening indicator. Menu-bar item: start/stop listening, open session history. Panel never takes key focus except when the query box is clicked.
 
-**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmmss.md` (second precision, so a same-minute restart can't overwrite the prior transcript): YAML frontmatter (start/end), transcript section, cards section (type, body, sources). Each card is emitted as a Markdown footnote whose `[^card-N]` reference rides the transcript line that triggered it (via the card's `trigger` utterance id), so Obsidian/GitHub render a bidirectional link between line and card; cards with no anchor (Ask-box/query) fall into an "Other cards" section. Written incrementally; transcripts only, no audio (decided). Vault is never written.
+**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmmss.md` (second precision, so a same-minute restart can't overwrite the prior transcript): YAML frontmatter (start/end), transcript section, cards section (type, body, sources). Each card is emitted as a Markdown footnote whose `[^card-N]` reference rides the transcript line that triggered it (via the card's `trigger` utterance id), so Obsidian/GitHub render a bidirectional link between line and card; cards with no anchor (Ask-box/query) fall into an "Other cards" section. Written incrementally; transcripts only, no audio (decided). Vault is never written. A separate **Export** path (`SessionMarkdown.inline`, toolbar share button → save panel) renders the same session with cards embedded inline in the conversation — mirroring the window — instead of as footnotes: the auto-saved note optimises for Obsidian backlinks, the export for reading as it looked on screen.
 
 ### TS sidecar (Claude Agent SDK)
 
@@ -233,8 +233,8 @@ behaviour but introducing the app's first design-token layer (`Theme.swift`:
 semantic light+dark colour tokens via dynamic `NSColor`s, plus spacing/radius/
 type-scale metrics). Decomposed into components: `ListeningToolbar` (record
 cluster — waveform + timer + pause/stop + mic mute — audio-source menu, Context
-chip, Auto-cards switch, Float, Sessions; idle collapses to a single Listen
-pill), `AskBar` (sparkle input + ⌘↵), and `ListeningCardView` (type/verdict
+chip, Auto-cards switch, Float, Export, Sessions; idle collapses to a single
+Listen pill), `AskBar` (sparkle input + ⌘↵), and `ListeningCardView` (type/verdict
 pill, Researching state, collapse/expand + dismiss, themed Markdown body,
 trigger-quote + sources footer, follow-up input). The transcript is a centred
 812 pt column with a day divider and flowing paragraphs that group consecutive
@@ -252,6 +252,19 @@ into the Context-chip popover; mic mute moved into the record cluster.
 
 The summarise control (a transient AskBar action) was removed shortly after —
 post-meeting summaries remain out of scope (REQUIREMENTS).
+
+### 2026-06-18 — Markdown export (inline cards)
+
+A toolbar **Export** button (share icon, left of Sessions) saves the current
+session to a chosen file via `NSSavePanel`. The format (`SessionMarkdown.inline`)
+reuses the auto-saved note's content but **inlines the footnotes**: utterances
+and finished cards merge chronologically (a card sorts after an utterance at
+equal time, the same ordering the live feed uses), and each card renders as a
+`>`-quoted "chat" block — `LABEL · Title`, body, then a grounding/trigger-quote +
+sources footer — so the file reads like the window rather than the
+backlink-oriented footnote note. Only `done`/`failed` cards are included.
+`SessionMarkdown` is a pure function, covered by the project's first unit tests
+(`Tests/AdvisorTests`, swift-testing).
 
 ## Revisit as it grows
 

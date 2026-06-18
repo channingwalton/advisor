@@ -19,6 +19,9 @@ struct ListeningToolbar: View {
     let onMuteToggle: () -> Void
     let onStop: () -> Void
     let onSessions: () -> Void
+    /// Whether the current session has anything to export (gates the button).
+    let canExport: Bool
+    let onExport: () -> Void
 
     @State private var showFocus = false
 
@@ -34,6 +37,7 @@ struct ListeningToolbar: View {
             focusChip
             autoCardsToggle
             floatButton
+            exportButton
             sessionsButton
         }
         .padding(.horizontal, 14)
@@ -231,6 +235,22 @@ struct ListeningToolbar: View {
         }
         .buttonStyle(.plain)
         .help("Float window on top")
+    }
+
+    private var exportButton: some View {
+        Button(action: onExport) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 34, height: 34)
+                .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
+                        .stroke(Theme.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canExport)
+        .help("Export session to Markdown…")
     }
 
     private var sessionsButton: some View {

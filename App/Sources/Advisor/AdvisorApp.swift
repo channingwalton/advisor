@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Repo root, derived from this source file's compile-time location so the
 // checkout can move without editing paths. Sources/Advisor/AdvisorApp.swift
@@ -98,7 +99,9 @@ struct TranscriptView: View {
                 onStop: { Task { await toggle() } },
                 onSessions: {
                     if let writer { NSWorkspace.shared.open(writer.sessionsDirectory) }
-                }
+                },
+                canExport: writer?.hasExportContent ?? false,
+                onExport: exportSession
             )
             statusLine
             transcriptArea
@@ -475,6 +478,24 @@ struct TranscriptView: View {
         }
         self.pausedAt = nil
         recorder?.resume()
+    }
+
+    /// Save the current session as inline-card markdown via a save panel. The
+    /// content mirrors the window (cards embedded in the conversation) rather
+    /// than the footnote layout of the auto-saved note.
+    private func exportSession() {
+        guard let writer, writer.hasExportContent else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export Session"
+        panel.nameFieldStringValue = writer.suggestedFilename()
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try writer.exportMarkdown().write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            store.status = "export failed: \(error.localizedDescription)"
+        }
     }
 
     private func submitQuery() {
