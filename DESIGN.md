@@ -533,6 +533,31 @@ recording cluster / resumable cluster) and the resume timer maths live in the pu
 maps the same three states to start/stop/resume. `store.paused`, the recorder's
 `paused` atomic, and `Recorder.pause()/resume()` were deleted.
 
+## Pre-canned contexts (2026-06-19, issue #10)
+
+A library of named, reusable session contexts. A `SavedContext {id, name, text}`
+list lives in `config.json` as `contexts` — App-side only data, decoded
+tolerantly and **ignored by the sidecar** (its `mergeConfig` reads keys
+field-by-field; the sidecar only ever receives the resolved context *text* per
+session, like `appearance`/`sttLocale`/`authMode`). Pure list operations
+(`ContextLibrary.saving` by name, `.upserting` by id, `.removing`) are
+unit-tested; the SwiftUI views are thin wrappers over them.
+
+Managed in three places, kept in sync via the existing `advisorConfigChanged`
+post: **Preferences** has a "Saved contexts" section (list + add/edit/delete
+through a sheet editor, committing by id so a rename can't spawn a duplicate);
+the **recording window's Context popover** gains **Load** (pick a saved context
+into the box) and **Save…** (store the current text under a name, upserting by
+name). The recording window persists via `AdvisorConfig.persistContexts`, a
+load-modify-save that touches only the `contexts` key so it can't clobber
+preference settings it doesn't hold in view state. Because contexts are now
+editable from two windows, `PreferencesView` also pulls on-disk context changes
+back in on `advisorConfigChanged` (guarded on inequality, so it never reacts to
+its own posts — no save loop), and the recording window reloads its library on
+the same post. Trade accepted (single-user tool): the Preferences "Add" path
+commits by id, so typing an already-used name there yields two same-named
+entries that the by-name recording-window Save can't disambiguate.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

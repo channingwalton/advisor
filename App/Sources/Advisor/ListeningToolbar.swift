@@ -15,6 +15,11 @@ struct ListeningToolbar: View {
     let captureSystem: Bool
     @Binding var sessionName: String
     @Binding var sessionContext: String
+    /// The user's library of named contexts, shown in the Context popover's Load
+    /// menu (issue #10).
+    let savedContexts: [SavedContext]
+    /// Save the current context text under the given name.
+    let onSaveContext: (String) -> Void
     @Binding var autoCards: Bool
     @Binding var pinned: Bool
     let onStart: () -> Void
@@ -27,6 +32,9 @@ struct ListeningToolbar: View {
 
     @State private var showFocus = false
     @State private var showName = false
+    /// Toggles the "save current context" name field in the Context popover.
+    @State private var showSaveField = false
+    @State private var savingName = ""
 
     var body: some View {
         HStack(spacing: 12) {
@@ -276,10 +284,59 @@ struct ListeningToolbar: View {
                     .font(.system(size: 12.5))
                     .frame(width: 320, height: 100)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.hairline, lineWidth: 0.5))
+                contextLibraryControls
             }
             .padding(14)
         }
         .help("Session context / prompt")
+    }
+
+    /// Load (pick a saved context into the box) and Save (store the current text
+    /// under a name) controls, sitting under the Context editor (issue #10).
+    private var contextLibraryControls: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(savedContexts) { c in
+                    Button(c.name) { sessionContext = c.text }
+                }
+            } label: {
+                Label("Load", systemImage: "tray.and.arrow.down")
+                    .font(.system(size: 12))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(savedContexts.isEmpty)
+
+            Spacer(minLength: 4)
+
+            if showSaveField {
+                TextField("Name", text: $savingName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 120)
+                    .onSubmit(commitSaveContext)
+                Button("Save", action: commitSaveContext)
+                    .font(.system(size: 12))
+                    .disabled(savingName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } else {
+                Button {
+                    showSaveField = true
+                } label: {
+                    Label("Save…", systemImage: "tray.and.arrow.up")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .disabled(sessionContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    private func commitSaveContext() {
+        let name = savingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        onSaveContext(name)
+        savingName = ""
+        showSaveField = false
     }
 
     // MARK: auto cards / float / sessions

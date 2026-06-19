@@ -35,12 +35,17 @@ struct AdvisorConfig: Codable, Equatable {
     /// App-side only: window appearance — "system" (default, follow macOS),
     /// "light" or "dark". Drives `NSApp.appearance`; not seen by the sidecar.
     var appearance = "system"
+    /// App-side only: the user's library of named, reusable session contexts
+    /// (issue #10). Loaded into the recording window's Context popover and
+    /// managed in Preferences; the sidecar only ever receives the resolved
+    /// context text per session, so it ignores this key.
+    var contexts: [SavedContext] = []
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
-        case provider, model, sttLocale, authMode, appearance
+        case provider, model, sttLocale, authMode, appearance, contexts
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -57,6 +62,7 @@ struct AdvisorConfig: Codable, Equatable {
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
         authMode = try c.decodeIfPresent(String.self, forKey: .authMode) ?? "subscription"
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? "system"
+        contexts = try c.decodeIfPresent([SavedContext].self, forKey: .contexts) ?? []
     }
 
     static var fileURL: URL {
@@ -78,6 +84,15 @@ struct AdvisorConfig: Codable, Equatable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try? encoder.encode(self).write(to: Self.fileURL)
+    }
+
+    /// Persist only the saved-context library, leaving every other key as it is
+    /// on disk. Used by the recording window's Context popover, which mustn't
+    /// clobber preference settings it doesn't hold in view state.
+    static func persistContexts(_ contexts: [SavedContext]) {
+        var c = load()
+        c.contexts = contexts
+        c.save()
     }
 }
 
@@ -257,6 +272,80 @@ struct AuthModeView: View {
     }
 }
 
+/// Manages the library of named, reusable session contexts (issue #10): a list
+/// with add / edit / delete, editing through a sheet. Bound to
+/// `config.contexts`, so every change rides the parent's save + notification.
+struct SavedContextsView: View {
+    @Binding var contexts: [SavedContext]
+    /// The context being edited in the sheet (a draft copy); nil when closed.
+    @State private var draft: SavedContext?
+
+    var body: some View {
+        if contexts.isEmpty {
+            Text("No saved contexts yet. Add one to load it before a session.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        ForEach(contexts) { ctx in
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ctx.name).font(.system(size: 12.5, weight: .medium))
+                    if !ctx.text.isEmpty {
+                        Text(ctx.text).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 8)
+                Button { draft = ctx } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Edit")
+                Button(role: .destructive) {
+                    contexts = ContextLibrary.removing(contexts, id: ctx.id)
+                } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .help("Delete")
+            }
+        }
+        Button { draft = SavedContext(name: "", text: "") } label: {
+            Label("Add context", systemImage: "plus")
+        }
+        .sheet(item: $draft) { editing in
+            ContextEditorSheet(draft: editing) { saved in
+                contexts = ContextLibrary.upserting(contexts, saved)
+            }
+        }
+    }
+}
+
+/// Modal editor for a single saved context — name + multi-line text. Commits
+/// through `onSave` (an id-based upsert), so it serves both add and edit.
+private struct ContextEditorSheet: View {
+    @State var draft: SavedContext
+    let onSave: (SavedContext) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Saved context").font(.headline)
+            TextField("Name", text: $draft.name)
+                .textFieldStyle(.roundedBorder)
+            Text("Who's here, what it's about, what to focus on.")
+                .font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: $draft.text)
+                .font(.system(size: 12.5))
+                .frame(width: 360, height: 140)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save") { onSave(draft); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(18)
+    }
+}
+
 struct PreferencesView: View {
     @State private var config = AdvisorConfig.load()
     @AppStorage("agentLanes") private var agentLanes = 3
@@ -284,6 +373,10 @@ struct PreferencesView: View {
                 Toggle("Answer questions", isOn: $config.triggers.question)
                 Toggle("Surface background context", isOn: $config.triggers.context)
                 Toggle("Fact-check claims", isOn: $config.triggers.factcheck)
+            }
+
+            Section("Saved contexts") {
+                SavedContextsView(contexts: $config.contexts)
             }
 
             Section("Appearance") {
@@ -314,6 +407,14 @@ struct PreferencesView: View {
         .onChange(of: config) { _, new in
             new.save()
             NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+        }
+        // Contexts can also be saved from the recording window's Context popover.
+        // Pull any such on-disk change in so a later Preferences edit doesn't
+        // write back a stale (context-less) config. Guarded on inequality so it
+        // never reacts to this view's own posts (no save loop).
+        .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
+            let disk = AdvisorConfig.load().contexts
+            if disk != config.contexts { config.contexts = disk }
         }
     }
 }

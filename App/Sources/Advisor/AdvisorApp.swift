@@ -114,6 +114,10 @@ struct TranscriptView: View {
     /// live; titles the session in the browser. Cleared when the session stops.
     @State private var sessionName = ""
     @State private var triggers = AdvisorConfig.Triggers()
+    /// The user's library of named, reusable contexts (issue #10) — loaded into
+    /// the Context popover's Load menu. Kept in sync with Preferences via
+    /// `advisorConfigChanged`; the popover's Save persists back to config.json.
+    @State private var savedContexts: [SavedContext] = []
     @State private var autoCards = true
     @State private var pinned = false
     /// When the current session started — drives the toolbar timer. Non-nil for
@@ -216,8 +220,11 @@ struct TranscriptView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
             // Preference toggles for triggers must reflect in the right-click
-            // action menu immediately, not only after a relaunch.
-            triggers = AdvisorConfig.load().triggers
+            // action menu immediately, not only after a relaunch; likewise the
+            // saved-context library edited in Preferences.
+            let cfg = AdvisorConfig.load()
+            triggers = cfg.triggers
+            savedContexts = cfg.contexts
         }
         .onChange(of: store.utterances) { _, _ in services.writer.noteChanged() }
         // Only re-write the session note when output-bearing fields change — not
@@ -238,6 +245,8 @@ struct TranscriptView: View {
                 captureSystem: captureSystem,
                 sessionName: $sessionName,
                 sessionContext: $sessionContext,
+                savedContexts: savedContexts,
+                onSaveContext: saveContext(named:),
                 autoCards: $autoCards,
                 pinned: $pinned,
                 onStart: { Task { await startSession() } },
@@ -533,7 +542,9 @@ struct TranscriptView: View {
     }
 
     private func setup() {
-        triggers = AdvisorConfig.load().triggers
+        let cfg = AdvisorConfig.load()
+        triggers = cfg.triggers
+        savedContexts = cfg.contexts
         devices = AudioDevices.inputs()
         // Sticky mic: restore the previously chosen device by name.
         selectedDevice =
@@ -623,6 +634,15 @@ struct TranscriptView: View {
         } catch {
             store.status = "export failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Save the current Context popover text under `name` as a reusable context
+    /// (issue #10), persisting to config.json and posting the config-changed
+    /// notification so Preferences (if open) and this view reflect it.
+    private func saveContext(named name: String) {
+        savedContexts = ContextLibrary.saving(savedContexts, name: name, text: sessionContext)
+        AdvisorConfig.persistContexts(savedContexts)
+        NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
     }
 
     private func submitQuery() {
