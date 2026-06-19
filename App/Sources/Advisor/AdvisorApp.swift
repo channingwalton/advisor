@@ -122,47 +122,43 @@ struct TranscriptView: View {
     /// When paused, the moment of pausing — freezes the timer. Nil when running.
     @State private var pausedAt: Date?
     @State private var spaceMonitor: Any?
+    /// True while a "Wait"-to-close is draining the session's in-flight agents.
+    /// Covers the window with a blocking overlay so the about-to-close UI can't
+    /// be driven (e.g. Space starting a fresh session). Cleared by the close.
+    @State private var finishing = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("micDeviceName") private var micDeviceName = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            ListeningToolbar(
-                store: store,
-                sessionStart: sessionStart,
-                pausedAt: pausedAt,
-                selectedDevice: $selectedDevice,
-                devices: devices,
-                captureSystem: captureSystem,
-                sessionName: $sessionName,
-                sessionContext: $sessionContext,
-                autoCards: $autoCards,
-                pinned: $pinned,
-                onPlay: { Task { await toggle() } },
-                onPauseResume: { if store.paused { resumeSession() } else { pauseSession() } },
-                onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
-                onStop: { Task { await toggle() } },
-                onHistory: { openWindow(id: "sessions") },
-                onSessions: {
-                    NSWorkspace.shared.open(services.writer.sessionsDirectory)
-                },
-                canExport: services.writer.hasExportContent,
-                onExport: exportSession
-            )
-            statusLine
-            transcriptArea
-            AskBar(
-                text: $queryText,
-                onSubmit: submitQuery
-            )
+        ZStack {
+            // The live feed UI. Disabled behind the finishing overlay while a
+            // "Wait"-to-close drains the session's in-flight agents (issue #7).
+            content
+                .disabled(finishing)
+            if finishing { finishingOverlay }
         }
         .background(Theme.surfaceWindow)
+        // Guard the window's close: if agent tasks are still running, prompt to
+        // wait for them or stop them before closing (issue #7).
+        .background(
+            WindowCloseGuard(
+                agentsInFlight: { store.cards.contains { $0.isResearching } },
+                isFinishing: { finishing },
+                terminate: terminateAgents,
+                waitForIdle: waitForAgentsThenClose
+            )
+        )
         .task { setup() }
         .onAppear(perform: installSpaceMonitor)
         .onDisappear {
             if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
             spaceMonitor = nil
+            // A single-instance `Window` keeps its @State across close/reopen, so
+            // clear the finishing overlay here or a "Wait"-close would leave a
+            // stale veil on the next session.
+            finishing = false
             // Closing the recording window cleanly ends an in-progress session
             // (stops audio, flushes the note, signals the sidecar) but leaves the
             // shared sidecar running so the Sessions browser keeps working.
@@ -176,7 +172,11 @@ struct TranscriptView: View {
             services.writer.releaseNote()
             TranscriptWindowContext.shared.liveFileURL = nil
             // The store is app-lifetime (owned by AppServices); clear the rendered
-            // session so reopening the recording window starts blank.
+            // session so reopening the recording window starts blank. Bump the STT
+            // generation as part of the reset (onDisappear runs atomically on the
+            // main actor) so this just-closed session's still-processing finals are
+            // dropped instead of appended to the blank store the next window shows.
+            store.sessionGeneration += 1
             store.utterances = []
             store.cards = []
             store.volatile = [:]
@@ -219,6 +219,58 @@ struct TranscriptView: View {
         // on pure UI toggles like expand/collapse (which also mutate store.cards).
         .onChange(of: cardsWriterKey) { _, _ in services.writer.noteChanged() }
         .onChange(of: agentLanes) { _, n in services.sidecar.sendLanes(n) }
+    }
+
+    /// The live feed UI — toolbar, status line, transcript, ask bar.
+    private var content: some View {
+        VStack(spacing: 0) {
+            ListeningToolbar(
+                store: store,
+                sessionStart: sessionStart,
+                pausedAt: pausedAt,
+                selectedDevice: $selectedDevice,
+                devices: devices,
+                captureSystem: captureSystem,
+                sessionName: $sessionName,
+                sessionContext: $sessionContext,
+                autoCards: $autoCards,
+                pinned: $pinned,
+                onPlay: { Task { await toggle() } },
+                onPauseResume: { if store.paused { resumeSession() } else { pauseSession() } },
+                onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
+                onStop: { Task { await toggle() } },
+                onHistory: { openWindow(id: "sessions") },
+                onSessions: {
+                    NSWorkspace.shared.open(services.writer.sessionsDirectory)
+                },
+                canExport: services.writer.hasExportContent,
+                onExport: exportSession
+            )
+            statusLine
+            transcriptArea
+            AskBar(
+                text: $queryText,
+                onSubmit: submitQuery
+            )
+        }
+    }
+
+    /// Modal cover shown while a "Wait"-to-close finishes the in-flight agents:
+    /// blocks interaction (the window is about to close) and offers an immediate
+    /// stop. Dismissed when the window closes.
+    private var finishingOverlay: some View {
+        ZStack {
+            Theme.surfaceWindow.opacity(0.9)
+            VStack(spacing: 14) {
+                ProgressView()
+                Text("Finishing agent tasks…")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                Button("Stop now", action: terminateAgents)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .ignoresSafeArea()
     }
 
     /// Crash/error feedback, shown as a slim line under the toolbar only when
@@ -587,11 +639,52 @@ struct TranscriptView: View {
         pausedAt = nil
     }
 
+    /// Cancel every in-flight agent for this session and mark each cancelled so
+    /// the final note write reflects it. The shared sidecar keeps running for the
+    /// Sessions browser — only this session's tasks stop. ("Stop and Close".)
+    private func terminateAgents() {
+        for idx in store.cards.indices where store.cards[idx].isResearching {
+            services.sidecar.sendCancel(store.cards[idx].id)
+            store.cards[idx].state = "cancelled"
+        }
+    }
+
+    /// Stop recording (so no new agents spawn), cover the window, and close it
+    /// once the in-flight agents reach a terminal state — flushing the note
+    /// first. Polls the card states, which update on the main actor as
+    /// `card_update` frames arrive. Closes via SwiftUI's `dismissWindow` so the
+    /// window's `onDisappear` cleanup actually runs. ("Wait".)
+    private func waitForAgentsThenClose() {
+        if store.listening { stopSession() }
+        // Cover the window and drop the Space monitor: recording has stopped, so
+        // a stray Space would otherwise start a fresh session mid-close.
+        if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
+        spaceMonitor = nil
+        withAnimation { finishing = true }
+        func poll() {
+            if !store.cards.contains(where: { $0.isResearching }) {
+                services.writer.flush()
+                // Drop the overlay before dismissing so the close guard (which
+                // ignores closes while finishing) lets this one through, and no
+                // stale veil survives on the single-instance window's reuse.
+                finishing = false
+                dismissWindow(id: "recording")
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: poll)
+        }
+        poll()
+    }
+
     private func toggle() async {
         guard let recorder else { return }
         if store.listening {
             stopSession()
         } else {
+            // Open a new STT session generation before clearing/starting, on the
+            // main actor with no `await` in between, so a previous session's
+            // in-flight finals are already stale by the time they try to write.
+            store.sessionGeneration += 1
             store.utterances = []
             store.cards = []
             sessionStart = Date()

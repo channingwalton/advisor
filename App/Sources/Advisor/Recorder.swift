@@ -27,6 +27,12 @@ final class TranscriptStore: ObservableObject {
     @Published var cards: [Card] = []
     /// Live in-progress speech (volatile STT results), per source.
     @Published var volatile: [Source: String] = [:]
+    /// Bumped on every session start. STT results carry the generation of the
+    /// session that produced them; a store write is dropped when it no longer
+    /// matches, so a previous session's trailing/echo-delayed finals can't bleed
+    /// into the next one — even when the recorder is reused (fast Stop→Listen) or
+    /// a fresh recorder writes to this same shared store (close→reopen).
+    var sessionGeneration = 0
 
     /// Expand/collapse a card in place.
     func toggleCard(_ id: String) {
@@ -67,10 +73,12 @@ final class Recorder {
         appleMic = AppleSpeechEngine(name: "mic", locale: locale)
         appleSys = AppleSpeechEngine(name: "sys", locale: locale)
 
-        appleMic.onFinal = { [weak self] text in self?.acceptAsync(text, from: .me) }
-        appleSys.onFinal = { [weak self] text in self?.acceptAsync(text, from: .them) }
-        appleMic.onVolatile = { [weak self] text in self?.setVolatile(text, for: .me) }
-        appleSys.onVolatile = { [weak self] text in self?.setVolatile(text, for: .them) }
+        // The engine tags each result with the session token it was started with,
+        // so a result from a superseded session is dropped at the store write.
+        appleMic.onFinal = { [weak self] text, gen in self?.acceptAsync(text, from: .me, gen: gen) }
+        appleSys.onFinal = { [weak self] text, gen in self?.acceptAsync(text, from: .them, gen: gen) }
+        appleMic.onVolatile = { [weak self] text, gen in self?.setVolatile(text, for: .me, gen: gen) }
+        appleSys.onVolatile = { [weak self] text, gen in self?.setVolatile(text, for: .them, gen: gen) }
 
         capture.onSamples = { [weak self] samples in
             guard let self,
@@ -90,26 +98,33 @@ final class Recorder {
         }
     }
 
-    private func setVolatile(_ text: String, for source: Source) {
-        Task { @MainActor in self.store.volatile[source] = text }
+    private func setVolatile(_ text: String, for source: Source, gen: Int) {
+        Task { @MainActor in
+            guard gen == self.store.sessionGeneration else { return }
+            self.store.volatile[source] = text
+        }
     }
 
     /// Entry point for Apple STT's finished text. Applies a short me-delay so
     /// echo dedup can see the system-audio twin first (Apple finalises both
-    /// streams near-simultaneously).
-    private func acceptAsync(_ text: String, from source: Source) {
+    /// streams near-simultaneously). `gen` is the session token the result was
+    /// produced under; it rides through to the store write, which drops it if the
+    /// session has since moved on.
+    private func acceptAsync(_ text: String, from source: Source, gen: Int) {
         let spokenEnd = Date()
         FileHandle.standardError.write(
             Data("[advisor] apple(\(source)): \"\(text)\"\n".utf8))
-        Task { @MainActor in self.store.volatile[source] = nil }
+        Task { @MainActor in
+            if gen == self.store.sessionGeneration { self.store.volatile[source] = nil }
+        }
         let delay: TimeInterval = source == .me && systemActive.load(ordering: .relaxed) ? 1.5 : 0
         sttQueue.asyncAfter(deadline: .now() + delay) {
-            self.accept(text, from: source, spokenEnd: spokenEnd)
+            self.accept(text, from: source, spokenEnd: spokenEnd, gen: gen)
         }
     }
 
     /// Common post-STT path: junk filter, echo dedup, store. Call on sttQueue.
-    private func accept(_ text: String, from source: Source, spokenEnd: Date) {
+    private func accept(_ text: String, from source: Source, spokenEnd: Date, gen: Int) {
         guard !text.isEmpty, !Self.isJunk(text) else { return }
 
         let tokens = Self.tokens(text)
@@ -131,6 +146,10 @@ final class Recorder {
         let latency = Int(Date().timeIntervalSince(spokenEnd) * 1000)
         let distinctiveSet = Set(Self.distinctive(tokens))
         Task { @MainActor in
+            // Drop the write if the session moved on while this was queued (the
+            // me-delay, or the engine's post-stop flush) — the gate that keeps the
+            // previous conversation out of the next session.
+            guard gen == self.store.sessionGeneration else { return }
             // Retroactive echo cleanup: a system-audio utterance supersedes any
             // recent mic utterance that was its (degraded) room echo.
             if source == .them, !distinctiveSet.isEmpty {
@@ -191,14 +210,18 @@ final class Recorder {
     }
 
     func start(device: InputDevice?, captureSystem: Bool) async {
+        // The caller bumps `sessionGeneration` synchronously before this `await`;
+        // read it here and tag every result with it, so anything still in flight
+        // from the previous session is dropped at the store write.
+        let gen = await MainActor.run { store.sessionGeneration }
         guard await AudioCapture.requestPermission() else {
             await MainActor.run { store.status = "microphone permission denied" }
             return
         }
         do {
             await MainActor.run { store.status = "starting Apple speech engine…" }
-            try await appleMic.start()
-            try await appleSys.start()
+            try await appleMic.start(sessionToken: gen)
+            try await appleSys.start(sessionToken: gen)
         } catch {
             await MainActor.run { store.status = "Apple STT failed: \(error)" }
             return

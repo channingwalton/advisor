@@ -18,17 +18,18 @@ final class AppleSpeechEngine {
     private let sourceFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
 
-    /// Finalised utterance text.
-    var onFinal: ((String) -> Void)?
-    /// In-progress (volatile) text for the current utterance; superseded by onFinal.
-    var onVolatile: ((String) -> Void)?
+    /// Finalised utterance text, tagged with the session token from `start`.
+    var onFinal: ((String, Int) -> Void)?
+    /// In-progress (volatile) text for the current utterance; superseded by
+    /// onFinal. Tagged with the session token from `start`.
+    var onVolatile: ((String, Int) -> Void)?
 
     init(name: String, locale: String = "en_GB") {
         self.name = name
         self.localeIdentifier = locale
     }
 
-    func start() async throws {
+    func start(sessionToken: Int) async throws {
         guard SpeechTranscriber.isAvailable else {
             throw AdvisorError.audioSetup("SpeechTranscriber unavailable on this OS")
         }
@@ -71,7 +72,7 @@ final class AppleSpeechEngine {
         self.analyzer = analyzer
         self.transcriber = transcriber
 
-        resultsTask = Task { [weak self, name] in
+        resultsTask = Task { [weak self, name, sessionToken] in
             guard let results = self?.transcriber?.results else { return }
             do {
                 for try await result in results {
@@ -79,9 +80,9 @@ final class AppleSpeechEngine {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { continue }
                     if result.isFinal {
-                        self?.onFinal?(text)
+                        self?.onFinal?(text, sessionToken)
                     } else {
-                        self?.onVolatile?(text)
+                        self?.onVolatile?(text, sessionToken)
                     }
                 }
             } catch {

@@ -408,6 +408,82 @@ session — `onDisappear` runs the stop branch (stop audio, `session_end`,
 `writer.end()`) but never `sidecar.stop()`, so the shared sidecar survives. It then
 clears the app-lifetime store so a reopened window starts blank.
 
+**Close guard for in-flight agents (2026-06-19, issue #7).** Ending the session
+doesn't stop the research/query agents it already dispatched — they finish on
+their shared lanes after the window is gone. `WindowCloseGuard`
+(`SessionClose.swift`) intercepts the close to handle this. It's a zero-size
+`NSViewRepresentable` that makes a coordinator the window's `NSWindowDelegate`,
+proxying SwiftUI's own delegate (forwarding every message except
+`windowShouldClose`). On close, if any card is still researching
+(`store.cards.contains { $0.isResearching }` — covers research, query and reply
+agents) it prompts: **Wait** stops recording and polls until the in-flight cards
+reach a terminal state, flushes the note, drops the overlay, then closes via
+SwiftUI's `dismissWindow(id:)`. While waiting, a blocking `finishingOverlay`
+covers the window and the live UI is `.disabled` — and the Space key monitor is
+dropped — so the about-to-close window can't be driven (Space would otherwise start
+a fresh session, recording having stopped); the overlay's **Stop now** button
+cancels the remaining agents to close at once. The guard ignores any close attempt
+while `finishing` is set (the `isFinishing` closure), so the wait can't re-prompt.
+
+Two traps the single-instance `Window` sprang here, both fixed: it keeps the
+recording view's **`@State` across close/reopen**, so the `finishing` flag is reset
+in `onDisappear` (and before the dismiss) or a "Wait"-close would leave a stale veil
+over the *next* session; and **`NSWindow.close()` did not fire SwiftUI's
+`onDisappear`**, so the wait's close goes through `dismissWindow` instead —
+otherwise the session's clean-stop (`releaseNote`, store-clear) was skipped and the
+previous session leaked into the new one. **Stop and Close** cancels each
+in-flight
+card (`sendCancel`, marked `cancelled` locally so the final write records it) and
+closes; **Cancel** keeps the window open. Nothing running → closes straight away,
+as before. The sidecar is never stopped — only this session's tasks — so the
+Sessions browser keeps working. The pure choice→action map (`SessionClose.action`)
+is unit-tested; the AppKit plumbing is exercised by hand. Cmd-Q still bypasses all
+of this via `applicationShouldTerminate` (which `sidecar.stop()`s, killing the node
+child and every agent with it).
+
+**Trailing-STT bleed across sessions (2026-06-19).** Closing and quickly reopening
+showed fragments of the previous conversation in the new session. Cause:
+`AppleSpeechEngine.stop()` calls `finalizeAndFinishThroughEndOfInput`, which flushes
+buffered audio as *trailing finals*, and `acceptAsync` defers `me` results by up to
+1.5 s for echo dedup — so finals land in the **shared, app-lifetime** `store` after
+the window closed, and the old `Recorder` lingers because its in-flight closures
+retain it. Fix: a **session token**. `TranscriptStore.sessionGeneration` bumps on
+each `Recorder.start()`; the token is passed into `AppleSpeechEngine.start` and
+tagged onto every result it emits (`onFinal`/`onVolatile` carry it), threaded
+through `acceptAsync`/`accept`, and **checked at the actual store write** on the
+main actor — the write is dropped when the token no longer matches. This beats a
+"stopped" flag (a first attempt): a reused recorder's reset would re-arm before a
+1.5 s-delayed `me` final fired, and an already-queued callback had no late check.
+The token is fixed at capture, so a previous session's straggler is dropped whether
+the recorder is reused (fast Stop→Listen) or a fresh recorder writes to the same
+shared store (close→reopen). The generation bumps at **every store reset that
+starts a blank view** — synchronously in `toggle`'s start branch (before the clear
+and any `await`, closing the race) and in the recording window's `onDisappear`
+(which also runs atomically on the main actor) — but **not** on a plain Stop, so a
+just-stopped session still shown in its window keeps receiving its own trailing
+finals. The close bump is the one that fixed the reported bleed: without it, a
+closed session's still-processing finals matched the unchanged generation and
+appended to the blank store the next window showed.
+
+**Auto-classifier outliving the session (2026-06-19).** `session_end` cleared only
+the debounce timer, so a classify already scheduled or mid-flight could still
+enqueue research and stream cards into a closed/replaced session (the close prompt's
+`agentsInFlight` can't see a classify that hasn't emitted a card yet). Fix: a
+`sessionActive` flag in the sidecar — set on `session_start`, cleared on
+`session_end` (which also drops the queued-but-undispatched `researchQueue`).
+`scheduleClassify`/`runClassify` bail when it's false, including a re-check after the
+classify await. In-flight research lanes keep running — the close prompt waits for or
+cancels those; only *new* auto-work is suppressed. User queries (Ask box, right-click)
+are deliberately ungated, so they still work after Stop.
+
+**Cancel now reaches reply agents (2026-06-19).** Card-reply follow-ups run on a
+transient lane outside `researchLanes`/`queryLane`, and the `cancel` handler only
+searched those two — so "Stop and Close" marked a reply card cancelled locally while
+its agent kept running in the shared sidecar. Fix: track in-flight reply lanes
+(`replyLanes`, keyed by `currentCardId`), include them in the cancel search so the
+session is interrupted, and guard `runCardReply`'s streamed/terminal sends with
+`cancelledCards` like `runCard` does.
+
 **The store-clear hazard, guarded.** Clearing the *shared* store while the writer
 still owned its just-saved note was a data-loss trap: `SessionWriter` rewrites the
 note wholesale from the store, and `end()` keeps `fileURL` (late cards land in the

@@ -80,6 +80,11 @@ const cursors = new Map<string, number>();
 let busy = false; // user queries (priority lane)
 let cardCounter = 0;
 let auto = true;
+/// True between session_start and session_end. Gates the auto-classifier so a
+/// classify already scheduled or in flight when the session ends can't enqueue
+/// fresh research — which would stream cards into a closed/replaced session.
+/// User queries (Ask box, right-click) are deliberately not gated by this.
+let sessionActive = false;
 
 /// Persistent sessions remember earlier messages, so send only new transcript.
 function transcriptDelta(lane: string): string {
@@ -137,6 +142,9 @@ async function runCard(
 /// taps can't fork unbounded processes.
 const MAX_CONCURRENT_REPLIES = 3;
 let activeReplies = 0;
+/// In-flight reply lanes, keyed by the card they answer, so a `cancel` can find
+/// and interrupt them — they live outside the research pool and queryLane.
+const replyLanes: Lane[] = [];
 
 async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Promise<void> {
   const header = `${msg.base}\n\n---\n\n**You:** ${msg.replyText}\n\n`;
@@ -151,26 +159,43 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
   }
   activeReplies++;
   const lane = makeLane("reply");
+  lane.currentCardId = msg.cardId;
+  replyLanes.push(lane);
   send({ type: "card_update", id: msg.cardId, body: header + "…", state: "pending" });
   try {
     const task =
       sessionContextPrefix(sessionContext) +
       replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
     const { text, error } = await lane.session.run(task, (body) => {
-      send({ type: "card_update", id: msg.cardId, body: header + body, state: "streaming" });
+      if (!cancelledCards.has(msg.cardId)) {
+        send({ type: "card_update", id: msg.cardId, body: header + body, state: "streaming" });
+      }
     });
-    const outcome = cardOutcome(text, error);
-    send({ type: "card_update", id: msg.cardId, body: header + outcome.body, state: outcome.state });
+    if (!cancelledCards.has(msg.cardId)) {
+      const outcome = cardOutcome(text, error);
+      send({
+        type: "card_update",
+        id: msg.cardId,
+        body: header + outcome.body,
+        state: outcome.state,
+      });
+    }
   } catch (err) {
     log(`reply error: ${err}`);
-    send({
-      type: "card_update",
-      id: msg.cardId,
-      body: header + `error: ${err instanceof Error ? err.message : String(err)}`,
-      state: "failed",
-    });
+    if (!cancelledCards.has(msg.cardId)) {
+      send({
+        type: "card_update",
+        id: msg.cardId,
+        body: header + `error: ${err instanceof Error ? err.message : String(err)}`,
+        state: "failed",
+      });
+    }
   } finally {
     lane.session.reset(); // dispose the transient session
+    lane.currentCardId = undefined;
+    const i = replyLanes.indexOf(lane);
+    if (i >= 0) replyLanes.splice(i, 1);
+    cancelledCards.delete(msg.cardId);
     activeReplies--;
   }
 }
@@ -276,12 +301,13 @@ function coveredSubjects(): string[] {
 }
 
 function scheduleClassify(): void {
-  if (!auto) return;
+  if (!auto || !sessionActive) return;
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => void runClassify(), DEBOUNCE_MS);
 }
 
 async function runClassify(): Promise<void> {
+  if (!sessionActive) return;
   if (classifying) {
     rerunWanted = true;
     return;
@@ -295,6 +321,9 @@ async function runClassify(): Promise<void> {
     const { triggers } = await classify(window, coveredSubjects());
     log(`classify ${Date.now() - ct0}ms → ${triggers.length} trigger(s)`);
     log(`classify → ${triggers.length} trigger(s)`);
+    // The session may have ended during the classify await — drop its triggers
+    // so no research is enqueued for a session that's gone.
+    if (!sessionActive) return;
     for (const t of triggers) {
       const key = normalise(t.subject);
       if (!key || covered.has(key)) continue;
@@ -334,6 +363,7 @@ function drainResearch(): void {
 function handle(msg: Inbound): void {
   switch (msg.type) {
     case "session_start":
+      sessionActive = true;
       transcript = [];
       cursors.clear();
       covered.clear();
@@ -405,7 +435,9 @@ function handle(msg: Inbound): void {
     case "cancel": {
       cancelledCards.add(msg.cardId);
       send({ type: "card_update", id: msg.cardId, body: "cancelled", state: "cancelled" });
-      const lane = [...researchLanes, queryLane].find((l) => l.currentCardId === msg.cardId);
+      const lane = [...researchLanes, queryLane, ...replyLanes].find(
+        (l) => l.currentCardId === msg.cardId
+      );
       if (lane) {
         log(`cancelling ${msg.cardId} on ${lane.name}`);
         void lane.session.interrupt();
@@ -422,7 +454,12 @@ function handle(msg: Inbound): void {
       void runDocumentQuestion(msg);
       break;
     case "session_end":
+      // End the auto-pipeline: stop scheduling/accepting classifies and drop any
+      // queued-but-not-yet-dispatched research. In-flight research lanes keep
+      // running (the app's close prompt waits for or cancels those).
+      sessionActive = false;
       if (debounceTimer) clearTimeout(debounceTimer);
+      researchQueue.length = 0;
       log("session ended");
       break;
   }
