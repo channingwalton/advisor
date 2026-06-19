@@ -26,6 +26,7 @@ struct SessionsView: View {
     @State private var query = ""
     @State private var thisWeekOnly = false
     @State private var oldestFirst = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +63,7 @@ struct SessionsView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
+                HStack { newRecordingButton; Spacer() }
                 searchField
                 filterRow
             }
@@ -99,6 +101,26 @@ struct SessionsView: View {
                 .padding(.bottom, 12)
             }
         }
+    }
+
+    /// Primary action: open (or bring forward) the single recording window. The
+    /// ⌘N glyph is a hint only — the shortcut itself is bound globally by
+    /// `RecordingCommands` (menu bar), so it isn't re-bound here to avoid a
+    /// duplicate-binding conflict.
+    private var newRecordingButton: some View {
+        Button { openWindow(id: "recording") } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "record.circle.fill").font(.system(size: 13))
+                Text("New Recording").font(.system(size: 13, weight: .semibold))
+                Text("⌘N").font(.system(size: 11, weight: .medium)).opacity(0.75)
+            }
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .help("Start a new recording (⌘N)")
     }
 
     private var searchField: some View {
