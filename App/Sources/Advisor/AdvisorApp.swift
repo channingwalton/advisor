@@ -786,7 +786,17 @@ struct SelectableTranscriptText: NSViewRepresentable {
         // leaves it nil).
         let tv = ActionTextView(frame: .zero)
         _ = tv.layoutManager
+        // Height is reported through the view's own intrinsicContentSize (see
+        // ActionTextView), recomputed for whatever width SwiftUI lays it out at.
+        // The container width tracks the frame, so the measured height can never
+        // diverge from the drawn wrap width — a custom sizeThatFits could commit a
+        // height from a probe wider than the final draw, clipping wrapped lines on
+        // session switch (issue #12).
+        tv.isHorizontallyResizable = false
+        tv.isVerticallyResizable = true
         tv.textContainer?.widthTracksTextView = true
+        tv.textContainer?.heightTracksTextView = false
+        tv.textContainer?.size = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         tv.textContainer?.lineFragmentPadding = 0
         tv.isEditable = false
         tv.isSelectable = true
@@ -794,10 +804,22 @@ struct SelectableTranscriptText: NSViewRepresentable {
         tv.drawsBackground = false
         tv.backgroundColor = NSColor.clear
         tv.textContainerInset = NSSize.zero
+        // Populate content here too, not only in updateNSView: when a session is
+        // selected the whole detail VStack is built at once, so the first height
+        // read must already see the real text.
+        apply(to: tv)
         return tv
     }
 
     func updateNSView(_ tv: ActionTextView, context: Context) {
+        apply(to: tv)
+    }
+
+    /// Push the current text + styling into the view's storage. isRichText is
+    /// false, so style the storage directly — typingAttributes alone won't
+    /// reflow already-set text, and height measurement reads the storage's
+    /// paragraph style.
+    private func apply(to tv: ActionTextView) {
         if tv.string != text { tv.string = text }
         // Transcript body type: 14.5 pt, line-height 1.2, semantic body colour.
         let font = NSFont.systemFont(ofSize: Theme.Metric.transcriptSize)
@@ -806,26 +828,14 @@ struct SelectableTranscriptText: NSViewRepresentable {
         tv.font = font
         tv.textColor = Theme.nsTextBody
         tv.defaultParagraphStyle = para
-        // isRichText is false, so style the storage directly — typingAttributes
-        // alone won't reflow already-set text (and height measurement reads the
-        // storage's paragraph style).
         let range = NSRange(location: 0, length: (tv.string as NSString).length)
         tv.textStorage?.addAttributes(
             [.font: font, .foregroundColor: Theme.nsTextBody, .paragraphStyle: para], range: range)
         tv.toolTip = toolTip
         tv.menuActions = actions
         tv.onAction = onAction
-    }
-
-    func sizeThatFits(
-        _ proposal: ProposedViewSize, nsView tv: ActionTextView, context: Context
-    ) -> CGSize? {
-        guard let container = tv.textContainer, let lm = tv.layoutManager,
-            let width = proposal.width, width.isFinite, width > 0
-        else { return nil }
-        tv.frame.size.width = width
-        lm.ensureLayout(for: container)
-        return CGSize(width: width, height: ceil(lm.usedRect(for: container).height))
+        // New text at the same width still changes the line count.
+        tv.invalidateIntrinsicContentSize()
     }
 }
 
@@ -835,6 +845,31 @@ struct SelectableTranscriptText: NSViewRepresentable {
 final class ActionTextView: NSTextView {
     var menuActions: [TranscriptAction] = []
     var onAction: ((String, String) -> Void)?
+    private var lastLaidOutWidth: CGFloat = -1
+
+    /// Height that fits the text at the current width; width stays flexible
+    /// (noIntrinsicMetric) so the view fills the transcript column. SwiftUI reads
+    /// this for the row height, so it always matches the drawn wrap (issue #12).
+    override var intrinsicContentSize: NSSize {
+        guard let lm = layoutManager, let container = textContainer else {
+            return super.intrinsicContentSize
+        }
+        lm.ensureLayout(for: container)
+        return NSSize(
+            width: NSView.noIntrinsicMetric, height: ceil(lm.usedRect(for: container).height))
+    }
+
+    // Whenever SwiftUI gives us a new width (window resize, session switch,
+    // sidebar reflow) the container has already tracked to it via super, so the
+    // freshly invalidated intrinsic height reflects the new wrap. Guarded on a
+    // real width change to avoid a layout loop.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if abs(newSize.width - lastLaidOutWidth) > 0.5 {
+            lastLaidOutWidth = newSize.width
+            invalidateIntrinsicContentSize()
+        }
+    }
 
     /// Highlighted substring, or the whole line when the selection is empty.
     private var effectiveSelection: String {
