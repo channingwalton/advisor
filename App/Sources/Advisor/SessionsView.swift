@@ -21,7 +21,6 @@ private struct LoadedSession: Identifiable, Equatable {
 /// The handoff's AI-derived bits (category badge, topic chips, summary, people,
 /// action items) and star/Resume are deliberately not rendered yet.
 struct SessionsView: View {
-    @Environment(\.openWindow) private var openWindow
     @State private var sessions: [LoadedSession] = []
     @State private var selection: URL?
     @State private var query = ""
@@ -30,8 +29,6 @@ struct SessionsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            titleBar
-            Divider()
             HStack(spacing: 0) {
                 sidebar
                     .frame(width: 350)
@@ -60,29 +57,6 @@ struct SessionsView: View {
         }
     }
 
-    // MARK: title bar
-
-    private var titleBar: some View {
-        HStack(spacing: 6) {
-            Text("Advisor").font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textStrong)
-            Text("·").foregroundStyle(Theme.textMuted)
-            Text("Sessions").font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
-        }
-        .frame(maxWidth: .infinity)
-        // Title stays centred; "New" opens the single recording window (or brings
-        // the existing one forward).
-        .overlay(alignment: .trailing) {
-            Button { openWindow(id: "recording") } label: {
-                Label("New", systemImage: "plus")
-            }
-            .help("Start a new recording")
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 52)
-        .background(Theme.surfaceTitlebar)
-    }
-
     // MARK: sidebar
 
     private var sidebar: some View {
@@ -92,7 +66,9 @@ struct SessionsView: View {
                 filterRow
             }
             .padding(.horizontal, 14)
-            .padding(.top, 12)
+            // Clear the hidden title bar's traffic lights, which overlay the
+            // top-left of the content now that the custom title panel is gone.
+            .padding(.top, 38)
             .padding(.bottom, 10)
             Divider()
             ScrollView {

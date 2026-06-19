@@ -83,8 +83,24 @@ struct AdvisorApp: App {
         }
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
+        // Cmd-N opens the single recording window (or brings it forward),
+        // replacing the menu bar's default "New" — there's no document to create.
+        .commands { RecordingCommands() }
         Settings {
             PreferencesView()
+        }
+    }
+}
+
+/// Menu-bar commands: Cmd-N starts a recording. Lives as a `Commands` type so it
+/// can read `openWindow` from the environment (the App struct can't directly).
+struct RecordingCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Recording") { openWindow(id: "recording") }
+                .keyboardShortcut("n", modifiers: .command)
         }
     }
 }

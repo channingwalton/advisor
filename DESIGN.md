@@ -382,8 +382,8 @@ appearance drives the whole UI for free — no per-view `.preferredColorScheme`.
 ## Sessions as the main window (2026-06-19, issue #4)
 
 The app now opens on the **Sessions** browser, not the live feed. `SessionsView`
-is the first scene — a `Window(id: "sessions")` with `.defaultLaunchBehavior(.presented)`
-— and its title bar carries a **New** button that opens the recording window. The
+is the first scene — a `Window(id: "sessions")` with `.defaultLaunchBehavior(.presented)`.
+A new recording is started with **Cmd-N** (see issue #11 below). The
 recording window (`TranscriptView`) is a separate `Window(id: "recording")`
 (`.defaultLaunchBehavior(.suppressed)`, `.restorationBehavior(.disabled)`); being a
 `Window` (not a `WindowGroup`) makes it single-instance for free — New just brings
@@ -557,6 +557,20 @@ its own posts — no save loop), and the recording window reloads its library on
 the same post. Trade accepted (single-user tool): the Preferences "Add" path
 commits by id, so typing an already-used name there yields two same-named
 entries that the by-name recording-window Save can't disambiguate.
+
+## Cmd-N, no Sessions title panel (2026-06-19, issue #11)
+
+Dropped `SessionsView`'s custom 52pt title panel (the "Advisor · Sessions"
+heading + **New** button). Starting a recording is now **Cmd-N**, wired as a
+`RecordingCommands: Commands` that `CommandGroup(replacing: .newItem)` (the
+shortcut belongs in the menu bar, and there's no document to "new"). It's a
+`Commands` type rather than inline `.commands {}` so it can read `openWindow`
+from the environment, which the `App` struct can't. The Sessions window keeps
+`.hiddenTitleBar`; with the panel gone its traffic lights now overlay the
+sidebar's top-left, so the search/filter block gains `.padding(.top, 38)` to
+clear them. The top strip stays draggable (hidden title bar) and `openWindow`'s
+single-instance `Window` semantics are unchanged — Cmd-N just brings an existing
+recording window forward.
 
 ## Revisit as it grows
 
