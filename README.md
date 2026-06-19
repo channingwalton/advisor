@@ -121,7 +121,9 @@ Selecting one shows it on the right: title and meta, the questions you asked, an
 the transcript rendered like the live window (with the cards Advisor surfaced
 inline, as in the live view). Give a session a name with the `…` menu → **Rename**
 (top right of the detail) — a short label for an easier-to-scan list; leave it
-blank to fall back to the context.
+blank to fall back to the context. The same menu has **Delete** (behind a
+confirmation — it permanently removes the note from disk); the live session can't
+be deleted.
 Ask a question about the selected session in the box at the bottom: the answer
 streams in and, once finished, is appended to that session's note under a
 `# Follow-ups` heading, so the saved transcript grows with

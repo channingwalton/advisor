@@ -496,6 +496,18 @@ finished note is handed off to disk-based management (the browser renames/querie
 it via `SessionArchive`, not the now-detached writer) — which also releases the
 two-writer ask-lock immediately on close instead of waiting for the next session.
 
+## Delete sessions (2026-06-19, issue #8)
+
+**Delete** lives in the detail pane's `…` menu (below Rename/Export/Reveal, after a
+divider, `role: .destructive`), behind a confirmation alert — the note is removed
+from disk, irreversible. It sits with the other note actions rather than as a
+per-row icon (tried a row trash icon first; it crowded the cell). The delete itself
+is one line — `SessionArchive.delete` (`removeItem`, returns false rather than
+throwing) — and the browser's notification-driven `reload()` already reconciles the
+selection when the open session goes away. The live (still-writing) session is
+exempt: its `SessionWriter` would just recreate any note deleted out from under it,
+so the menu item is `disabled(isLive)`.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

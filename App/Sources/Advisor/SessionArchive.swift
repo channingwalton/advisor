@@ -128,6 +128,18 @@ enum SessionArchive {
         }
     }
 
+    /// Delete `file` from disk. Returns false if removal fails (e.g. the note is
+    /// already gone). Irreversible — the caller owns confirmation.
+    @discardableResult
+    static func delete(_ file: SessionFile) -> Bool {
+        do {
+            try FileManager.default.removeItem(at: file.url)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// `existing` with a follow-up Q&A appended under a single `# Follow-ups`
     /// heading (added the first time only). Pure, for testability.
     static func appendingFollowUp(

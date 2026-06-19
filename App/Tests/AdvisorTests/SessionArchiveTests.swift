@@ -108,6 +108,22 @@ import Foundation
     #expect(parsed.context == "Effects") // untouched
 }
 
+@Test func deleteRemovesSessionFile() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let url = dir.appendingPathComponent("2026-06-18-170000.md")
+    try "x".write(to: url, atomically: true, encoding: .utf8)
+    let file = try #require(SessionArchive.list(in: dir).first)
+
+    #expect(SessionArchive.delete(file))
+    #expect(!FileManager.default.fileExists(atPath: url.path))
+    // Deleting an already-gone file reports failure rather than throwing.
+    #expect(!SessionArchive.delete(file))
+}
+
 @Test func readsContentsOfSessionFile() throws {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")

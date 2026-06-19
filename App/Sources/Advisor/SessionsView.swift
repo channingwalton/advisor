@@ -339,6 +339,9 @@ private struct SessionDetailPane: View {
     @State private var renaming = false
     @State private var renameText = ""
 
+    // Delete confirmation.
+    @State private var confirmingDelete = false
+
     private var isAsking: Bool { answerState == "pending" || answerState == "streaming" }
     /// Asking the still-being-written live note is disabled (the writer's
     /// debounced rewrite would clobber an appended follow-up).
@@ -385,6 +388,11 @@ private struct SessionDetailPane: View {
                     Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([file.url])
                     }
+                    Divider()
+                    // The live note is exempt: its writer would just recreate any
+                    // file deleted out from under it.
+                    Button("Delete…", role: .destructive) { confirmingDelete = true }
+                        .disabled(isLive)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
@@ -403,6 +411,21 @@ private struct SessionDetailPane: View {
         } message: {
             Text("Give this session a name. Leave blank to fall back to its context.")
         }
+        .alert("Delete session", isPresented: $confirmingDelete) {
+            Button("Delete", role: .destructive, action: deleteSession)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Delete “\(detail.title)”? This permanently removes its transcript "
+                + "and cards, and can't be undone.")
+        }
+    }
+
+    /// Delete this session's note from disk, then refresh the browser (which drops
+    /// the row and reconciles the selection). Guarded against the live note by the
+    /// menu's `disabled(isLive)`.
+    private func deleteSession() {
+        SessionArchive.delete(file)
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
     /// Persist the renamed title. The live/just-finished note is renamed through
