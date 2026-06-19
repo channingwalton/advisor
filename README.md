@@ -1,5 +1,7 @@
 # Advisor
 
+[![CI](https://github.com/channingwalton/advisor/actions/workflows/ci.yml/badge.svg)](https://github.com/channingwalton/advisor/actions/workflows/ci.yml)
+
 A personal macOS assistant that listens to conversations in realtime — meetings,
 calls, videos, in-person — transcribes them locally, and proactively surfaces
 answers, background context, and fact-checks as the conversation flows. Ask it
