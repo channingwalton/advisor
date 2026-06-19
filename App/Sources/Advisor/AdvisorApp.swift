@@ -239,10 +239,6 @@ struct TranscriptView: View {
                 onPauseResume: { if store.paused { resumeSession() } else { pauseSession() } },
                 onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
                 onStop: { Task { await toggle() } },
-                onHistory: { openWindow(id: "sessions") },
-                onSessions: {
-                    NSWorkspace.shared.open(services.writer.sessionsDirectory)
-                },
                 canExport: services.writer.hasExportContent,
                 onExport: exportSession
             )

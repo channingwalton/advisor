@@ -19,8 +19,6 @@ struct ListeningToolbar: View {
     let onPauseResume: () -> Void
     let onMuteToggle: () -> Void
     let onStop: () -> Void
-    let onHistory: () -> Void
-    let onSessions: () -> Void
     /// Whether the current session has anything to export (gates the button).
     let canExport: Bool
     let onExport: () -> Void
@@ -42,8 +40,6 @@ struct ListeningToolbar: View {
             autoCardsToggle
             floatButton
             exportButton
-            historyButton
-            sessionsButton
         }
         .padding(.horizontal, 14)
         .frame(height: Theme.Metric.toolbarHeight)
@@ -303,36 +299,6 @@ struct ListeningToolbar: View {
         .buttonStyle(.plain)
         .disabled(!canExport)
         .help("Export session to Markdown…")
-    }
-
-    private var historyButton: some View {
-        Button(action: onHistory) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .frame(width: 34, height: 34)
-                .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
-                        .stroke(Theme.hairline, lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .help("Browse previous transcripts")
-    }
-
-    private var sessionsButton: some View {
-        Button(action: onSessions) {
-            Image(systemName: "folder")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .frame(width: 34, height: 34)
-                .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
-                        .stroke(Theme.hairline, lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .help("Open sessions folder")
     }
 }
 
