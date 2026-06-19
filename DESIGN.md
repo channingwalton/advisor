@@ -508,6 +508,31 @@ selection when the open session goes away. The live (still-writing) session is
 exempt: its `SessionWriter` would just recreate any note deleted out from under it,
 so the menu item is `disabled(isLive)`.
 
+## Resume after stopping; Pause removed (2026-06-19, issue #6)
+
+**Stop is now resumable, and Pause is gone.** Pause kept the audio engines alive
+and merely dropped incoming samples; Stop tore everything down and ended the
+session. The two overlapped, so Pause was removed and Stop took on its role: Stop
+tears down the audio engines (releasing the mic + ScreenCaptureKit stream) but
+leaves the *session* live — no `session_end`, no `writer.end()`, `sessionStart`
+retained. The record cluster then shows a frozen-timer **Resume** control that
+restarts audio into the **same** session: no STT generation bump (so existing
+utterances stand), no new `session_start` (so the sidecar classifier keeps full
+context), no new note. The timer excludes stopped spans the way it used to exclude
+paused ones (`sessionStart` shifted forward by the stop's duration on resume —
+`RecordControl.resumedStart`).
+
+A session is therefore finalised only when the **recording window closes** (or the
+app terminates): the close path ends the session whenever one is in progress
+(`sessionStart != nil`), not only when audio is live. Consequence: in-window
+Stop→Listen no longer starts a fresh session — a new session means closing the
+window and opening a new one from the Sessions browser, matching the
+single-session-per-window model. The toolbar's three states (idle Listen pill /
+recording cluster / resumable cluster) and the resume timer maths live in the pure
+`RecordControl` helper (unit-tested, mirroring `SessionClose`); the Space monitor
+maps the same three states to start/stop/resume. `store.paused`, the recorder's
+`paused` atomic, and `Recorder.pause()/resume()` were deleted.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

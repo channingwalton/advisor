@@ -116,11 +116,13 @@ struct TranscriptView: View {
     @State private var triggers = AdvisorConfig.Triggers()
     @State private var autoCards = true
     @State private var pinned = false
-    /// When the current session started — drives the toolbar timer. Nil when idle.
-    /// Shifted forward by each pause's duration so the timer excludes pauses.
+    /// When the current session started — drives the toolbar timer. Non-nil for
+    /// the whole session (Listen until the window closes), even while stopped.
+    /// Shifted forward by each stop's duration so the timer excludes stops.
     @State private var sessionStart: Date?
-    /// When paused, the moment of pausing — freezes the timer. Nil when running.
-    @State private var pausedAt: Date?
+    /// When stopped, the moment of stopping — freezes the timer and marks the
+    /// session resumable. Nil while recording or idle.
+    @State private var stoppedAt: Date?
     @State private var spaceMonitor: Any?
     /// True while a "Wait"-to-close is draining the session's in-flight agents.
     /// Covers the window with a blocking overlay so the about-to-close UI can't
@@ -161,8 +163,10 @@ struct TranscriptView: View {
             finishing = false
             // Closing the recording window cleanly ends an in-progress session
             // (stops audio, flushes the note, signals the sidecar) but leaves the
-            // shared sidecar running so the Sessions browser keeps working.
-            if store.listening { stopSession() }
+            // shared sidecar running so the Sessions browser keeps working. A
+            // stopped-but-resumable session is still in progress (sessionStart set
+            // though not listening), so end on the session, not the audio state.
+            if sessionStart != nil { endSession() }
             services.recorder = nil
             // Detach the writer from the just-saved note and drop the live lock
             // BEFORE clearing the shared store, so neither the store-clear's change
@@ -184,8 +188,9 @@ struct TranscriptView: View {
         .onChange(of: selectedDevice) { _, d in if let d { micDeviceName = d.name } }
         .onChange(of: sessionContext) { _, new in
             // Push live edits to the running agents; pre-session text rides along
-            // on session_start instead. Also keep the note's title in sync.
-            if store.listening {
+            // on session_start instead. Also keep the note's title in sync. Fires
+            // for the whole session (including while stopped), not just recording.
+            if sessionStart != nil {
                 let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
                 services.sidecar.sendSessionContext(trimmed)
                 services.writer.updateContext(trimmed)
@@ -195,7 +200,7 @@ struct TranscriptView: View {
         .onChange(of: sessionName) { _, new in
             // The name is a local label, not research context — only the note's
             // title tracks it (no sidecar push). Persisted on the next write.
-            if store.listening {
+            if sessionStart != nil {
                 services.writer.updateName(new.trimmingCharacters(in: .whitespacesAndNewlines))
                 services.writer.noteChanged()
             }
@@ -227,7 +232,7 @@ struct TranscriptView: View {
             ListeningToolbar(
                 store: store,
                 sessionStart: sessionStart,
-                pausedAt: pausedAt,
+                stoppedAt: stoppedAt,
                 selectedDevice: $selectedDevice,
                 devices: devices,
                 captureSystem: captureSystem,
@@ -235,10 +240,10 @@ struct TranscriptView: View {
                 sessionContext: $sessionContext,
                 autoCards: $autoCards,
                 pinned: $pinned,
-                onPlay: { Task { await toggle() } },
-                onPauseResume: { if store.paused { resumeSession() } else { pauseSession() } },
+                onStart: { Task { await startSession() } },
+                onResume: { resumeRecording() },
                 onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
-                onStop: { Task { await toggle() } },
+                onStop: { stopRecording() },
                 canExport: services.writer.hasExportContent,
                 onExport: exportSession
             )
@@ -276,8 +281,8 @@ struct TranscriptView: View {
         if shouldShowStatus(text) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(store.listening
-                        ? (store.paused ? Color.orange : Theme.recordRed) : Theme.textMuted)
+                    .fill(store.listening ? Theme.recordRed
+                        : (stoppedAt != nil ? Color.orange : Theme.textMuted))
                     .frame(width: 7, height: 7)
                 Text(text)
                     .font(.system(size: 11))
@@ -555,7 +560,7 @@ struct TranscriptView: View {
         }
     }
 
-    /// Space toggles play/pause/resume globally, except while editing a text
+    /// Space toggles start/stop/resume globally, except while editing a text
     /// field (where space must type a space). SwiftUI's `.keyboardShortcut`
     /// can't express that exception, so use a local key monitor instead.
     private func installSpaceMonitor() {
@@ -565,35 +570,40 @@ struct TranscriptView: View {
             else { return event }
             // Don't steal space from a focused *editable* text field (the Ask
             // box). The selectable transcript is a non-editable NSTextView and
-            // must still toggle play/pause when it holds focus.
+            // must still toggle recording when it holds focus.
             if let tv = event.window?.firstResponder as? NSTextView, tv.isEditable { return event }
-            if !store.listening {
-                Task { await toggle() }
-            } else if store.paused {
-                resumeSession()
-            } else {
-                pauseSession()
+            switch RecordControl.state(listening: store.listening, stopped: stoppedAt != nil) {
+            case .recording: stopRecording()
+            case .stopped: resumeRecording()
+            case .idle: Task { await startSession() }
             }
             return nil
         }
     }
 
-    /// Pause capture and freeze the timer at this moment.
-    private func pauseSession() {
-        guard store.listening, !store.paused else { return }
-        pausedAt = Date()
-        recorder?.pause()
+    /// Stop audio capture but keep the session resumable: the note and the
+    /// sidecar's classifier session stay live (no `session_end`), so resuming
+    /// continues the same session with full context. Freezes the timer at this
+    /// moment. The session is finalised only when the window closes (issue #6).
+    private func stopRecording() {
+        guard store.listening else { return }
+        stoppedAt = Date()
+        recorder?.stop()
     }
 
-    /// Resume capture; shift `sessionStart` forward by the paused span so the
-    /// timer continues from where it froze.
-    private func resumeSession() {
-        guard let pausedAt else { recorder?.resume(); return }
+    /// Resume a stopped session: shift `sessionStart` forward by the stopped span
+    /// so the timer continues from where it froze, then restart audio into the
+    /// same session (no generation bump, so existing utterances are kept; no new
+    /// `session_start`/note). The frozen-timer state holds until audio is live.
+    private func resumeRecording() {
+        guard let recorder, let stoppedAt else { return }
         if let start = sessionStart {
-            sessionStart = start.addingTimeInterval(Date().timeIntervalSince(pausedAt))
+            sessionStart = RecordControl.resumedStart(start, stoppedAt: stoppedAt, now: Date())
         }
-        self.pausedAt = nil
-        recorder?.resume()
+        Task {
+            await recorder.start(device: selectedDevice, captureSystem: captureSystem)
+            await MainActor.run { self.stoppedAt = nil }
+        }
     }
 
     /// Share the current session note to a chosen location via a save panel.
@@ -622,17 +632,19 @@ struct TranscriptView: View {
         queryText = ""
     }
 
-    /// End the current session cleanly: stop audio, signal the sidecar, flush the
-    /// note. Leaves the shared sidecar running. Called from `toggle()`'s stop
-    /// branch and from `onDisappear` when the window closes mid-session.
-    private func stopSession() {
+    /// Finalise the current session: stop audio, signal the sidecar, flush the
+    /// note, and clear the session state. Leaves the shared sidecar running.
+    /// Called when the window closes (or its "Wait"-to-close path) — Stop alone no
+    /// longer ends a session, since it's now resumable (issue #6). Safe whether
+    /// the session was recording or already stopped.
+    private func endSession() {
         recorder?.stop()
         services.sidecar.sendSessionEnd()
         services.writer.end()
         sessionContext = "" // blank slate for the next session
         sessionName = ""
         sessionStart = nil
-        pausedAt = nil
+        stoppedAt = nil
     }
 
     /// Cancel every in-flight agent for this session and mark each cancelled so
@@ -651,7 +663,7 @@ struct TranscriptView: View {
     /// `card_update` frames arrive. Closes via SwiftUI's `dismissWindow` so the
     /// window's `onDisappear` cleanup actually runs. ("Wait".)
     private func waitForAgentsThenClose() {
-        if store.listening { stopSession() }
+        if sessionStart != nil { endSession() }
         // Cover the window and drop the Space monitor: recording has stopped, so
         // a stray Space would otherwise start a fresh session mid-close.
         if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
@@ -672,28 +684,28 @@ struct TranscriptView: View {
         poll()
     }
 
-    private func toggle() async {
-        guard let recorder else { return }
-        if store.listening {
-            stopSession()
-        } else {
-            // Open a new STT session generation before clearing/starting, on the
-            // main actor with no `await` in between, so a previous session's
-            // in-flight finals are already stale by the time they try to write.
-            store.sessionGeneration += 1
-            store.utterances = []
-            store.cards = []
-            sessionStart = Date()
-            pausedAt = nil
-            let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
-            let nm = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
-            services.sidecar.sendSessionStart(UUID().uuidString, context: ctx)
-            services.writer.start(context: ctx, name: nm)
-            // A transcript window opened on this note must disable asking until
-            // the live writer is done with it.
-            TranscriptWindowContext.shared.liveFileURL = services.writer.currentFileURL
-            await recorder.start(device: selectedDevice, captureSystem: captureSystem)
-        }
+    /// Start a fresh session from idle: a new STT generation, a new note and a new
+    /// sidecar session. Stop no longer ends a session (it's resumable), so this
+    /// only runs from the idle Listen control — a new session means closing the
+    /// window and opening a new one from the Sessions browser.
+    private func startSession() async {
+        guard let recorder, sessionStart == nil else { return }
+        // Open a new STT session generation before clearing/starting, on the
+        // main actor with no `await` in between, so a previous session's
+        // in-flight finals are already stale by the time they try to write.
+        store.sessionGeneration += 1
+        store.utterances = []
+        store.cards = []
+        sessionStart = Date()
+        stoppedAt = nil
+        let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nm = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        services.sidecar.sendSessionStart(UUID().uuidString, context: ctx)
+        services.writer.start(context: ctx, name: nm)
+        // A transcript window opened on this note must disable asking until
+        // the live writer is done with it.
+        TranscriptWindowContext.shared.liveFileURL = services.writer.currentFileURL
+        await recorder.start(device: selectedDevice, captureSystem: captureSystem)
     }
 }
 

@@ -18,8 +18,6 @@ struct Utterance: Identifiable, Equatable {
 final class TranscriptStore: ObservableObject {
     @Published var utterances: [Utterance] = []
     @Published var listening = false
-    /// True while listening but audio is paused (engines idle, no new input).
-    @Published var paused = false
     /// True while the local mic is muted (system audio still captured).
     @Published var micMuted = false
     @Published var status = "idle"
@@ -55,12 +53,10 @@ final class Recorder {
     private let store: TranscriptStore
     private let sttQueue = DispatchQueue(label: "advisor.stt")
     // These flags are read on the realtime audio/sysaudio capture threads and
-    // written from the control path (start/stop/pause/mute), so they are atomic
-    // to avoid a data race. Relaxed ordering: each is independent, no flag guards
+    // written from the control path (start/stop/mute), so they are atomic to
+    // avoid a data race. Relaxed ordering: each is independent, no flag guards
     // another's visibility.
     private let systemActive = Atomic<Bool>(false)
-    /// When true, capture callbacks drop audio so no new transcription occurs.
-    private let paused = Atomic<Bool>(false)
     /// When true, mic callbacks drop audio (system audio keeps flowing).
     private let micMuted = Atomic<Bool>(false)
     /// Recent `them` utterances for echo dedup. Only touched on sttQueue.
@@ -81,14 +77,11 @@ final class Recorder {
         appleSys.onVolatile = { [weak self] text, gen in self?.setVolatile(text, for: .them, gen: gen) }
 
         capture.onSamples = { [weak self] samples in
-            guard let self,
-                !self.paused.load(ordering: .relaxed),
-                !self.micMuted.load(ordering: .relaxed) else { return }
+            guard let self, !self.micMuted.load(ordering: .relaxed) else { return }
             self.appleMic.append(samples)
         }
         systemCapture.onSamples = { [weak self] samples in
-            guard let self, !self.paused.load(ordering: .relaxed) else { return }
-            self.appleSys.append(samples)
+            self?.appleSys.append(samples)
         }
         systemCapture.onStopped = { [weak self] error in
             guard let self else { return }
@@ -246,10 +239,8 @@ final class Recorder {
             ]
             .compactMap { $0 }.joined(separator: " ")
             let status = ([detail] + notes).joined(separator: " | ")
-            paused.store(false, ordering: .relaxed)
             await MainActor.run {
                 store.listening = true
-                store.paused = false
                 store.status = status
             }
         } catch {
@@ -259,7 +250,6 @@ final class Recorder {
     }
 
     func stop() {
-        paused.store(false, ordering: .relaxed)
         micMuted.store(false, ordering: .relaxed)
         capture.stop()
         Task {
@@ -268,32 +258,10 @@ final class Recorder {
             await stopSystem()
             await MainActor.run {
                 store.listening = false
-                store.paused = false
                 store.micMuted = false
                 store.status = "idle"
                 store.volatile = [:]
             }
-        }
-    }
-
-    /// Pause/resume input. Engines stay alive; paused simply drops incoming
-    /// audio so no new transcription is produced.
-    func pause() {
-        guard !paused.load(ordering: .relaxed) else { return }
-        paused.store(true, ordering: .relaxed)
-        Task { @MainActor in
-            store.paused = true
-            store.status = "paused"
-            store.volatile = [:]
-        }
-    }
-
-    func resume() {
-        guard paused.load(ordering: .relaxed) else { return }
-        paused.store(false, ordering: .relaxed)
-        Task { @MainActor in
-            store.paused = false
-            store.status = "listening"
         }
     }
 

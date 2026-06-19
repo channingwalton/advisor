@@ -139,9 +139,11 @@ provider + model shared by the classifier, research, and manual-query lanes),
 appearance (system/light/dark), system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
 next session start. The toolbar keeps only in-session controls: the record
-cluster (waveform, timer, pause/stop, mic mute), audio source, **Context**, Auto
+cluster (waveform, timer, stop, mic mute), audio source, **Context**, Auto
 cards, Float, Export, History, Sessions (idle collapses the cluster to a single
-Listen pill). The
+Listen pill). **Stop** is resumable — it pauses capture but keeps the session
+live, and the cluster offers **Resume** to pick it back up with full context; the
+session is finalised when the recording window closes. The
 **Context** chip opens a **session prompt** popover (who's present, the topic,
 what to focus on): fill it before Listen or edit it live during the session to
 steer the agents — each edit applies to the next card. It clears when the

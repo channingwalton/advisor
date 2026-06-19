@@ -1,13 +1,15 @@
 import SwiftUI
 
 /// The Listening view's control strip (60 pt). Left: record cluster (waveform +
-/// timer + pause/stop) and audio-source button. Right: Focus chip, Auto-cards
-/// toggle, Float, Sessions. Idle collapses the cluster to a single Listen pill.
+/// timer + mic mute + stop) and audio-source button. Right: Focus chip, Auto-cards
+/// toggle, Float, Sessions. Idle collapses the cluster to a single Listen pill; a
+/// stopped-but-resumable session shows a frozen-timer Resume cluster (issue #6).
 struct ListeningToolbar: View {
     @ObservedObject var store: TranscriptStore
     let sessionStart: Date?
-    /// When paused, the moment capture paused — freezes the timer display.
-    let pausedAt: Date?
+    /// When stopped, the moment capture stopped — freezes the timer display until
+    /// the session is resumed. Nil while recording or idle.
+    let stoppedAt: Date?
     @Binding var selectedDevice: InputDevice?
     let devices: [InputDevice]
     let captureSystem: Bool
@@ -15,8 +17,8 @@ struct ListeningToolbar: View {
     @Binding var sessionContext: String
     @Binding var autoCards: Bool
     @Binding var pinned: Bool
-    let onPlay: () -> Void
-    let onPauseResume: () -> Void
+    let onStart: () -> Void
+    let onResume: () -> Void
     let onMuteToggle: () -> Void
     let onStop: () -> Void
     /// Whether the current session has anything to export (gates the button).
@@ -28,10 +30,10 @@ struct ListeningToolbar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if store.listening {
-                recordCluster
-            } else {
-                listenButton
+            switch RecordControl.state(listening: store.listening, stopped: stoppedAt != nil) {
+            case .recording: recordCluster
+            case .stopped: resumeCluster
+            case .idle: listenButton
             }
             audioSourceButton
             Spacer(minLength: 8)
@@ -52,7 +54,7 @@ struct ListeningToolbar: View {
     // MARK: record cluster
 
     private var listenButton: some View {
-        Button(action: onPlay) {
+        Button(action: onStart) {
             HStack(spacing: 7) {
                 Circle().fill(Theme.recordRed).frame(width: 9, height: 9)
                 Text("Listen").font(.system(size: 12.5, weight: .semibold))
@@ -69,15 +71,12 @@ struct ListeningToolbar: View {
 
     private var recordCluster: some View {
         HStack(spacing: 9) {
-            Waveform(active: !store.paused, colour: Theme.recordRed)
+            Waveform(active: true, colour: Theme.recordRed)
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 Text(elapsed)
                     .font(.system(size: 12.5, weight: .semibold).monospacedDigit())
                     .foregroundStyle(Theme.recordRedText)
             }
-            clusterButton(system: store.paused ? "play.fill" : "pause.fill",
-                help: store.paused ? "Resume (Space)" : "Pause (Space)",
-                action: onPauseResume)
             clusterButton(system: store.micMuted ? "mic.slash.fill" : "mic.fill",
                 help: store.micMuted ? "Unmute mic" : "Mute mic (system audio keeps recording)",
                 action: onMuteToggle)
@@ -91,6 +90,34 @@ struct ListeningToolbar: View {
             .buttonStyle(.plain)
             .help("Stop (Esc)")
             .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 40)
+        .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: 11))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11).stroke(Theme.recordRed.opacity(0.28), lineWidth: 0.5))
+    }
+
+    /// Shown while a session is stopped but resumable: the frozen elapsed timer
+    /// and a Resume button that picks the same session back up (issue #6).
+    private var resumeCluster: some View {
+        HStack(spacing: 9) {
+            Waveform(active: false, colour: Theme.recordRed)
+            Text(elapsed)
+                .font(.system(size: 12.5, weight: .semibold).monospacedDigit())
+                .foregroundStyle(Theme.textSecondary)
+            Button(action: onResume) {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill").font(.system(size: 11))
+                    Text("Resume").font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(Theme.onAccent)
+                .padding(.horizontal, 11)
+                .frame(height: 30)
+                .background(Theme.recordRed, in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .help("Resume (Space)")
         }
         .padding(.horizontal, 9)
         .frame(height: 40)
@@ -116,10 +143,10 @@ struct ListeningToolbar: View {
 
     private var elapsed: String {
         guard let sessionStart else { return "00:00" }
-        // `sessionStart` is shifted forward by paused durations on resume, so
-        // now − sessionStart excludes prior pauses; while paused, count to the
-        // pause moment so the display holds steady.
-        let ref = pausedAt ?? Date()
+        // `sessionStart` is shifted forward by stopped durations on resume, so
+        // now − sessionStart excludes prior stops; while stopped, count to the
+        // stop moment so the display holds steady.
+        let ref = store.listening ? Date() : (stoppedAt ?? Date())
         let s = max(0, Int(ref.timeIntervalSince(sessionStart)))
         return String(format: "%02d:%02d", s / 60, s % 60)
     }
