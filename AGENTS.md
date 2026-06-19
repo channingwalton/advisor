@@ -35,7 +35,9 @@ cd App && sh package.sh                # → dist/Advisor.app (self-contained, a
 Resource paths resolve via `AppResources` (bundle when packaged, `repoRoot`
 in a dev checkout) — keep new runtime-resource lookups going through it.
 
-There is no CI. Always build both sides before committing.
+CI (`.github/workflows/ci.yml`) builds and tests both sides on push to `main`
+and on PRs (App on `macos-26`, sidecar on `ubuntu-latest`). Always build both
+sides locally before committing too.
 
 ## Conventions & constraints
 
