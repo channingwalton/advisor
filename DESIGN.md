@@ -56,9 +56,12 @@ The Swift app owns everything realtime and visual; the sidecar owns everything t
 Swift → sidecar:
 
 ```json
-{"type":"session_start","sessionId":"...","ts":...}
-{"type":"utterance","id":"u123","source":"them","text":"...","t0":...,"t1":...}
+{"type":"session_start","sessionId":"...","ts":...,"context":"..."}
+{"type":"session_context","text":"<live edit of the session prompt>"}
+{"type":"utterance","id":"u123","source":"them","text":"...","ts":...}
 {"type":"query","id":"q7","text":"...","action":"answer|context|factcheck","triggerId":"u123"}
+{"type":"config","auto":true,"lanes":3}
+{"type":"cancel","cardId":"c9"}
 {"type":"card_reply","cardId":"c9","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","transcript":"them: ...\nme: ..."}
 {"type":"ask_document","id":"d3","question":"...","document":"<the whole saved transcript note>"}
 {"type":"session_end"}
@@ -67,7 +70,7 @@ Swift → sidecar:
 Sidecar → Swift:
 
 ```json
-{"type":"card","id":"c9","trigger":"u123","kind":"answer|context|factcheck|query","title":"...","body":"...","sources":[{"title":"...","url":"..."}],"state":"pending|streaming|done|failed","confidence":"high|medium|low"}
+{"type":"card","id":"c9","trigger":"u123","kind":"answer|context|factcheck|query","title":"...","body":"...","state":"pending|streaming|done|failed|cancelled"}
 {"type":"card_update","id":"c9","body":"...","state":"streaming"}
 {"type":"document_answer","id":"d3","body":"...","state":"pending|streaming|done|failed"}
 {"type":"error","fatal":false,"message":"..."}
@@ -79,9 +82,8 @@ Versioned with a `hello` exchange at startup.
 
 | Stage | Budget |
 |---|---|
-| VAD endpoint detection | 0.3 s |
-| Whisper segment decode | 0.5–1.0 s |
-| Trigger classify (Haiku) | 0.5 s |
+| SpeechAnalyzer endpoint + final result | 0.3–1.0 s |
+| Trigger classify (shared model) | 0.5 s |
 | Placeholder card visible | **≤2 s total** |
 | Agent first useful content (streamed) | +2–3 s |
 

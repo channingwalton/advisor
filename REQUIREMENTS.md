@@ -26,7 +26,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 ### Answering
 - F8. Answer detected questions automatically.
 - F9. Surface background context for detected entities (relevant notes, tickets, docs, prior discussion).
-- F10. Fact-check claims against web/internal sources, clearly labelled with confidence and source.
+- F10. Fact-check claims against web/internal sources, citing the source; say "couldn't verify" rather than guess when a claim can't be confirmed.
 - F11. Search across: web, Obsidian Vault (`~/Documents/Notes`), work tools via MCP (Jira, Confluence, Slack), local files/repos.
 - F12. Every answer cites its source(s).
 

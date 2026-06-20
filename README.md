@@ -120,8 +120,8 @@ The **Sessions** browser is the app's main window (it opens at launch; the
 recording window's **History** button, clock icon, brings it forward) — a master/
 detail window over past sessions. The left sidebar lists sessions grouped by day
 (Today / Yesterday / Earlier this week / …) with search (which also matches tags;
-type `#tag` to filter by tag specifically) and an All / This week
-filter; each row shows the session's title (its name if you gave it one, else the
+type `#tag` to filter by tag specifically), an All / This week
+filter and a recent/oldest sort toggle; each row shows the session's title (its name if you gave it one, else the
 context you typed before Listen, else the date), a gist, duration and card count,
 and any tags as coloured pills.
 Selecting one shows it on the right: title and meta, the questions you asked, and
@@ -130,9 +130,9 @@ inline, as in the live view). The detail header's **Tags** chip applies or
 removes tags (picking from your library). Give a session a name with the
 `…` menu → **Rename**
 (top right of the detail) — a short label for an easier-to-scan list; leave it
-blank to fall back to the context. The same menu has **Delete** (behind a
-confirmation — it permanently removes the note from disk); the live session can't
-be deleted.
+blank to fall back to the context. The same menu has **Reveal in Finder** (opens
+the session's markdown file) and **Delete** (behind a confirmation — it
+permanently removes the note from disk); the live session can't be deleted.
 Ask a question about the selected session in the box at the bottom: the answer
 streams in and, once finished, is appended to that session's note under a
 `# Follow-ups` heading, so the saved transcript grows with
@@ -201,6 +201,7 @@ path. On **Codex** the sandbox is coarser (see above) — no per-call policy.
 
 ## Documents
 
+- [FEATURES.md](FEATURES.md) — the feature list, in plain language
 - [REQUIREMENTS.md](REQUIREMENTS.md) — what it must do, decisions made
 - [DESIGN.md](DESIGN.md) — architecture, protocol, milestones, tuning history
 
