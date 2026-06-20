@@ -2,8 +2,7 @@
 
 A personal macOS assistant that listens to live conversations, transcribes
 them on-device, and proactively surfaces answers, context, and fact-checks as
-you talk. This list is the source for a future website — each feature has a
-short, plain-language description.
+you talk.
 
 ## Live listening
 
@@ -44,6 +43,7 @@ surfaces a card inline, anchored to the moment it relates to:
 - **Two-tier speed** — a fast classifier decides *whether* to act in under a
   second, leaving the research agent the rest of the budget to answer
   (aspiration: a useful card within a few seconds).
+- Choose AI provider: Claude/Codex subscription/API
 
 ## Ask anything
 
@@ -94,20 +94,17 @@ The app opens on a master/detail browser of your past sessions:
   toolbar or the browser; they show as coloured pills on session rows and are
   searchable (type `#tag` to filter). Renaming a tag updates it everywhere.
 - **Saved contexts** — pre-canned context prompts you can pick from instead of
-  retyping common setups.
+  retyping common setups to use to guide a recording session.
 - **Markdown sessions** — every session is saved as a portable markdown file
-  with cards embedded inline, in a folder you choose (it offers to move
-  existing transcripts when you change it).
+  with cards embedded inline, in a folder you choose.
 
 ## Sources
 
 Advisor researches across whatever you've connected:
 
 - **Web search** — built in.
-- **Your notes & connectors** — your Obsidian vault and work tools (Jira,
-  Confluence, Slack, …) via MCP, read-only by default. Advisor itself knows
-  nothing about your notes; it loads your own Claude configuration
-  (`~/.claude/CLAUDE.md`), where vault locations and personal context live.
+- **Your notes & connectors** — your local file system, work tools such as Jira,
+  Confluence, Slack, etc. as configured in your AI connectors, read-only by default, independent of Advisor
 - **Local files** — read-only access to non-sensitive files in your home
   directory.
 
@@ -120,9 +117,14 @@ Advisor researches across whatever you've connected:
   no writes. Credential paths (`~/.ssh`, `~/.aws`, `~/.claude`, keychains, …)
   are denied — case-insensitively, with symlinks resolved so a link can't slip
   past the denylist.
-- **Connectors fail closed** — anything not recognised as a read or search is
-  treated as an action and gated behind an opt-in "Allow connector actions"
-  toggle.
+- **Sandboxed research (Codex)** — coarser, because the Codex SDK has no
+  per-call hook: a process-wide `read-only` sandbox with `never` approval blocks
+  all writes and escalation, but read-only shell *is* permitted (so the
+  credential-path denylist does not apply), and MCP connectors come from your
+  `~/.codex/config.toml` rather than the "Allow connector actions" gate.
+- **Connectors fail closed (Claude)** — anything not recognised as a read or
+  search is treated as an action and gated behind an opt-in "Allow connector
+  actions" toggle.
 - **Single user** — no accounts, no multi-tenancy, no server. Everything runs
   locally.
 
@@ -132,9 +134,9 @@ Advisor researches across whatever you've connected:
   one backend: **Claude** (Agent SDK) by default, or **Codex**
   (`@openai/codex-sdk`), picked in Preferences.
 - **Uses your existing login** — defaults to your Claude Code / Codex CLI
-  subscription; no API key required.
+  subscription.
 - **Optional API-key fallback** — for a machine with no CLI login, paste an
-  Anthropic or OpenAI key (stored in the macOS Keychain, never in config). The
+  Anthropic or OpenAI key (stored in the macOS Keychain). The
   key is validated against the provider when entered, so a bad key surfaces
   immediately.
 
@@ -156,7 +158,3 @@ Advisor researches across whatever you've connected:
 
 - Overlapping simultaneous speakers on a single mixed mono feed can't be fully
   separated by any single-stream STT.
-- The trigger classifier and research agents consume your Claude (or Codex)
-  subscription allowance.
-</content>
-</invoke>
