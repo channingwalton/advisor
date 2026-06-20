@@ -110,8 +110,9 @@ The **mic** button in the record cluster mutes the local microphone
 while the session keeps running — system audio is still captured and
 transcribed; tap again to unmute. `Float` keeps the window on top. Sessions are
 saved as markdown under
-`~/Library/Application Support/Advisor/sessions/` (`Sessions` button), with cards
-embedded inline in the conversation just as the window shows them. The
+`~/Library/Application Support/Advisor/sessions/` by default — Preferences lets
+you choose another folder (and offers to move existing transcripts across) — with
+cards embedded inline in the conversation just as the window shows them. The
 **Export** button (share icon) copies the current session note to a location you
 choose.
 
@@ -146,7 +147,9 @@ agent count, connector action permissions, trigger sensitivity
 provider + model shared by the classifier, research, and manual-query lanes),
 saved contexts, the **tag** library (add / rename / recolour / delete, each with a
 preset colour; renaming updates the tag on every session already using it),
-appearance (system/light/dark), system-audio capture, and STT locale. Stored in
+appearance (system/light/dark), system-audio capture, STT locale, and the
+session storage folder (choose where transcripts are saved; changing it offers to
+move existing ones across). Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
 next session start. The toolbar keeps only in-session controls: the record
 cluster (waveform, timer, stop, mic mute), audio source, **Context**, Auto

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 extension Notification.Name {
@@ -54,12 +55,18 @@ struct AdvisorConfig: Codable, Equatable {
     /// note frontmatter; this library supplies the colour. The sidecar never
     /// sees it.
     var tags: [SavedTag] = []
+    /// App-side only: an absolute path to the folder where session notes are
+    /// stored (issue #16). "" = the built-in default
+    /// (`Application Support/Advisor/sessions`). Only the app reads or writes
+    /// session notes, so the sidecar never sees this — like `sttLocale`. Resolved
+    /// through `SessionArchive.directory`.
+    var sessionDir = ""
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
-        case provider, model, sttLocale, authMode, appearance, contexts, tags
+        case provider, model, sttLocale, authMode, appearance, contexts, tags, sessionDir
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -78,6 +85,7 @@ struct AdvisorConfig: Codable, Equatable {
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? "system"
         contexts = try c.decodeIfPresent([SavedContext].self, forKey: .contexts) ?? []
         tags = try c.decodeIfPresent([SavedTag].self, forKey: .tags) ?? []
+        sessionDir = try c.decodeIfPresent(String.self, forKey: .sessionDir) ?? ""
     }
 
     static var fileURL: URL {
@@ -552,6 +560,23 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Session storage") {
+                LabeledContent("Folder") {
+                    HStack(spacing: 8) {
+                        Text(sessionFolderDisplay)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                        Button("Change…") { chooseSessionFolder() }
+                    }
+                }
+                Text("Where transcripts are saved. Changing the folder offers to move your existing transcripts across.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Text("Agent settings apply at the start of the next session.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -571,5 +596,86 @@ struct PreferencesView: View {
             let disk = AdvisorConfig.load().contexts
             if disk != config.contexts { config.contexts = disk }
         }
+    }
+
+    /// The resolved storage folder shown in Preferences — the chosen path or the
+    /// built-in default when none is set.
+    private var sessionFolderDisplay: String {
+        SessionArchive.directory(for: config.sessionDir).path
+    }
+
+    /// Pick a new transcript folder (issue #16). When the current folder holds
+    /// transcripts, offer to move them across (the live note, still owned by its
+    /// writer, is left behind). Cancelling the move-prompt leaves the folder
+    /// unchanged. Writing `config.sessionDir` fires the form's `onChange` →
+    /// `save()` + `advisorConfigChanged`, which the Sessions browser reloads on.
+    private func chooseSessionFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Session Folder"
+        panel.prompt = "Choose"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = SessionArchive.directory(for: config.sessionDir)
+        guard panel.runModal() == .OK, let chosen = panel.url else { return }
+
+        let oldDir = SessionArchive.directory(for: config.sessionDir)
+        guard chosen.standardizedFileURL != oldDir.standardizedFileURL else { return }
+
+        let live = TranscriptWindowContext.shared.liveFileURL
+        let movable = SessionArchive.list(in: oldDir).filter {
+            $0.url.standardizedFileURL != live?.standardizedFileURL
+        }
+        if !movable.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Move existing transcripts?"
+            alert.informativeText =
+                "Move \(movable.count) transcript\(movable.count == 1 ? "" : "s") to the new folder, "
+                + "or leave them where they are?"
+            alert.addButton(withTitle: "Move")
+            alert.addButton(withTitle: "Leave Them")
+            alert.addButton(withTitle: "Cancel")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                // A partial/failed move would split the archive across folders;
+                // surface it rather than silently switching past it. On a total
+                // failure (nothing moved) keep the old folder so no session is
+                // hidden; on a partial move, report what stayed and still switch
+                // (the bulk is now in the new folder, and the user is told).
+                let result = SessionArchive.move(from: oldDir, to: chosen, excluding: live)
+                if result.skipped > 0 {
+                    reportIncompleteMove(result, to: chosen)
+                    if result.moved == 0 { return }
+                }
+            case .alertSecondButtonReturn:
+                break // keep the old transcripts where they are; just switch folder
+            default:
+                return // Cancel: leave the storage folder unchanged
+            }
+        }
+        config.sessionDir = chosen.path
+    }
+
+    /// Tell the user a move didn't fully complete (a same-named note already in
+    /// the destination, or a file error). `moved == 0` means nothing moved and
+    /// the folder is being left unchanged; otherwise the skipped notes remain in
+    /// the old folder while the rest moved across.
+    private func reportIncompleteMove(_ result: (moved: Int, skipped: Int), to dest: URL) {
+        let alert = NSAlert()
+        if result.moved == 0 {
+            alert.messageText = "Couldn't move transcripts"
+            alert.informativeText =
+                "None of the \(result.skipped) transcript\(result.skipped == 1 ? "" : "s") could be "
+                + "moved — a note with the same name may already exist in the new folder, or the "
+                + "move failed. The storage folder was left unchanged."
+        } else {
+            alert.messageText = "Some transcripts weren't moved"
+            alert.informativeText =
+                "\(result.moved) moved, but \(result.skipped) couldn't — a note with the same name "
+                + "may already exist in the new folder, or the move failed. Those \(result.skipped) "
+                + "stay in the old folder."
+        }
+        alert.runModal()
     }
 }

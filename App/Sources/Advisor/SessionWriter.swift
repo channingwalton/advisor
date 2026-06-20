@@ -4,7 +4,10 @@ import Foundation
 /// The Obsidian vault is never written.
 @MainActor
 final class SessionWriter {
-    let sessionsDirectory: URL
+    /// Resolves the storage folder, called at each `start()` (not cached at
+    /// init), so a Preferences change to the session folder (issue #16) reaches
+    /// the next session without an app relaunch. Injectable for tests.
+    private let resolveDirectory: () -> URL
     private let store: TranscriptStore
     private var fileURL: URL?
     private var started: Date?
@@ -24,11 +27,12 @@ final class SessionWriter {
     /// clobbered by the live rewrite.
     var currentFileURL: URL? { fileURL }
 
-    init(store: TranscriptStore) {
+    init(
+        store: TranscriptStore,
+        resolveDirectory: @escaping () -> URL = { SessionArchive.directory }
+    ) {
         self.store = store
-        sessionsDirectory = SessionArchive.directory
-        try? FileManager.default.createDirectory(
-            at: sessionsDirectory, withIntermediateDirectories: true)
+        self.resolveDirectory = resolveDirectory
     }
 
     func start(context: String = "", name: String = "", tags: [String] = []) {
@@ -38,7 +42,12 @@ final class SessionWriter {
         self.name = name
         self.tags = tags
         sessionActive = true
-        fileURL = sessionsDirectory.appendingPathComponent(SessionArchive.fileName(for: started!))
+        // Resolve (and create) the storage folder now rather than at init, so a
+        // folder changed in Preferences since launch applies to this session.
+        let directory = resolveDirectory()
+        try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        fileURL = directory.appendingPathComponent(SessionArchive.fileName(for: started!))
         write()
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }

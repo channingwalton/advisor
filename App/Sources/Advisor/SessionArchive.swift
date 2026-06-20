@@ -12,12 +12,27 @@ struct SessionFile: Identifiable, Hashable {
 /// transcripts. Owns the on-disk location and filename convention (the live
 /// writer delegates to it), so the format lives in one place.
 enum SessionArchive {
-    /// Where session notes are stored — `~/Library/Application Support/Advisor/sessions`.
-    static var directory: URL {
+    /// The built-in location used when no custom folder is configured —
+    /// `~/Library/Application Support/Advisor/sessions`.
+    static var defaultDirectory: URL {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Advisor/sessions", isDirectory: true)
     }
+
+    /// Resolve a configured `sessionDir` (issue #16) to a directory URL: the
+    /// `defaultDirectory` when blank, else that absolute path. Pure, for
+    /// testability — `directory` feeds it the live config value.
+    static func directory(for sessionDir: String) -> URL {
+        let trimmed = sessionDir.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty
+            ? defaultDirectory : URL(fileURLWithPath: trimmed, isDirectory: true)
+    }
+
+    /// Where session notes are stored: the folder chosen in Preferences
+    /// (`AdvisorConfig.sessionDir`) or the built-in default. Read fresh from
+    /// config so a folder change applies without an app relaunch.
+    static var directory: URL { directory(for: AdvisorConfig.load().sessionDir) }
 
     /// `yyyy-MM-dd-HHmmss` with calendar/locale pinned, so a session filename is
     /// always Gregorian regardless of the user's system calendar. Used to both
@@ -224,6 +239,32 @@ enum SessionArchive {
             }
         }
         return changed
+    }
+
+    /// Move every session note from `source` to `dest`, creating `dest` if
+    /// needed (issue #16: relocating transcripts when the storage folder
+    /// changes). Skips the `excluding` note (the live one, still owned by its
+    /// writer) and any note whose name already exists in `dest` (never clobbers).
+    /// Non-session files are ignored — `list` only yields well-formed notes.
+    /// Returns how many moved and how many were skipped on collision. Synchronous
+    /// file I/O — fine for a personal archive of this size, like `renameTag`.
+    @discardableResult
+    static func move(from source: URL, to dest: URL, excluding: URL? = nil) -> (moved: Int, skipped: Int) {
+        guard source.standardizedFileURL != dest.standardizedFileURL else { return (0, 0) }
+        try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        var moved = 0, skipped = 0
+        for file in list(in: source) {
+            if let excluding,
+                file.url.standardizedFileURL == excluding.standardizedFileURL { continue }
+            let target = dest.appendingPathComponent(file.url.lastPathComponent)
+            if FileManager.default.fileExists(atPath: target.path) { skipped += 1; continue }
+            if (try? FileManager.default.moveItem(at: file.url, to: target)) != nil {
+                moved += 1
+            } else {
+                skipped += 1
+            }
+        }
+        return (moved, skipped)
     }
 
     /// Delete `file` from disk. Returns false if removal fails (e.g. the note is

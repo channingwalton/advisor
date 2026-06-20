@@ -615,6 +615,45 @@ note. Search includes tag names in the browser's haystack, and a `#tag` token
 (`SessionSearch`) filters by tag specifically rather than matching any transcript
 word.
 
+## Choosable transcript folder (2026-06-20, issue #16)
+
+Where session notes live is now a preference. `config.json` gains `sessionDir`
+(App-side only, like `sttLocale`/`contexts`/`tags` — only the app reads or writes
+notes, so the sidecar never sees it): `""` means the built-in default
+(`Application Support/Advisor/sessions`), otherwise an absolute path.
+`SessionArchive.directory` reads it **fresh** each access
+(`directory(for: AdvisorConfig.load().sessionDir)` over a pure resolver split out
+for testing), so a folder change applies without an app relaunch. The
+launch-lifetime `SessionWriter` is the subtle case: it would otherwise pin the
+launch-time folder, so it resolves the directory **at each `start()`** (injected
+resolver, defaulting to `SessionArchive.directory`) rather than caching it at
+`init` — every new session lands in the *current* folder. The browser's `list()`
+reads it per notification-driven `reload()`. Resolution is the only hot use and
+the config file is tiny, so re-reading beats caching + invalidation.
+
+**Preferences ▸ Session storage** shows the resolved path with a **Change…**
+button (`NSOpenPanel`, directories only, create allowed). On a new pick, if the
+old folder holds transcripts the user is offered **Move / Leave Them / Cancel**
+(`SessionArchive.move` — relocate the session `.md`, create the dest, never
+clobber a name collision, ignore non-session files; synchronous, like
+`renameTag`). `move` returns `(moved, skipped)`: a partial/failed move would
+split the archive across two folders, so the switch isn't silent about it — a
+total failure (nothing moved) keeps the old folder, and a partial move reports
+what stayed behind before still switching to where the bulk now lives. Writing
+`config.sessionDir` rides the form's existing `onChange` → `save()` +
+`advisorConfigChanged`, which the Sessions browser already reloads on, so it
+re-lists from the new folder for free.
+
+The **live** note is excluded from the move (like `delete`/`renameTag`): the
+still-writing session already resolved its `fileURL` in the old folder at
+`start()`, and a debounced rewrite would recreate any file moved out from under
+it. Consequence (accepted, not fought): a session recording *across* the change
+keeps writing to the old folder — it won't appear in the browser (now listing the
+new folder) until it ends and — if ever — the folder is pointed back. New
+sessions started after the change use the new folder, so this only affects an
+in-flight recording; blocking the change mid-session was considered and dropped
+as over-scoped.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
