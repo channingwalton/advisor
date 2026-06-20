@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: #f4f2ee; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; color: #1f1d24; }
+  a { color: inherit; }
+  ::selection { background: rgba(58,92,224,0.18); }
+  @keyframes adv-bar { 0%,100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
+  @keyframes adv-pulse { 0% { box-shadow: 0 0 0 0 rgba(255,69,58,0.45); } 70% { box-shadow: 0 0 0 6px rgba(255,69,58,0); } 100% { box-shadow: 0 0 0 0 rgba(255,69,58,0); } }
+  @keyframes adv-caret { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+  @keyframes adv-spin { to { transform: rotate(360deg); } }
+  @keyframes adv-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+  @keyframes adv-rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</helmet>
+
+<div style="overflow: hidden; background: #f4f2ee;">
+
+<!-- ================= NAV ================= -->
+<div style="position: sticky; top: 0; z-index: 50; backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); background: rgba(244,242,238,0.74); border-bottom: 0.5px solid rgba(0,0,0,0.08);">
+  <div style="max-width: 1140px; margin: 0 auto; height: 58px; display: flex; align-items: center; gap: 14px; padding: 0 26px;">
+    <a href="#top" style="display: flex; align-items: center; gap: 10px; text-decoration: none;">
+      <span style="position: relative; width: 28px; height: 28px; border-radius: 22.5%; overflow: hidden; box-shadow: 0 2px 5px -1px rgba(40,44,96,0.45), inset 0 0 0 0.5px rgba(0,0,0,0.06); background: linear-gradient(157deg, #7088ff 0%, #3a5ce0 52%, #4730a8 100%); display: inline-block;">
+        <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 9%;">
+          <span style="width: 8%; height: 40%; background: rgba(255,255,255,0.9); border-radius: 99px;"></span>
+          <span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span>
+          <span style="width: 8%; height: 88%; background: #fff; border-radius: 99px;"></span>
+          <span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span>
+          <span style="width: 8%; height: 40%; background: rgba(255,255,255,0.9); border-radius: 99px;"></span>
+        </span>
+        <span style="position: absolute; top: 7%; right: 7%; width: 25%; height: 25%; background: #fff; clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%);"></span>
+      </span>
+      <span style="font-size: 17px; font-weight: 600; letter-spacing: -0.2px; color: #1f1d24;">Advisor</span>
+    </a>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 30px;">
+      <a href="#how" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">How it works</a>
+      <a href="#screens" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">Screenshots</a>
+      <a href="#features" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">Features</a>
+      <a href="#pricing" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">Pricing</a>
+      <a href="#download" style="display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 16px; border-radius: 9px; background: #1f1d24; color: #fff; font-size: 13px; font-weight: 600; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,0.12);" style-hover="background:#34313c;">
+        <span style="width: 8px; height: 8px; border-right: 1.6px solid #fff; border-bottom: 1.6px solid #fff; transform: rotate(45deg) translate(-1px,-1px); display: inline-block;"></span>
+        Download
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- ================= HERO ================= -->
+<div id="top" style="position: relative; background: radial-gradient(120% 80% at 50% -10%, #ffffff 0%, #f4f2ee 60%);">
+  <div style="max-width: 1140px; margin: 0 auto; padding: 92px 26px 0; text-align: center;">
+    <div style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 9px; border-radius: 99px; background: #fff; border: 0.5px solid rgba(0,0,0,0.08); box-shadow: 0 1px 2px rgba(0,0,0,0.04); margin-bottom: 30px;">
+      <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: #3a5ce0; background: #eef1fb; padding: 3px 9px; border-radius: 99px;">New</span>
+      <span style="font-size: 13px; color: #56545d; font-weight: 500;">A personal assistant for macOS that listens in</span>
+    </div>
+
+    <h1 style="font-size: 72px; line-height: 1.02; letter-spacing: -2.4px; font-weight: 700; margin: 0; color: #1c1a22; text-wrap: balance;">Answers arrive<br>before you ask.</h1>
+
+    <p style="max-width: 620px; margin: 26px auto 0; font-size: 19px; line-height: 1.55; color: #56545d; text-wrap: pretty;">Advisor sits beside any conversation — meetings, calls, videos, in person — transcribes it on your Mac, and quietly surfaces answers, context, and fact-checks the moment they're useful.</p>
+
+    <div style="display: flex; align-items: center; justify-content: center; gap: 13px; margin-top: 36px;">
+      <a href="#download" style="display: inline-flex; align-items: center; gap: 9px; height: 50px; padding: 0 26px; border-radius: 13px; background: linear-gradient(180deg, #4a6bef, #3a5ce0); color: #fff; font-size: 16px; font-weight: 600; text-decoration: none; box-shadow: 0 8px 22px -8px rgba(58,92,224,0.6), inset 0 1px 0 rgba(255,255,255,0.22);" style-hover="filter:brightness(1.05);">
+        <span style="width: 9px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(45deg) translate(-1px,-1px); display: inline-block;"></span>
+        Download for macOS
+      </a>
+      <a href="#how" style="display: inline-flex; align-items: center; gap: 9px; height: 50px; padding: 0 24px; border-radius: 13px; background: #fff; border: 0.5px solid rgba(0,0,0,0.1); color: #1f1d24; font-size: 16px; font-weight: 600; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" style-hover="background:#fbfbfb;">
+        <span style="width: 0; height: 0; border-left: 9px solid #3a5ce0; border-top: 6px solid transparent; border-bottom: 6px solid transparent; display: inline-block;"></span>
+        See it work
+      </a>
+    </div>
+    <div style="margin-top: 18px; font-size: 13px; color: #8a8891; font-weight: 500;">Free 14-day trial · macOS 26 · Apple Silicon · On-device transcription</div>
+  </div>
+
+  <!-- ===== HERO APP WINDOW ===== -->
+  <div data-reveal style="max-width: 1000px; margin: 56px auto 0; padding: 0 26px;">
+    <div style="animation: adv-float 7s ease-in-out infinite;">
+    <div style="background: #fbfbfd; border-radius: 15px; overflow: hidden; box-shadow: 0 40px 90px -30px rgba(24,26,52,0.5), 0 8px 20px -10px rgba(24,26,52,0.18), 0 0 0 0.5px rgba(0,0,0,0.08); border: 0.5px solid rgba(255,255,255,0.7);">
+      <!-- titlebar -->
+      <div style="height: 46px; display: flex; align-items: center; padding: 0 16px; background: linear-gradient(#fdfdff, #f4f4f8); border-bottom: 0.5px solid rgba(0,0,0,0.08); position: relative;">
+        <div style="display: flex; gap: 8px;">
+          <span style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f57;"></span>
+          <span style="width: 12px; height: 12px; border-radius: 50%; background: #febc2e;"></span>
+          <span style="width: 12px; height: 12px; border-radius: 50%; background: #28c840;"></span>
+        </div>
+        <div style="position: absolute; left: 0; right: 0; margin: 0 auto; width: max-content; display: flex; align-items: center; gap: 9px;">
+          <span style="font-size: 13px; font-weight: 600; color: #3a3a42;">Advisor</span>
+          <span style="width: 1px; height: 12px; background: rgba(0,0,0,0.12);"></span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #ff453a; font-weight: 500;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #ff453a; animation: adv-pulse 1.8s infinite;"></span>Listening · 12:48</span>
+        </div>
+      </div>
+      <!-- toolbar -->
+      <div style="height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: #fbfbfd; border-bottom: 0.5px solid rgba(0,0,0,0.06);">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 11px; border-radius: 11px; background: #fff; border: 0.5px solid rgba(255,69,58,0.28); box-shadow: inset 0 0 0 1px rgba(255,69,58,0.05);">
+          <span style="display: inline-flex; align-items: flex-end; gap: 2.5px; height: 15px;">
+            <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite;"></span>
+            <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite 0.15s;"></span>
+            <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite 0.3s;"></span>
+            <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite 0.45s;"></span>
+            <span style="width: 2.5px; height: 100%; background: #ff453a; border-radius: 2px; transform-origin: bottom; animation: adv-bar 0.9s ease-in-out infinite 0.6s;"></span>
+          </span>
+          <span style="font-size: 12.5px; font-weight: 600; color: #d8362d; font-variant-numeric: tabular-nums;">12:48</span>
+          <span style="width: 28px; height: 28px; border-radius: 8px; background: #ff453a; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(255,69,58,0.4);"><span style="width: 9px; height: 9px; background: #fff; border-radius: 2.5px;"></span></span>
+        </div>
+        <div style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 11px; border-radius: 9px; background: #fff; border: 0.5px solid rgba(0,0,0,0.09);">
+          <span style="width: 14px; height: 14px; border-radius: 5px 5px 7px 7px; border: 1.6px solid #7c7d88; position: relative; display: inline-block;"></span>
+          <span style="display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15;"><span style="font-size: 11.5px; font-weight: 600; color: #33343c;">Studio Display Mic</span><span style="font-size: 9.5px; color: #9596a0;">+ system audio</span></span>
+        </div>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+          <div style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 9px; background: #eef1fb; border: 0.5px solid rgba(58,92,224,0.18);">
+            <span style="font-size: 10px; font-weight: 700; color: #3a5ce0; letter-spacing: 0.4px; text-transform: uppercase;">Focus</span>
+            <span style="font-size: 12px; color: #3b4254; font-weight: 500;">Q3 board review</span>
+          </div>
+          <div style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 11px 0 12px; border-radius: 9px; background: #fff; border: 0.5px solid rgba(0,0,0,0.09);">
+            <span style="font-size: 12px; font-weight: 500; color: #44454e;">Auto cards</span>
+            <span style="width: 30px; height: 18px; border-radius: 10px; background: #3a5ce0; position: relative; display: inline-block;"><span style="position: absolute; top: 1.5px; right: 1.5px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25);"></span></span>
+          </div>
+        </div>
+      </div>
+      <!-- body -->
+      <div style="height: 442px; overflow: hidden; background: #fbfbfd;">
+        <div style="max-width: 760px; margin: 0 auto; padding: 24px 28px;">
+          <div style="text-align: center; font-size: 10.5px; color: #aeafb8; margin-bottom: 20px; font-weight: 500; letter-spacing: 0.3px;">Today · 2:31 PM · on-device transcription</div>
+          <div style="display: flex; gap: 11px; margin-bottom: 16px;">
+            <span style="flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: #f0a05a; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">D</span>
+            <div><div style="display: flex; align-items: baseline; gap: 7px; margin-bottom: 2px;"><span style="font-size: 13px; font-weight: 600; color: #2a2b33;">Daniel</span><span style="font-size: 11px; color: #b0b1bb;">2:46</span></div><div style="font-size: 14px; line-height: 1.6; color: #3a3b44;">If we look at Q3, our <mark style="background: #fdeecb; color: #946100; border-radius: 3px; padding: 0 2px;">net revenue retention came in at 118%</mark>, up from 109% last quarter.</div></div>
+          </div>
+          <!-- fact-check card -->
+          <div style="margin: 0 0 16px 37px; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 13px; box-shadow: 0 5px 18px -10px rgba(20,22,40,0.2), 0 1px 2px rgba(0,0,0,0.04); overflow: hidden; animation: adv-rise 0.5s ease both;">
+            <div style="display: flex; align-items: center; gap: 9px; padding: 12px 14px 9px;">
+              <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.4px; color: #2f8d5b; background: #e6f4ec; padding: 3px 8px; border-radius: 6px;"><span style="width: 12px; height: 12px; border-radius: 50%; background: #2f8d5b; color: #fff; font-size: 8px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800;">✓</span>FACT-CHECK · VERIFIED</span>
+              <span style="font-size: 13.5px; font-weight: 650; color: #2a2b33;">118% NRR is top-quartile for SaaS</span>
+            </div>
+            <div style="padding: 0 15px 12px;"><div style="font-size: 13px; line-height: 1.56; color: #44454f;">Median net revenue retention for growth-stage B2B SaaS sits around 105–110%; 118% places this comfortably in the top quartile. The jump from 109% is also unusually fast.</div>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.06);"><span style="font-size: 11px; color: #8a8b95; font-style: italic;">"net revenue retention came in at 118%"</span><span style="margin-left: auto; font-size: 11px; color: #3a5ce0;">2 sources</span></div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 11px; margin-bottom: 16px;">
+            <span style="flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: #5a8ad6; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">S</span>
+            <div><div style="display: flex; align-items: baseline; gap: 7px; margin-bottom: 2px;"><span style="font-size: 13px; font-weight: 600; color: #2a2b33;">Sarah</span><span style="font-size: 11px; color: #b0b1bb;">3:08</span></div><div style="font-size: 14px; line-height: 1.6; color: #3a3b44;">Honestly, the <mark style="background: #eae6fb; color: #6044c0; border-radius: 3px; padding: 0 2px;">Mistral integration</mark> is what's driving most of the expansion revenue<span style="display: inline-block; width: 6px; height: 15px; background: #3a5ce0; border-radius: 1px; margin-left: 3px; vertical-align: -2px; animation: adv-caret 1s steps(1) infinite;"></span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <!-- privacy ticker strip -->
+  <div data-reveal style="max-width: 1000px; margin: 40px auto 0; padding: 0 26px;">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 30px; padding: 18px 0 96px; color: #8a8891;">
+      <span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #2f8d5b;"></span>Audio never leaves your Mac</span>
+      <span style="width: 4px; height: 4px; border-radius: 50%; background: #d3d2cd;"></span>
+      <span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #2f8d5b;"></span>No meeting bot joins the call</span>
+      <span style="width: 4px; height: 4px; border-radius: 50%; background: #d3d2cd;"></span>
+      <span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #2f8d5b;"></span>Nothing recorded — only transcripts</span>
+      <span style="width: 4px; height: 4px; border-radius: 50%; background: #d3d2cd;"></span>
+      <span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #2f8d5b;"></span>Sandboxed, read-only research</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================= HOW IT WORKS ================= -->
+<div id="how" style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06); border-bottom: 0.5px solid rgba(0,0,0,0.06);">
+  <div style="max-width: 1140px; margin: 0 auto; padding: 104px 26px;">
+    <div data-reveal style="text-align: center; margin-bottom: 64px;">
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #3a5ce0; margin-bottom: 14px;">How it works</div>
+      <h2 style="font-size: 46px; line-height: 1.07; letter-spacing: -1.4px; font-weight: 700; margin: 0; color: #1c1a22;">Three steps. One button.</h2>
+      <p style="max-width: 560px; margin: 18px auto 0; font-size: 17px; line-height: 1.55; color: #56545d;">From the moment you hit Listen, capture and transcription happen on your Mac — only transcript text is sent off, to your own AI provider, to research.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px;">
+      <!-- step 1 -->
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 18px; padding: 30px 26px;">
+        <div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 116px; border-radius: 13px; background: linear-gradient(160deg, #eef1fb, #e3e8fa); margin-bottom: 24px;">
+          <span style="display: inline-flex; align-items: flex-end; gap: 5px; height: 46px;">
+            <span style="width: 6px; height: 40%; background: #3a5ce0; border-radius: 99px; transform-origin: bottom; animation: adv-bar 1s ease-in-out infinite;"></span>
+            <span style="width: 6px; height: 70%; background: #3a5ce0; border-radius: 99px; transform-origin: bottom; animation: adv-bar 1s ease-in-out infinite 0.15s;"></span>
+            <span style="width: 6px; height: 100%; background: #4730a8; border-radius: 99px; transform-origin: bottom; animation: adv-bar 1s ease-in-out infinite 0.3s;"></span>
+            <span style="width: 6px; height: 70%; background: #3a5ce0; border-radius: 99px; transform-origin: bottom; animation: adv-bar 1s ease-in-out infinite 0.45s;"></span>
+            <span style="width: 6px; height: 40%; background: #3a5ce0; border-radius: 99px; transform-origin: bottom; animation: adv-bar 1s ease-in-out infinite 0.6s;"></span>
+          </span>
+        </div>
+        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 8px;">01</div>
+        <h3 style="font-size: 21px; font-weight: 650; letter-spacing: -0.4px; margin: 0 0 9px; color: #1c1a22;">Listen</h3>
+        <p style="font-size: 14.5px; line-height: 1.6; color: #56545d; margin: 0;">One button captures your microphone <em>and</em> your Mac's system audio at once — both sides of any call, with no bot joining the meeting.</p>
+      </div>
+      <!-- step 2 -->
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 18px; padding: 30px 26px;">
+        <div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 116px; border-radius: 13px; background: linear-gradient(160deg, #eef1fb, #e3e8fa); margin-bottom: 24px;">
+          <span style="position: relative; width: 58px; height: 58px; border-radius: 13px; background: #fff; border: 1.5px solid #c3cdf2; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px -4px rgba(58,92,224,0.3);">
+            <span style="width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(150deg, #4a6bef, #4730a8);"></span>
+            <span style="position: absolute; top: -7px; left: 14px; width: 4px; height: 7px; background: #aebbf0; border-radius: 2px;"></span>
+            <span style="position: absolute; top: -7px; left: 27px; width: 4px; height: 7px; background: #aebbf0; border-radius: 2px;"></span>
+            <span style="position: absolute; top: -7px; left: 40px; width: 4px; height: 7px; background: #aebbf0; border-radius: 2px;"></span>
+            <span style="position: absolute; bottom: -7px; left: 14px; width: 4px; height: 7px; background: #aebbf0; border-radius: 2px;"></span>
+            <span style="position: absolute; bottom: -7px; left: 27px; width: 4px; height: 7px; background: #aebbf0; border-radius: 2px;"></span>
+            <span style="position: absolute; bottom: -7px; left: 40px; width: 4px; height: 7px; background: #aebbf0; border-radius: 2px;"></span>
+          </span>
+        </div>
+        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 8px;">02</div>
+        <h3 style="font-size: 21px; font-weight: 650; letter-spacing: -0.4px; margin: 0 0 9px; color: #1c1a22;">Transcribe on-device</h3>
+        <p style="font-size: 14.5px; line-height: 1.6; color: #56545d; margin: 0;">Apple's on-device speech recognition turns talk into a clean, live transcript. Words appear in grey, then firm up into sentences. Audio is never stored.</p>
+      </div>
+      <!-- step 3 -->
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 18px; padding: 30px 26px;">
+        <div style="display: flex; align-items: center; justify-content: center; width: 100%; height: 116px; border-radius: 13px; background: linear-gradient(160deg, #eef1fb, #e3e8fa); margin-bottom: 24px;">
+          <span style="position: relative; width: 90px; height: 60px; border-radius: 11px; background: #fff; box-shadow: 0 6px 16px -6px rgba(58,92,224,0.4); padding: 13px 12px;">
+            <span style="display: block; width: 34px; height: 7px; border-radius: 99px; background: #4730a8; margin-bottom: 9px;"></span>
+            <span style="display: block; width: 64px; height: 5px; border-radius: 99px; background: #d6dbf2; margin-bottom: 6px;"></span>
+            <span style="display: block; width: 52px; height: 5px; border-radius: 99px; background: #d6dbf2;"></span>
+            <span style="position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; background: linear-gradient(150deg, #6e8bff, #4730a8); clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%); filter: drop-shadow(0 2px 4px rgba(58,92,224,0.4));"></span>
+          </span>
+        </div>
+        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 8px;">03</div>
+        <h3 style="font-size: 21px; font-weight: 650; letter-spacing: -0.4px; margin: 0 0 9px; color: #1c1a22;">Surface insight</h3>
+        <p style="font-size: 14.5px; line-height: 1.6; color: #56545d; margin: 0;">Advisor decides what's worth helping with and slides in a card — an answer, background, or a fact-check — anchored to the exact moment it relates to.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCREENSHOTS ================= -->
+<div id="screens" style="background: #f4f2ee;">
+  <div style="max-width: 1140px; margin: 0 auto; padding: 104px 26px;">
+    <div data-reveal style="text-align: center; margin-bottom: 60px;">
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #3a5ce0; margin-bottom: 14px;">A second mind in the room</div>
+      <h2 style="font-size: 46px; line-height: 1.07; letter-spacing: -1.4px; font-weight: 700; margin: 0; color: #1c1a22;">See it in action.</h2>
+    </div>
+
+    <!-- big light listening -->
+    <div data-reveal style="background: #fff; border-radius: 20px; padding: 26px; box-shadow: 0 30px 70px -34px rgba(24,26,52,0.4), 0 0 0 0.5px rgba(0,0,0,0.06); margin-bottom: 24px;">
+      <div style="display: grid; grid-template-columns: 1fr 1.35fr; gap: 30px; align-items: center;">
+        <div style="padding: 18px 8px 18px 22px;">
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #6044c0; background: #eee9fb; padding: 4px 10px; border-radius: 7px; letter-spacing: 0.4px;">LIVE LISTENING</span>
+          <h3 style="font-size: 30px; font-weight: 650; letter-spacing: -0.8px; margin: 16px 0 12px; color: #1c1a22;">The transcript, with insight inline.</h3>
+          <p style="font-size: 15.5px; line-height: 1.62; color: #56545d; margin: 0 0 20px;">A clean chronological feed of who said what — with answer, context, and fact-check cards woven in exactly where they belong. Cited, collapsible, and yours to ask follow-ups on.</p>
+          <div style="display: flex; flex-direction: column; gap: 11px;">
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; color: #3a3b44;"><span style="flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; background: #e6f4ec; color: #2f8d5b; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;">✓</span>Fact-checks cite their sources — or say "couldn't verify"</div>
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; color: #3a3b44;"><span style="flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; background: #eee9fb; color: #6044c0; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;">+</span>Context on the people, projects, and terms in play</div>
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; color: #3a3b44;"><span style="flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; background: #eef1fb; color: #3a5ce0; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;">✦</span>Ask anything, anytime — the transcript is the context</div>
+          </div>
+        </div>
+        <!-- mini window light -->
+        <div style="border-radius: 13px; overflow: hidden; box-shadow: 0 18px 44px -22px rgba(24,26,52,0.45), 0 0 0 0.5px rgba(0,0,0,0.08); border: 0.5px solid rgba(0,0,0,0.04);">
+          <div style="height: 38px; display: flex; align-items: center; padding: 0 14px; gap: 8px; background: linear-gradient(#fdfdff, #f4f4f8); border-bottom: 0.5px solid rgba(0,0,0,0.07); position: relative;">
+            <span style="width: 10px; height: 10px; border-radius: 50%; background: #ff5f57;"></span><span style="width: 10px; height: 10px; border-radius: 50%; background: #febc2e;"></span><span style="width: 10px; height: 10px; border-radius: 50%; background: #28c840;"></span>
+            <span style="position: absolute; left: 0; right: 0; margin: 0 auto; width: max-content; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: #ff453a; font-weight: 500;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ff453a;"></span>Listening · 12:48</span>
+          </div>
+          <div style="background: #fbfbfd; padding: 18px 20px; min-height: 320px;">
+            <div style="text-align: center; font-size: 10px; color: #b8b9c2; margin-bottom: 14px;">Today · on-device transcription</div>
+            <div style="font-size: 13px; line-height: 1.55; color: #3a3b44; margin-bottom: 12px;"><strong style="color:#2a2b33;">Daniel:</strong> And that's despite the pricing change you rolled out in <mark style="background: #fdeecb; color: #946100; border-radius: 3px; padding: 0 2px;">August</mark>?</div>
+            <div style="background: #fff; border: 0.5px solid rgba(58,92,224,0.22); border-radius: 11px; box-shadow: 0 5px 16px -10px rgba(58,92,224,0.3); overflow: hidden; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px;"><span style="font-size: 9.5px; font-weight: 700; color: #3a5ce0; background: #e7ecfd; padding: 2px 7px; border-radius: 5px; letter-spacing: 0.4px;">ANSWER</span><span style="font-size: 11px; color: #8a93b5;">replying to your question</span></div>
+              <div style="padding: 0 12px 11px;"><div style="font-size: 13px; font-weight: 650; color: #2a2b33; line-height: 1.4; margin-bottom: 5px;">Expansion held because retention, not new logos, drove it.</div><div style="font-size: 12px; line-height: 1.5; color: #56545f;">The August change raised list price but grandfathered existing seats — so NRR rose while churn stayed flat.</div></div>
+            </div>
+            <div style="font-size: 13px; line-height: 1.55; color: #80818b;"><strong style="color:#5a5b65;">Sarah:</strong> Right, and the enterprise tier is only just starting to<span style="display: inline-block; width: 5px; height: 13px; background: #3a5ce0; border-radius: 1px; margin-left: 2px; vertical-align: -2px; animation: adv-caret 1s steps(1) infinite;"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- row: dark + sessions -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+      <!-- dark -->
+      <div data-reveal style="background: linear-gradient(165deg, #1c1d27, #14141c); border-radius: 20px; padding: 28px; box-shadow: 0 30px 70px -34px rgba(10,12,30,0.7), 0 0 0 0.5px rgba(0,0,0,0.1);">
+        <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #aab6ff; background: rgba(108,124,255,0.16); padding: 4px 10px; border-radius: 7px; letter-spacing: 0.4px;">DARK MODE</span>
+        <h3 style="font-size: 24px; font-weight: 650; letter-spacing: -0.5px; margin: 14px 0 8px; color: #f4f4f7;">Built for the late call.</h3>
+        <p style="font-size: 14px; line-height: 1.6; color: #a3a3ad; margin: 0 0 22px;">Light, dark, or follow the system — Advisor's whole UI is themed to match your Mac.</p>
+        <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 16px 40px -20px rgba(0,0,0,0.7); border: 0.5px solid rgba(255,255,255,0.08);">
+          <div style="height: 34px; display: flex; align-items: center; padding: 0 12px; gap: 7px; background: #23232e; border-bottom: 0.5px solid rgba(255,255,255,0.06); position: relative;">
+            <span style="width: 9px; height: 9px; border-radius: 50%; background: #ff5f57;"></span><span style="width: 9px; height: 9px; border-radius: 50%; background: #febc2e;"></span><span style="width: 9px; height: 9px; border-radius: 50%; background: #28c840;"></span>
+            <span style="position: absolute; left: 0; right: 0; margin: 0 auto; width: max-content; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #ff6b61; font-weight: 500;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ff453a;"></span>Listening · 18:24</span>
+          </div>
+          <div style="background: #18181f; padding: 16px 18px; min-height: 226px;">
+            <div style="font-size: 12.5px; line-height: 1.55; color: #c7c7d0; margin-bottom: 12px;">OCaml is adopting effect systems in a big way. But <mark style="background: rgba(120,90,210,0.32); color: #c6b6f5; border-radius: 3px; padding: 0 2px;">Koka</mark> has been a laboratory for exploring them.</div>
+            <div style="background: #21212b; border: 0.5px solid rgba(108,124,255,0.28); border-radius: 11px; overflow: hidden;">
+              <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px;"><span style="font-size: 9.5px; font-weight: 700; color: #aab6ff; background: rgba(108,124,255,0.18); padding: 2px 7px; border-radius: 5px; letter-spacing: 0.4px;">CONTEXT</span><span style="font-size: 12px; font-weight: 600; color: #e7e7ee;">OCaml effect systems</span><span style="margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: #8a8b97;"><span style="width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid #3a3a48; border-top-color: #aab6ff; display: inline-block; animation: adv-spin 0.7s linear infinite;"></span>Researching</span></div>
+              <div style="padding: 0 12px 11px;"><div style="font-size: 12px; line-height: 1.55; color: #b7b7c2;"><strong style="color:#e0e0e8;">Effect handlers</strong> shipped in OCaml 5.0 (Dec 2022) with the multicore runtime — a control mechanism, not type-tracked.</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- sessions -->
+      <div data-reveal style="background: #fff; border-radius: 20px; padding: 28px; box-shadow: 0 30px 70px -34px rgba(24,26,52,0.4), 0 0 0 0.5px rgba(0,0,0,0.06);">
+        <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #2f8d5b; background: #e6f4ec; padding: 4px 10px; border-radius: 7px; letter-spacing: 0.4px;">SESSIONS BROWSER</span>
+        <h3 style="font-size: 24px; font-weight: 650; letter-spacing: -0.5px; margin: 14px 0 8px; color: #1c1a22;">Every conversation, kept.</h3>
+        <p style="font-size: 14px; line-height: 1.6; color: #56545d; margin: 0 0 22px;">Sessions save as searchable markdown — grouped by day, tagged, and rendered just like the live window. Ask a past session a question; the answer appends to its note.</p>
+        <div style="border-radius: 12px; overflow: hidden; box-shadow: 0 16px 40px -22px rgba(24,26,52,0.45); border: 0.5px solid rgba(0,0,0,0.08); display: flex; min-height: 226px;">
+          <!-- sidebar -->
+          <div style="flex: 0 0 42%; background: #f4f4f7; border-right: 0.5px solid rgba(0,0,0,0.07); padding: 12px 10px;">
+            <div style="height: 24px; border-radius: 7px; background: #fff; border: 0.5px solid rgba(0,0,0,0.08); margin-bottom: 11px; display: flex; align-items: center; padding: 0 8px; font-size: 10px; color: #a9aab3;">Search…</div>
+            <div style="font-size: 9px; font-weight: 700; color: #a9aab3; letter-spacing: 0.4px; margin: 0 0 7px 2px;">TODAY</div>
+            <div style="background: #fff; border-radius: 8px; padding: 8px 9px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border-left: 2.5px solid #3a5ce0; margin-bottom: 7px;"><div style="font-size: 11px; font-weight: 600; color: #2a2b33; margin-bottom: 2px;">Q3 board review</div><div style="font-size: 9.5px; color: #9596a0;">12:48 · 4 cards</div><div style="display: flex; gap: 4px; margin-top: 5px;"><span style="font-size: 8px; color: #3a5ce0; background: #eef1fb; padding: 1px 6px; border-radius: 99px;">finance</span></div></div>
+            <div style="padding: 8px 9px; margin-bottom: 5px;"><div style="font-size: 11px; font-weight: 600; color: #5a5b65; margin-bottom: 2px;">Effect systems talk</div><div style="font-size: 9.5px; color: #b0b1bb;">9:02 · 6 cards</div></div>
+            <div style="padding: 8px 9px;"><div style="font-size: 11px; font-weight: 600; color: #5a5b65; margin-bottom: 2px;">Mistral 1:1</div><div style="font-size: 9.5px; color: #b0b1bb;">Yesterday · 2 cards</div></div>
+          </div>
+          <!-- detail -->
+          <div style="flex: 1; background: #fbfbfd; padding: 14px 15px;">
+            <div style="font-size: 15px; font-weight: 650; color: #1c1a22; margin-bottom: 3px;">Q3 board review</div>
+            <div style="font-size: 10px; color: #9596a0; margin-bottom: 12px;">Today · 2:31 PM · 28 min · 4 cards</div>
+            <div style="font-size: 11px; line-height: 1.5; color: #56545f; margin-bottom: 10px;"><strong style="color:#2a2b33;">Daniel:</strong> Net revenue retention came in at 118%, up from 109%.</div>
+            <div style="background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 9px; padding: 9px 10px; box-shadow: 0 2px 8px -4px rgba(0,0,0,0.12);"><div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;"><span style="font-size: 8.5px; font-weight: 700; color: #2f8d5b; background: #e6f4ec; padding: 1px 6px; border-radius: 4px;">✓ VERIFIED</span></div><div style="font-size: 10.5px; line-height: 1.45; color: #56545f;">118% NRR is top-quartile for growth-stage SaaS.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- card closeup -->
+    <div data-reveal style="background: linear-gradient(160deg, #eef1fb, #e7e3fa); border-radius: 20px; padding: 48px; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.05);">
+      <div style="display: grid; grid-template-columns: 1fr 1.15fr; gap: 44px; align-items: center;">
+        <div>
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #3a5ce0; background: #fff; padding: 4px 10px; border-radius: 7px; letter-spacing: 0.4px;">THE SIGNATURE MOVE</span>
+          <h3 style="font-size: 32px; font-weight: 650; letter-spacing: -0.8px; margin: 16px 0 12px; color: #1c1a22;">A card, the moment it matters.</h3>
+          <p style="font-size: 15.5px; line-height: 1.62; color: #4a4954; margin: 0 0 16px;">Cards stream in live — a brief preliminary answer first, then a revised one as Advisor consults the web and your connected sources. Each one cites where it came from, and turns into a short thread when you ask a follow-up.</p>
+          <p style="font-size: 13.5px; line-height: 1.6; color: #6a6973; margin: 0;">Tune the sensitivity — conservative, balanced, or eager — and toggle each kind on or off.</p>
+        </div>
+        <!-- big card -->
+        <div style="background: #fff; border: 0.5px solid rgba(58,92,224,0.2); border-radius: 16px; box-shadow: 0 24px 50px -22px rgba(58,92,224,0.4), 0 0 0 0.5px rgba(0,0,0,0.04); overflow: hidden;">
+          <div style="display: flex; align-items: center; gap: 9px; padding: 16px 18px 0;">
+            <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.5px; color: #6044c0; background: #eee9fb; padding: 4px 9px; border-radius: 6px;"><span style="width: 5px; height: 5px; border-radius: 50%; background: #6044c0;"></span>CONTEXT</span>
+            <span style="font-size: 16px; font-weight: 650; color: #2a2b33;">Net revenue retention</span>
+            <span style="margin-left: auto; font-size: 18px; color: #c8c9d0;">×</span>
+          </div>
+          <div style="padding: 13px 18px 6px;">
+            <div style="font-size: 14px; line-height: 1.6; color: #44454f; margin-bottom: 11px;">The percentage of recurring revenue retained from existing customers over a period — <em>including</em> expansion and upsell, minus churn and downgrades.</div>
+            <div style="display: flex; gap: 10px; margin-bottom: 9px;"><span style="flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: #c3b8e8; margin-top: 8px;"></span><div style="font-size: 14px; line-height: 1.58; color: #44454f;">Above 100% means the existing base grows on its own, before any new sales.</div></div>
+            <div style="display: flex; gap: 10px;"><span style="flex: 0 0 5px; width: 5px; height: 5px; border-radius: 50%; background: #c3b8e8; margin-top: 8px;"></span><div style="font-size: 14px; line-height: 1.58; color: #44454f;">Growth-stage B2B SaaS typically sits at <strong>105–110%</strong>; top-quartile clears 118%.</div></div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 12px 18px; margin-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.06);">
+            <span style="font-size: 11.5px; color: #8a8b95; font-style: italic;">Term mentioned by Daniel</span>
+            <span style="margin-left: auto; display: inline-flex; gap: 12px;"><span style="font-size: 11.5px; color: #3a5ce0;">SaaS Metrics</span><span style="font-size: 11.5px; color: #3a5ce0;">Your notes</span></span>
+          </div>
+          <div style="display: flex; gap: 8px; padding: 0 14px 14px;">
+            <div style="flex: 1; display: flex; align-items: center; height: 36px; padding: 0 13px; background: #f7f7fa; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 10px; font-size: 13px; color: #a9aab3;">Ask a follow-up…</div>
+            <div style="height: 36px; padding: 0 17px; display: inline-flex; align-items: center; border-radius: 10px; background: #3a5ce0; color: #fff; font-size: 13px; font-weight: 600; box-shadow: 0 2px 6px rgba(58,92,224,0.32);">Send</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= FEATURES ================= -->
+<div id="features" style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06);">
+  <div style="max-width: 1140px; margin: 0 auto; padding: 104px 26px;">
+    <div data-reveal style="text-align: center; margin-bottom: 60px;">
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #3a5ce0; margin-bottom: 14px;">Everything it does</div>
+      <h2 style="font-size: 46px; line-height: 1.07; letter-spacing: -1.4px; font-weight: 700; margin: 0; color: #1c1a22;">A quiet, capable companion.</h2>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 16px; padding: 26px;">
+        <div style="width: 38px; height: 38px; border-radius: 10px; background: #eef1fb; display: flex; align-items: center; justify-content: center; margin-bottom: 16px;"><span style="width: 16px; height: 16px; background: linear-gradient(150deg, #6e8bff, #4730a8); clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%);"></span></div>
+        <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 7px; color: #1c1a22;">Proactive cards</h3>
+        <p style="font-size: 13.5px; line-height: 1.58; color: #56545d; margin: 0;">Answers, background context, and fact-checks appear on their own — anchored to the moment they relate to.</p>
+      </div>
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 16px; padding: 26px;">
+        <div style="width: 38px; height: 38px; border-radius: 10px; background: #eef1fb; display: flex; align-items: flex-end; justify-content: center; gap: 3px; padding-bottom: 11px; margin-bottom: 16px;"><span style="width: 3px; height: 7px; background: #3a5ce0; border-radius: 99px;"></span><span style="width: 3px; height: 12px; background: #3a5ce0; border-radius: 99px;"></span><span style="width: 3px; height: 16px; background: #4730a8; border-radius: 99px;"></span><span style="width: 3px; height: 12px; background: #3a5ce0; border-radius: 99px;"></span><span style="width: 3px; height: 7px; background: #3a5ce0; border-radius: 99px;"></span></div>
+        <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 7px; color: #1c1a22;">Captures both sides</h3>
+        <p style="font-size: 13.5px; line-height: 1.58; color: #56545d; margin: 0;">Your mic and your Mac's system audio at once — no meeting bot. Mute yourself mid-call and the room keeps transcribing.</p>
+      </div>
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 16px; padding: 26px;">
+        <div style="width: 38px; height: 38px; border-radius: 10px; background: #e6f4ec; display: flex; align-items: center; justify-content: center; margin-bottom: 16px;"><span style="width: 13px; height: 15px; border-radius: 4px; background: #2f8d5b; position: relative; display: inline-block;"><span style="position: absolute; top: -6px; left: 50%; transform: translateX(-50%); width: 9px; height: 9px; border: 2px solid #2f8d5b; border-bottom: none; border-radius: 5px 5px 0 0;"></span></span></div>
+        <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 7px; color: #1c1a22;">On-device & private</h3>
+        <p style="font-size: 13.5px; line-height: 1.58; color: #56545d; margin: 0;">Speech-to-text runs locally with Apple SpeechAnalyzer. Audio never leaves your Mac — nothing is recorded, only transcripts kept.</p>
+      </div>
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 16px; padding: 26px;">
+        <div style="width: 38px; height: 38px; border-radius: 10px; background: #eef1fb; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; font-size: 15px; color: #3a5ce0;">✦</div>
+        <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 7px; color: #1c1a22;">Ask anything</h3>
+        <p style="font-size: 13.5px; line-height: 1.58; color: #56545d; margin: 0;">Pose a question any time — about the conversation or beyond it. Or right-click any line to answer, explain, or fact-check it.</p>
+      </div>
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 16px; padding: 26px;">
+        <div style="width: 38px; height: 38px; border-radius: 10px; background: #eef1fb; display: flex; align-items: center; justify-content: center; margin-bottom: 16px;"><span style="width: 16px; height: 14px; border-radius: 4px; border: 2px solid #3a5ce0; display: inline-block; position: relative;"><span style="position: absolute; left: 2px; right: 7px; top: 2px; height: 2px; background: #3a5ce0;"></span></span></div>
+        <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 7px; color: #1c1a22;">Sessions browser</h3>
+        <p style="font-size: 13.5px; line-height: 1.58; color: #56545d; margin: 0;">Past sessions in portable markdown — grouped by day, searchable, tagged with coloured pills, renamable, and exportable.</p>
+      </div>
+      <div data-reveal style="background: #faf9f7; border: 0.5px solid rgba(0,0,0,0.07); border-radius: 16px; padding: 26px;">
+        <div style="width: 38px; height: 38px; border-radius: 10px; background: #eef1fb; display: flex; align-items: center; justify-content: center; gap: 3px; margin-bottom: 16px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #3a5ce0;"></span><span style="width: 11px; height: 2px; background: #aebbf0;"></span><span style="width: 7px; height: 7px; border-radius: 50%; background: #4730a8;"></span></div>
+        <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 7px; color: #1c1a22;">Your notes & tools</h3>
+        <p style="font-size: 13.5px; line-height: 1.58; color: #56545d; margin: 0;">Researches across web search, your Obsidian vault, and connectors like Jira, Confluence, and Slack — read-only by default.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= PRIVACY BAND ================= -->
+<div style="background: linear-gradient(165deg, #1d1e29, #14141c);">
+  <div style="max-width: 1140px; margin: 0 auto; padding: 96px 26px; text-align: center;">
+    <div data-reveal>
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #aab6ff; margin-bottom: 16px;">Privacy by architecture</div>
+      <h2 style="font-size: 40px; line-height: 1.12; letter-spacing: -1.1px; font-weight: 700; margin: 0 auto; color: #fff; max-width: 760px; text-wrap: balance;">Single user. No accounts. No server of ours. Your audio never leaves the Mac.</h2>
+      <p style="max-width: 600px; margin: 20px auto 0; font-size: 16px; line-height: 1.6; color: #a3a3ad;">To research, Advisor sends transcript text — never audio — to your own AI provider, Claude or Codex, on your existing subscription. There, agents are sandboxed by a per-call policy: web search and read-only access to non-sensitive files. No shell, no writes. Credential paths are denied; connectors fail closed.</p>
+    </div>
+    <div data-reveal style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; text-align: left;">
+      <div style="background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 22px;"><div style="font-size: 15px; font-weight: 650; color: #f4f4f7; margin-bottom: 6px;">Local-first</div><div style="font-size: 13px; line-height: 1.55; color: #9a9aa6;">Transcription is on-device; listening is always explicitly user-initiated.</div></div>
+      <div style="background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 22px;"><div style="font-size: 15px; font-weight: 650; color: #f4f4f7; margin-bottom: 6px;">Sandboxed research</div><div style="font-size: 13px; line-height: 1.55; color: #9a9aa6;">Per-call tool policy; <code style="font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #c6b6f5;">~/.ssh</code>, <code style="font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #c6b6f5;">~/.aws</code> and keychains denied.</div></div>
+      <div style="background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 22px;"><div style="font-size: 15px; font-weight: 650; color: #f4f4f7; margin-bottom: 6px;">Uses your own login</div><div style="font-size: 13px; line-height: 1.55; color: #9a9aa6;">Research runs on your own Claude or Codex subscription — transcript text goes to your provider, never to us.</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= PRICING ================= -->
+<div id="pricing" style="background: #f4f2ee;">
+  <div style="max-width: 1140px; margin: 0 auto; padding: 104px 26px;">
+    <div data-reveal style="text-align: center; margin-bottom: 44px;">
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #3a5ce0; margin-bottom: 14px;">Pricing</div>
+      <h2 style="font-size: 46px; line-height: 1.07; letter-spacing: -1.4px; font-weight: 700; margin: 0; color: #1c1a22;">One plan. Everything in.</h2>
+      <p style="max-width: 500px; margin: 18px auto 28px; font-size: 17px; line-height: 1.55; color: #56545d;">Start with a free 14-day trial. Cancel any time.</p>
+      <!-- toggle -->
+      <div style="display: inline-flex; align-items: center; gap: 4px; padding: 4px; border-radius: 12px; background: #fff; border: 0.5px solid rgba(0,0,0,0.08); box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+        <button onClick="{{ setMonthly }}" style="{{ monthlyBtnStyle }}">Monthly</button>
+        <button onClick="{{ setAnnual }}" style="{{ annualBtnStyle }}">Annual <span style="{{ saveBadgeStyle }}">{{ annualSaveBadge }}</span></button>
+      </div>
+    </div>
+
+    <div data-reveal style="max-width: 460px; margin: 0 auto;">
+      <div style="background: #fff; border-radius: 22px; padding: 40px 38px; box-shadow: 0 30px 70px -34px rgba(24,26,52,0.35), 0 0 0 0.5px rgba(0,0,0,0.06); position: relative; overflow: hidden;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #3a5ce0, #4730a8);"></div>
+        <div style="display: flex; align-items: center; gap: 11px; margin-bottom: 22px;">
+          <span style="position: relative; width: 38px; height: 38px; border-radius: 22.5%; overflow: hidden; box-shadow: 0 3px 8px -2px rgba(40,44,96,0.4); background: linear-gradient(157deg, #7088ff 0%, #3a5ce0 52%, #4730a8 100%); display: inline-block;">
+            <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 9%;"><span style="width: 8%; height: 40%; background: rgba(255,255,255,0.9); border-radius: 99px;"></span><span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 88%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 40%; background: rgba(255,255,255,0.9); border-radius: 99px;"></span></span>
+            <span style="position: absolute; top: 7%; right: 7%; width: 25%; height: 25%; background: #fff; clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%);"></span>
+          </span>
+          <div><div style="font-size: 19px; font-weight: 700; color: #1c1a22; letter-spacing: -0.3px;">Advisor</div><div style="font-size: 12.5px; color: #8a8891;">for macOS</div></div>
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 8px; margin-bottom: 4px;">
+          <span style="font-size: 54px; font-weight: 700; letter-spacing: -2px; color: #1c1a22; line-height: 1; font-variant-numeric: tabular-nums;">{{ priceBig }}</span>
+          <span style="font-size: 16px; color: #8a8891; font-weight: 500; padding-bottom: 8px;">{{ priceUnit }}</span>
+        </div>
+        <div style="font-size: 13px; color: #8a8891; margin-bottom: 26px; min-height: 18px;">{{ priceSub }}</div>
+        <a href="#download" style="display: flex; align-items: center; justify-content: center; height: 50px; border-radius: 13px; background: linear-gradient(180deg, #4a6bef, #3a5ce0); color: #fff; font-size: 16px; font-weight: 600; text-decoration: none; box-shadow: 0 8px 22px -8px rgba(58,92,224,0.6), inset 0 1px 0 rgba(255,255,255,0.22); margin-bottom: 26px;" style-hover="filter:brightness(1.05);">Start free trial</a>
+        <div style="display: flex; flex-direction: column; gap: 13px;">
+          <div style="display: flex; align-items: flex-start; gap: 11px; font-size: 14px; color: #3a3b44; line-height: 1.4;"><span style="flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; background: #eef1fb; color: #3a5ce0; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px;">✓</span>Unlimited listening &amp; sessions</div>
+          <div style="display: flex; align-items: flex-start; gap: 11px; font-size: 14px; color: #3a3b44; line-height: 1.4;"><span style="flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; background: #eef1fb; color: #3a5ce0; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px;">✓</span>All card kinds — answer, context, fact-check</div>
+          <div style="display: flex; align-items: flex-start; gap: 11px; font-size: 14px; color: #3a3b44; line-height: 1.4;"><span style="flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; background: #eef1fb; color: #3a5ce0; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px;">✓</span>Web, vault &amp; connector research</div>
+          <div style="display: flex; align-items: flex-start; gap: 11px; font-size: 14px; color: #3a3b44; line-height: 1.4;"><span style="flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; background: #eef1fb; color: #3a5ce0; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px;">✓</span>Light &amp; dark, floating window, export</div>
+        </div>
+        <div style="margin-top: 24px; padding-top: 18px; border-top: 0.5px solid rgba(0,0,0,0.07); font-size: 12px; line-height: 1.5; color: #9a9aa6;">Runs on your own Claude or Codex subscription — agent usage is billed to your provider plan, not by us.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= DOWNLOAD / SPECS ================= -->
+<div id="download" style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06);">
+  <div style="max-width: 1140px; margin: 0 auto; padding: 104px 26px;">
+    <div data-reveal style="background: linear-gradient(160deg, #1f2230, #15151d); border-radius: 24px; padding: 56px 52px; box-shadow: 0 40px 90px -40px rgba(20,24,60,0.5); position: relative; overflow: hidden;">
+      <div style="position: absolute; right: -80px; top: -80px; width: 340px; height: 340px; border-radius: 50%; background: radial-gradient(circle, rgba(74,107,239,0.4), transparent 68%); pointer-events: none;"></div>
+      <div style="position: relative; display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center;">
+        <div>
+          <h2 style="font-size: 40px; line-height: 1.08; letter-spacing: -1.2px; font-weight: 700; margin: 0 0 16px; color: #fff; text-wrap: balance;">Download Advisor.</h2>
+          <p style="font-size: 16px; line-height: 1.6; color: #a8a8b4; margin: 0 0 28px; max-width: 420px;">A single, self-contained app. The Node runtime and sidecar are bundled — nothing else to install.</p>
+          <div style="display: flex; align-items: center; gap: 13px; flex-wrap: wrap;">
+            <a href="#" style="display: inline-flex; align-items: center; gap: 11px; height: 54px; padding: 0 26px; border-radius: 14px; background: #fff; color: #1c1a22; font-weight: 650; font-size: 16px; text-decoration: none; box-shadow: 0 10px 26px -10px rgba(0,0,0,0.5);" style-hover="background:#f0f0f3;">
+              <span style="display: inline-flex; flex-direction: column; align-items: center; gap: 2px;"><span style="width: 11px; height: 11px; border-right: 2px solid #1c1a22; border-bottom: 2px solid #1c1a22; transform: rotate(45deg) translate(-1px,-1px); display: inline-block;"></span></span>
+              <span style="display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15;"><span style="font-size: 11px; font-weight: 500; color: #8a8891;">Download the</span><span style="font-size: 15px;">Advisor.dmg</span></span>
+            </a>
+            <div style="font-size: 13px; color: #8a8b97; line-height: 1.5;">Version 1.0 · 142 MB<br>Apple Silicon</div>
+          </div>
+        </div>
+        <!-- specs -->
+        <div style="background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.09); border-radius: 16px; padding: 8px 4px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 0.5px solid rgba(255,255,255,0.07);"><span style="font-size: 13.5px; color: #8a8b97;">Operating system</span><span style="font-size: 13.5px; font-weight: 600; color: #e7e7ee;">macOS 26 or later</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 0.5px solid rgba(255,255,255,0.07);"><span style="font-size: 13.5px; color: #8a8b97;">Chip</span><span style="font-size: 13.5px; font-weight: 600; color: #e7e7ee;">Apple Silicon</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 0.5px solid rgba(255,255,255,0.07);"><span style="font-size: 13.5px; color: #8a8b97;">Permissions</span><span style="font-size: 13.5px; font-weight: 600; color: #e7e7ee;">Mic · Screen &amp; system audio</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 0.5px solid rgba(255,255,255,0.07);"><span style="font-size: 13.5px; color: #8a8b97;">Agent backend</span><span style="font-size: 13.5px; font-weight: 600; color: #e7e7ee;">Claude Code / Codex CLI</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px;"><span style="font-size: 13.5px; color: #8a8b97;">Transcription</span><span style="font-size: 13.5px; font-weight: 600; color: #e7e7ee;">On-device · no model files</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= FOOTER ================= -->
+<div style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.07);">
+  <div style="max-width: 1140px; margin: 0 auto; padding: 48px 26px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="position: relative; width: 24px; height: 24px; border-radius: 22.5%; overflow: hidden; background: linear-gradient(157deg, #7088ff 0%, #3a5ce0 52%, #4730a8 100%); display: inline-block;">
+        <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 9%;"><span style="width: 8%; height: 40%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 88%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 40%; background: #fff; border-radius: 99px;"></span></span>
+        <span style="position: absolute; top: 7%; right: 7%; width: 25%; height: 25%; background: #fff; clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%);"></span>
+      </span>
+      <span style="font-size: 14px; font-weight: 600; color: #1f1d24;">Advisor</span>
+    </div>
+    <div style="display: flex; gap: 24px; margin-left: 8px;">
+      <a href="#how" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">How it works</a>
+      <a href="#features" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Features</a>
+      <a href="#pricing" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Pricing</a>
+      <a href="#download" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Download</a>
+    </div>
+    <div style="margin-left: auto; font-size: 12.5px; color: #9a9aa6;">© 2026 Advisor · A personal macOS assistant</div>
+  </div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;: {&quot;width&quot;: 1280, &quot;height&quot;: 880}, &quot;defaultBilling&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;monthly&quot;, &quot;annual&quot;], &quot;default&quot;: &quot;annual&quot;, &quot;tsType&quot;: &quot;'monthly' | 'annual'&quot;}, &quot;priceMonthly&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;£4.99&quot;, &quot;tsType&quot;: &quot;string&quot;}, &quot;priceAnnual&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;£49.99&quot;, &quot;tsType&quot;: &quot;string&quot;}, &quot;annualSaveBadge&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;Save 17%&quot;, &quot;tsType&quot;: &quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { billing: null };
+
+  get billing() {
+    return this.state.billing || this.props.defaultBilling || 'annual';
+  }
+
+  renderVals() {
+    const billing = this.billing;
+    const isMonthly = billing === 'monthly';
+    const monthly = this.props.priceMonthly || '\u00A34.99';
+    const annual = this.props.priceAnnual || '\u00A349.99';
+    const saveBadge = this.props.annualSaveBadge || 'Save 17%';
+
+    const tab = (active) => 'height:36px; padding:0 18px; border-radius:9px; border:none; cursor:pointer; font-size:13.5px; font-weight:600; display:inline-flex; align-items:center; gap:7px; ' +
+      (active ? 'background:#1f1d24; color:#fff; box-shadow:0 1px 2px rgba(0,0,0,0.15);' : 'background:transparent; color:#56545d;');
+
+    return {
+      annualSaveBadge: saveBadge,
+      setMonthly: () => this.setState({ billing: 'monthly' }),
+      setAnnual: () => this.setState({ billing: 'annual' }),
+      monthlyBtnStyle: tab(isMonthly),
+      annualBtnStyle: tab(!isMonthly),
+      saveBadgeStyle: 'font-size:10px; font-weight:700; letter-spacing:0.3px; padding:2px 7px; border-radius:99px; ' +
+        (!isMonthly ? 'background:rgba(108,124,255,0.3); color:#c6cbff;' : 'background:#e6f4ec; color:#2f8d5b;'),
+      priceBig: isMonthly ? monthly : annual,
+      priceUnit: isMonthly ? '/ month' : '/ year',
+      priceSub: isMonthly ? 'Billed monthly · 14-day free trial' : 'Billed yearly \u2014 two months free \u00B7 14-day free trial',
+    };
+  }
+}
+</script>
+</body>
+</html>
