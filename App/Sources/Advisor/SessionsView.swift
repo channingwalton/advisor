@@ -173,7 +173,6 @@ struct SessionsView: View {
         let d = session.detail
         return Button { selection = session.id } label: {
             HStack(alignment: .top, spacing: 9) {
-                Circle().fill(Theme.accent).frame(width: 7, height: 7).padding(.top, 5)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(d.title)
