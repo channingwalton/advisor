@@ -15,9 +15,13 @@ struct ListeningToolbar: View {
     let captureSystem: Bool
     @Binding var sessionName: String
     @Binding var sessionContext: String
+    /// The session's tags (issue #15), edited via the Tags chip.
+    @Binding var sessionTags: [String]
     /// The user's library of named contexts, shown in the Context popover's Load
     /// menu (issue #10).
     let savedContexts: [SavedContext]
+    /// The user's tag library, for the Tags chip's autocomplete (issue #15).
+    let tagLibrary: [SavedTag]
     /// Save the current context text under the given name.
     let onSaveContext: (String) -> Void
     @Binding var autoCards: Bool
@@ -47,6 +51,7 @@ struct ListeningToolbar: View {
             Spacer(minLength: 8)
             nameChip
             focusChip
+            TagsChip(tags: sessionTags, library: tagLibrary) { sessionTags = $0 }
             autoCardsToggle
             floatButton
             exportButton

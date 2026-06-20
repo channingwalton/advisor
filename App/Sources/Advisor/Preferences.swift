@@ -7,6 +7,15 @@ extension Notification.Name {
     /// Posted when a session note is created or finalised, so the Sessions
     /// browser refreshes its list without being reopened.
     static let advisorSessionsChanged = Notification.Name("advisorSessionsChanged")
+    /// Posted when a tag is renamed in Preferences (`userInfo` "from"/"to"), so
+    /// the recording window can remap its staged/live `sessionTags` — the on-disk
+    /// rename skips the live note to avoid the two-writer clobber, and a not-yet-
+    /// started session's tags live only in that view state.
+    static let advisorTagRenamed = Notification.Name("advisorTagRenamed")
+    /// Posted when the Sessions browser changes the *live* note's tags
+    /// (`userInfo` "tags": [String]), so the recording window updates its
+    /// `sessionTags` and a later toolbar edit doesn't overwrite the change.
+    static let advisorLiveTagsChanged = Notification.Name("advisorLiveTagsChanged")
 }
 
 /// Mirrors sidecar/src/config.ts — written to Application Support/Advisor/config.json.
@@ -40,12 +49,17 @@ struct AdvisorConfig: Codable, Equatable {
     /// managed in Preferences; the sidecar only ever receives the resolved
     /// context text per session, so it ignores this key.
     var contexts: [SavedContext] = []
+    /// App-side only: the user's library of session tags (issue #15) — name +
+    /// colour, managed in Preferences. Sessions reference tags by name in their
+    /// note frontmatter; this library supplies the colour. The sidecar never
+    /// sees it.
+    var tags: [SavedTag] = []
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
-        case provider, model, sttLocale, authMode, appearance, contexts
+        case provider, model, sttLocale, authMode, appearance, contexts, tags
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -63,6 +77,7 @@ struct AdvisorConfig: Codable, Equatable {
         authMode = try c.decodeIfPresent(String.self, forKey: .authMode) ?? "subscription"
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? "system"
         contexts = try c.decodeIfPresent([SavedContext].self, forKey: .contexts) ?? []
+        tags = try c.decodeIfPresent([SavedTag].self, forKey: .tags) ?? []
     }
 
     static var fileURL: URL {
@@ -346,6 +361,142 @@ private struct ContextEditorSheet: View {
     }
 }
 
+/// Manages the library of session tags (issue #15): a list with add / edit /
+/// delete, editing through a sheet (name + colour). Bound to `config.tags`, so
+/// every change rides the parent's save + notification, which the Sessions
+/// browser listens for to recolour its pills. Deleting a tag here just stops it
+/// rendering on session cards (the name may still sit in a note's frontmatter).
+struct SavedTagsView: View {
+    @Binding var tags: [SavedTag]
+    /// The tag being edited in the sheet (a draft copy); nil when closed.
+    @State private var draft: SavedTag?
+
+    var body: some View {
+        if tags.isEmpty {
+            Text("No tags yet. Add one, then apply it to a session from its toolbar.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        ForEach(tags) { tag in
+            HStack(spacing: 8) {
+                TagPill(name: tag.name, colorHex: tag.colorHex)
+                Spacer(minLength: 8)
+                Button { draft = tag } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Edit")
+                Button(role: .destructive) {
+                    tags = TagLibrary.removing(tags, id: tag.id)
+                } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .help("Delete")
+            }
+        }
+        Button { draft = SavedTag(name: "", colorHex: Theme.tagSwatches[0]) } label: {
+            Label("Add tag", systemImage: "plus")
+        }
+        .sheet(item: $draft) { editing in
+            TagEditorSheet(
+                draft: editing,
+                siblingNames: tags.filter { $0.id != editing.id }.map(\.name)
+            ) { saved in
+                commit(saved)
+            }
+        }
+    }
+
+    /// Apply an add/edit. On a rename of an existing tag, propagate the new name
+    /// into every note already tagged — sessions reference tags by name, so the
+    /// library and the notes must move together. Saved notes are rewritten on
+    /// disk here; the live note (if any) is renamed through its writer, driven by
+    /// the `advisorTagRenamed` notification the recording window observes.
+    private func commit(_ saved: SavedTag) {
+        let oldName = tags.first { $0.id == saved.id }?.name
+        let newName = saved.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        tags = TagLibrary.upserting(tags, saved)
+        // Propagate only a rename the library actually applied — not a colour-only
+        // edit, a brand-new tag, or a name collision the upsert rejected (the
+        // editor disables that, but never rewrite notes on a no-op).
+        guard let oldName, oldName != newName,
+            tags.contains(where: { $0.id == saved.id && $0.name == newName })
+        else { return }
+        let live = TranscriptWindowContext.shared.liveFileURL
+        SessionArchive.renameTag(from: oldName, to: newName, excluding: live)
+        // Always post: a recording window remaps the live note's tags (skipped on
+        // disk above) and any tags staged before Listen. Harmless with no window.
+        NotificationCenter.default.post(
+            name: .advisorTagRenamed, object: nil,
+            userInfo: ["from": oldName, "to": newName])
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+    }
+}
+
+/// Modal editor for a single tag — name + a colour swatch picker. Commits through
+/// `onSave` (an id-based upsert), so it serves both add and edit; a rename is
+/// propagated to existing notes by the caller. Save is disabled for a blank name
+/// or one that collides (case-insensitively) with another tag.
+private struct TagEditorSheet: View {
+    @State var draft: SavedTag
+    /// Names of the other tags, to block a duplicate name.
+    let siblingNames: [String]
+    let onSave: (SavedTag) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    /// The set of swatches plus the draft's current colour (so an edit of a tag
+    /// whose stored colour isn't a preset still shows its selection).
+    private var swatches: [String] {
+        Theme.tagSwatches.contains(draft.colorHex)
+            ? Theme.tagSwatches : Theme.tagSwatches + [draft.colorHex]
+    }
+
+    private var trimmedName: String {
+        draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var collides: Bool {
+        siblingNames.contains { $0.caseInsensitiveCompare(trimmedName) == .orderedSame }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Tag").font(.headline)
+            TextField("Name", text: $draft.name)
+                .textFieldStyle(.roundedBorder)
+            if collides {
+                Text("A tag with this name already exists.")
+                    .font(.caption).foregroundStyle(Theme.factRed)
+            }
+            Text("Colour").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ForEach(swatches, id: \.self) { hex in
+                    Button { draft.colorHex = hex } label: {
+                        Circle().fill(Color(tagHex: hex))
+                            .frame(width: 22, height: 22)
+                            .overlay(
+                                Circle().stroke(
+                                    draft.colorHex == hex ? Theme.textStrong : .clear,
+                                    lineWidth: 2))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack {
+                Text("Preview").font(.caption).foregroundStyle(.secondary)
+                TagPill(
+                    name: draft.name.isEmpty ? "tag" : draft.name, colorHex: draft.colorHex)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save") { onSave(draft); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmedName.isEmpty || collides)
+            }
+        }
+        .padding(18)
+        .frame(width: 320)
+        // Suppress the system keyboard-focus ring on the colour swatch buttons.
+        .focusEffectDisabled()
+    }
+}
+
 struct PreferencesView: View {
     @State private var config = AdvisorConfig.load()
     @AppStorage("agentLanes") private var agentLanes = 3
@@ -377,6 +528,10 @@ struct PreferencesView: View {
 
             Section("Saved contexts") {
                 SavedContextsView(contexts: $config.contexts)
+            }
+
+            Section("Tags") {
+                SavedTagsView(tags: $config.tags)
             }
 
             Section("Appearance") {

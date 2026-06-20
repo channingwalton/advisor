@@ -89,30 +89,36 @@ enum SessionArchive {
         return String(markdown[close.upperBound...].drop(while: { $0 == "\n" }))
     }
 
-    /// `markdown` with its `name:` frontmatter set to `name` (collapsed to one
-    /// line). An empty/blank `name` removes the key. Existing frontmatter keys and
-    /// the body are preserved; a note without frontmatter gains one. Pure, for
-    /// testability. Used to rename a *saved* session — the live note is renamed
-    /// through `SessionWriter` instead, to avoid the two-writer clobber.
-    static func settingName(_ name: String, in markdown: String) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// `markdown` with a single scalar frontmatter `key:` set to `value` (collapsed
+    /// to one line). An empty/blank `value` removes the key. Existing frontmatter
+    /// keys and the body are preserved; a note without frontmatter gains one. Pure,
+    /// for testability. The shared core behind `settingName`/`settingTags`.
+    static func settingScalar(_ key: String, _ value: String, in markdown: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\n", with: " ")
         guard markdown.hasPrefix("---\n"),
             let close = markdown.range(
                 of: "\n---\n",
                 range: markdown.index(markdown.startIndex, offsetBy: 4)..<markdown.endIndex)
         else {
-            // No frontmatter: prepend one carrying just the name (nothing to do
-            // when clearing a name that was never set).
-            return trimmed.isEmpty ? markdown : "---\nname: \(trimmed)\n---\n\n" + markdown
+            // No frontmatter: prepend one carrying just this key (nothing to do
+            // when clearing a key that was never set).
+            return trimmed.isEmpty ? markdown : "---\n\(key): \(trimmed)\n---\n\n" + markdown
         }
         let open = markdown.index(markdown.startIndex, offsetBy: 4)
         var lines = markdown[open..<close.lowerBound]
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
-            .filter { !$0.hasPrefix("name:") }
-        if !trimmed.isEmpty { lines.append("name: \(trimmed)") }
+            .filter { !$0.hasPrefix("\(key):") }
+        if !trimmed.isEmpty { lines.append("\(key): \(trimmed)") }
         return "---\n" + lines.joined(separator: "\n") + markdown[close.lowerBound...]
+    }
+
+    /// `markdown` with its `name:` frontmatter set to `name`. An empty/blank `name`
+    /// removes the key. Used to rename a *saved* session — the live note is renamed
+    /// through `SessionWriter` instead, to avoid the two-writer clobber.
+    static func settingName(_ name: String, in markdown: String) -> String {
+        settingScalar("name", name, in: markdown)
     }
 
     /// Set (or clear) the `name:` frontmatter of `file` on disk. Returns false if
@@ -126,6 +132,98 @@ enum SessionArchive {
         } catch {
             return false
         }
+    }
+
+    /// Parse a `tags:` frontmatter value (comma-separated) into names: trimmed,
+    /// empties dropped, order preserved. The inverse of `tagsLine`.
+    static func parseTags(_ value: String) -> [String] {
+        value.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// The canonical form of a single tag name: trimmed, with the `tags:` line
+    /// separators (commas, newlines) squashed to spaces. The tag library stores
+    /// names in this form too, so a name written to a note round-trips back to the
+    /// same string `TagLibrary.named` resolves a colour by.
+    static func normalisedTagName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+
+    /// The canonical `tags:` frontmatter value for `tags`: each name normalised,
+    /// empties dropped, and case-insensitive duplicates removed (first occurrence
+    /// wins, order kept). "" when there are no usable tags. The single source of
+    /// truth for the tag line, shared by `settingTags` and `SessionMarkdown.inline`.
+    static func tagsLine(_ tags: [String]) -> String {
+        var seen = Set<String>()
+        var out: [String] = []
+        for tag in tags {
+            let name = normalisedTagName(tag)
+            guard !name.isEmpty, seen.insert(name.lowercased()).inserted else { continue }
+            out.append(name)
+        }
+        return out.joined(separator: ", ")
+    }
+
+    /// `markdown` with its `tags:` frontmatter set to `tags`. An empty list removes
+    /// the key. Used to tag a *saved* session — the live note is tagged through
+    /// `SessionWriter` instead, to avoid the two-writer clobber.
+    static func settingTags(_ tags: [String], in markdown: String) -> String {
+        settingScalar("tags", tagsLine(tags), in: markdown)
+    }
+
+    /// Set (or clear) the `tags:` frontmatter of `file` on disk. Returns false if
+    /// the write fails.
+    @discardableResult
+    static func setTags(_ tags: [String], in file: SessionFile) -> Bool {
+        let updated = settingTags(tags, in: contents(of: file))
+        do {
+            try updated.write(to: file.url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// `markdown` with any `old` tag in its frontmatter renamed to `new`
+    /// (case-insensitive match). Unchanged when the note doesn't carry the tag.
+    /// `settingTags` re-de-dups, so renaming onto a tag the note already has
+    /// merges them. Pure, for testability. Backs the Preferences rename that
+    /// propagates a tag's new name across every note already tagged with it.
+    static func renamingTag(from old: String, to new: String, in markdown: String) -> String {
+        let oldTrim = old.trimmingCharacters(in: .whitespaces)
+        let tags = parseTags(frontmatter(markdown)["tags"] ?? "")
+        guard tags.contains(where: { $0.caseInsensitiveCompare(oldTrim) == .orderedSame })
+        else { return markdown }
+        let renamed = tags.map {
+            $0.caseInsensitiveCompare(oldTrim) == .orderedSame ? new : $0
+        }
+        return settingTags(renamed, in: markdown)
+    }
+
+    /// Rename a tag from `old` to `new` across every saved note in `directory`,
+    /// skipping `excluding` (the live note, which is rewritten through its writer
+    /// instead). Returns the number of notes changed. Notes without the tag are
+    /// untouched. Synchronous file I/O — fine for a personal archive of this size.
+    @discardableResult
+    static func renameTag(
+        from old: String, to new: String,
+        in directory: URL = SessionArchive.directory, excluding: URL? = nil
+    ) -> Int {
+        var changed = 0
+        for file in list(in: directory) {
+            if let excluding,
+                file.url.standardizedFileURL == excluding.standardizedFileURL { continue }
+            let original = contents(of: file)
+            let updated = renamingTag(from: old, to: new, in: original)
+            if updated != original,
+                (try? updated.write(to: file.url, atomically: true, encoding: .utf8)) != nil {
+                changed += 1
+            }
+        }
+        return changed
     }
 
     /// Delete `file` from disk. Returns false if removal fails (e.g. the note is

@@ -11,6 +11,7 @@ final class SessionWriter {
     private var ended: Date?
     private var context = ""
     private var name = ""
+    private var tags: [String] = []
     /// True between `start()` and `end()`. Gates `updateContext` so a context
     /// change arriving after stop (the toolbar clears the prompt, but
     /// `store.listening` flips asynchronously) can't blank the saved title; late
@@ -30,11 +31,12 @@ final class SessionWriter {
             at: sessionsDirectory, withIntermediateDirectories: true)
     }
 
-    func start(context: String = "", name: String = "") {
+    func start(context: String = "", name: String = "", tags: [String] = []) {
         started = Date()
         ended = nil
         self.context = context
         self.name = name
+        self.tags = tags
         sessionActive = true
         fileURL = sessionsDirectory.appendingPathComponent(SessionArchive.fileName(for: started!))
         write()
@@ -65,6 +67,17 @@ final class SessionWriter {
     /// owned note must go through the writer. Not gated — it runs post-stop.
     func renameOwnedNote(_ text: String) {
         name = text
+        flush()
+    }
+
+    /// Set the tags on the note this writer owns (the live or just-finished
+    /// session) and write it out now. Used by the recording toolbar and the
+    /// Sessions browser: a direct frontmatter write would be clobbered by a late
+    /// rewrite when a research card finishes, so tagging the owned note must go
+    /// through the writer. Not gated — it also runs post-stop, like
+    /// `renameOwnedNote`.
+    func setOwnedNoteTags(_ tags: [String]) {
+        self.tags = tags
         flush()
     }
 
@@ -139,7 +152,7 @@ final class SessionWriter {
         guard let fileURL, let started else { return }
         let md = SessionMarkdown.inline(
             utterances: store.utterances, cards: store.cards, started: started, ended: ended,
-            context: context, name: name)
+            context: context, name: name, tags: tags)
         try? md.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 }

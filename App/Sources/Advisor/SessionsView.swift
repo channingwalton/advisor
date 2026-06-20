@@ -26,6 +26,9 @@ struct SessionsView: View {
     @State private var query = ""
     @State private var thisWeekOnly = false
     @State private var oldestFirst = false
+    /// The user's tag library (issue #15) — supplies pill colours and the detail
+    /// pane's autocomplete. Refreshed from config on appear and config changes.
+    @State private var tagLibrary: [SavedTag] = []
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -45,6 +48,11 @@ struct SessionsView: View {
         .onAppear(perform: reload)
         .onReceive(NotificationCenter.default.publisher(for: .advisorSessionsChanged)) { _ in
             reload()
+        }
+        // Tag library edits in Preferences (rename, recolour, delete) must
+        // recolour/hide pills here without a relaunch.
+        .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
+            tagLibrary = AdvisorConfig.load().tags
         }
         // When a filter hides the selected session, select the first visible one
         // so the detail and sidebar stay consistent.
@@ -127,7 +135,7 @@ struct SessionsView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").font(.system(size: 12))
                 .foregroundStyle(Theme.textTertiary)
-            TextField("Search sessions, people, topics…", text: $query)
+            TextField("Search sessions… (#tag to filter by tag)", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
         }
@@ -197,6 +205,7 @@ struct SessionsView: View {
                                 .foregroundStyle(Theme.accent)
                         }
                     }
+                    tagPills(for: d)
                 }
             }
             .padding(.vertical, 8)
@@ -220,6 +229,22 @@ struct SessionsView: View {
         .padding(.horizontal, 8)
     }
 
+    /// Coloured pills for a row's tags. Only tags still in the library render —
+    /// a tag deleted in Preferences disappears here without rewriting the note.
+    @ViewBuilder private func tagPills(for d: SessionDetail) -> some View {
+        let known = d.tags.compactMap { name in
+            TagLibrary.named(name, in: tagLibrary).map { (name, $0.colorHex) }
+        }
+        if !known.isEmpty {
+            FlowLayout(spacing: 5) {
+                ForEach(known, id: \.0) { name, hex in
+                    TagPill(name: name, colorHex: hex)
+                }
+            }
+            .padding(.top, 1)
+        }
+    }
+
     // MARK: detail
 
     @ViewBuilder private var detail: some View {
@@ -227,7 +252,7 @@ struct SessionsView: View {
         // must not stay open in the detail (the Ask bar would append to a
         // transcript no longer in the sidebar).
         if let selected = filtered.first(where: { $0.id == selection }) {
-            SessionDetailPane(file: selected.file, detail: selected.detail)
+            SessionDetailPane(file: selected.file, detail: selected.detail, library: tagLibrary)
                 .id(selected.id)
         } else {
             Text("Select a session to read it.")
@@ -239,11 +264,13 @@ struct SessionsView: View {
     // MARK: data
 
     private func reload() {
+        tagLibrary = AdvisorConfig.load().tags
         sessions = SessionArchive.list().map { file in
             let contents = SessionArchive.contents(of: file)
             let detail = SessionDetail.parse(
                 contents: contents, fallbackTitle: Self.rowTitle(file.date))
             let haystack = ([detail.title, detail.name, detail.context, detail.gist]
+                + detail.tags
                 + detail.cards.map(\.title)
                 + detail.blocks.compactMap { if case .paragraph(let t) = $0 { t } else { nil } })
                 .joined(separator: " ").lowercased()
@@ -256,10 +283,10 @@ struct SessionsView: View {
 
     /// Filtered + sorted sessions (search + this-week chip + sort order).
     private var filtered: [LoadedSession] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = query.trimmingCharacters(in: .whitespaces)
         let cal = Calendar.current
         return sessions
-            .filter { q.isEmpty || $0.haystack.contains(q) }
+            .filter { SessionSearch.matches(query: q, tags: $0.detail.tags, haystack: $0.haystack) }
             // Calendar week, matching the sidebar's TODAY / YESTERDAY / EARLIER
             // THIS WEEK grouping — not a rolling 7 days, which would disagree
             // with those labels near the start of the week.
@@ -323,6 +350,8 @@ struct SessionsView: View {
 private struct SessionDetailPane: View {
     let file: SessionFile
     let detail: SessionDetail
+    /// The tag library, for the Tags chip's autocomplete and pill colours.
+    let library: [SavedTag]
 
     @ObservedObject private var ctx = TranscriptWindowContext.shared
 
@@ -376,6 +405,7 @@ private struct SessionDetailPane: View {
                     .foregroundStyle(Theme.textStrong)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
+                TagsChip(tags: detail.tags, library: library, onChange: applyTags)
                 Menu {
                     Button("Rename…") {
                         renameText = detail.name
@@ -400,6 +430,7 @@ private struct SessionDetailPane: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             }
             Text(metaLine).font(.system(size: 12.5)).foregroundStyle(Theme.textSecondary)
+            tagRow
         }
         .alert("Rename session", isPresented: $renaming) {
             TextField("Session name", text: $renameText)
@@ -415,6 +446,39 @@ private struct SessionDetailPane: View {
             Text("Delete “\(detail.title)”? This permanently removes its transcript "
                 + "and cards, and can't be undone.")
         }
+    }
+
+    /// At-a-glance pills for the session's tags (library-known only), under the
+    /// meta line. Editing is via the header's Tags chip.
+    @ViewBuilder private var tagRow: some View {
+        let known = detail.tags.compactMap { name in
+            TagLibrary.named(name, in: library).map { (name, $0.colorHex) }
+        }
+        if !known.isEmpty {
+            FlowLayout(spacing: 6) {
+                ForEach(known, id: \.0) { name, hex in
+                    TagPill(name: name, colorHex: hex)
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    /// Persist a tag change. The live/just-finished note is tagged through its
+    /// writer (so a late card rewrite carries the tags); any other note is edited
+    /// on disk directly. Either way, reload the browser from disk. Mirrors
+    /// `saveName`.
+    private func applyTags(_ tags: [String]) {
+        if isLive, let writer = ctx.writer {
+            writer.setOwnedNoteTags(tags)
+            // Keep the recording window's own tag state in step, or its next
+            // toolbar edit would overwrite this one from a stale array.
+            NotificationCenter.default.post(
+                name: .advisorLiveTagsChanged, object: nil, userInfo: ["tags": tags])
+        } else {
+            SessionArchive.setTags(tags, in: file)
+        }
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
     /// Delete this session's note from disk, then refresh the browser (which drops

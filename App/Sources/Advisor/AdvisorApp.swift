@@ -129,6 +129,13 @@ struct TranscriptView: View {
     /// context. Filled before Listen (seeded into the writer at start) or edited
     /// live; titles the session in the browser. Cleared when the session stops.
     @State private var sessionName = ""
+    /// The session's tags (issue #15). Staged before Listen (seeded into the
+    /// writer at start) or edited live via the toolbar's Tags chip; rendered as
+    /// coloured pills in the browser. Cleared when the session stops.
+    @State private var sessionTags: [String] = []
+    /// The user's tag library, for the toolbar's Tags chip autocomplete. Kept in
+    /// sync with Preferences via `advisorConfigChanged`.
+    @State private var tagLibrary: [SavedTag] = []
     @State private var triggers = AdvisorConfig.Triggers()
     /// The user's library of named, reusable contexts (issue #10) — loaded into
     /// the Context popover's Load menu. Kept in sync with Preferences via
@@ -225,6 +232,12 @@ struct TranscriptView: View {
                 services.writer.noteChanged()
             }
         }
+        .onChange(of: sessionTags) { _, new in
+            // Tags ride along on session_start before a session; once started,
+            // they go straight through the writer (which flushes), so the change
+            // lands in the note even when a late card rewrite would otherwise win.
+            if sessionStart != nil { services.writer.setOwnedNoteTags(new) }
+        }
         .onChange(of: autoCards) { _, on in services.sidecar.sendAuto(on) }
         .onChange(of: pinned) { _, on in
             // Prefer the key window (the recording window, since its toolbar holds
@@ -241,6 +254,25 @@ struct TranscriptView: View {
             let cfg = AdvisorConfig.load()
             triggers = cfg.triggers
             savedContexts = cfg.contexts
+            tagLibrary = cfg.tags
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .advisorTagRenamed)) { note in
+            // A tag renamed in Preferences: remap it on the live note's staged
+            // tags. The on-disk rename skipped this note, so the sessionTags
+            // onChange below (re)writes it through the writer with the new name.
+            guard let from = note.userInfo?["from"] as? String,
+                let to = note.userInfo?["to"] as? String
+            else { return }
+            let remapped = sessionTags.map {
+                $0.caseInsensitiveCompare(from) == .orderedSame ? to : $0
+            }
+            if remapped != sessionTags { sessionTags = remapped }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .advisorLiveTagsChanged)) { note in
+            // The Sessions browser tagged the live note; adopt its tags so a later
+            // toolbar edit builds on them rather than clobbering them.
+            guard let tags = note.userInfo?["tags"] as? [String] else { return }
+            if tags != sessionTags { sessionTags = tags }
         }
         .onChange(of: store.utterances) { _, _ in services.writer.noteChanged() }
         // Only re-write the session note when output-bearing fields change — not
@@ -261,7 +293,9 @@ struct TranscriptView: View {
                 captureSystem: captureSystem,
                 sessionName: $sessionName,
                 sessionContext: $sessionContext,
+                sessionTags: $sessionTags,
                 savedContexts: savedContexts,
+                tagLibrary: tagLibrary,
                 onSaveContext: saveContext(named:),
                 autoCards: $autoCards,
                 pinned: $pinned,
@@ -561,6 +595,7 @@ struct TranscriptView: View {
         let cfg = AdvisorConfig.load()
         triggers = cfg.triggers
         savedContexts = cfg.contexts
+        tagLibrary = cfg.tags
         devices = AudioDevices.inputs()
         // Sticky mic: restore the previously chosen device by name.
         selectedDevice =
@@ -677,10 +712,14 @@ struct TranscriptView: View {
         recorder?.stop()
         services.sidecar.sendSessionEnd()
         services.writer.end()
-        sessionContext = "" // blank slate for the next session
-        sessionName = ""
+        // Clear `sessionStart` first: the field clears below fire onChange, and
+        // the tags handler persists through the (ungated) writer — with the
+        // session already ended, that would flush empty tags over the saved note.
         sessionStart = nil
         stoppedAt = nil
+        sessionContext = "" // blank slate for the next session
+        sessionName = ""
+        sessionTags = []
     }
 
     /// Cancel every in-flight agent for this session and mark each cancelled so
@@ -737,7 +776,7 @@ struct TranscriptView: View {
         let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let nm = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
         services.sidecar.sendSessionStart(UUID().uuidString, context: ctx)
-        services.writer.start(context: ctx, name: nm)
+        services.writer.start(context: ctx, name: nm, tags: sessionTags)
         // A transcript window opened on this note must disable asking until
         // the live writer is done with it.
         TranscriptWindowContext.shared.liveFileURL = services.writer.currentFileURL

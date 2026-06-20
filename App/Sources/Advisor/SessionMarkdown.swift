@@ -11,7 +11,7 @@ enum SessionMarkdown {
     /// `failed` cards are included; in-flight cards are skipped.
     static func inline(
         utterances: [Utterance], cards: [Card], started: Date?, ended: Date?,
-        context: String = "", name: String = ""
+        context: String = "", name: String = "", tags: [String] = []
     ) -> String {
         let iso = ISO8601DateFormatter()
         let time = DateFormatter()
@@ -50,6 +50,11 @@ enum SessionMarkdown {
         if !ctx.isEmpty {
             md += "context: \(ctx.replacingOccurrences(of: "\n", with: " "))\n"
         }
+        // The session's tags, comma-separated on one line — `SessionArchive`
+        // owns the canonical formatting so the live note and a browser edit
+        // produce identical lines.
+        let tagLine = SessionArchive.tagsLine(tags)
+        if !tagLine.isEmpty { md += "tags: \(tagLine)\n" }
         md += "---\n\n# Transcript\n\n"
         md += entries.map(\.text).joined(separator: "\n\n")
         return md + "\n"

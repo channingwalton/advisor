@@ -109,4 +109,30 @@ enum Theme {
     /// Card ambient shadow. Near-invisible in dark mode, where the elevated
     /// card surface + hairline border carry the separation instead.
     static let cardShadow = dyn(0x141628, 0x000000, lightAlpha: 0.14, darkAlpha: 0.35)
+
+    // MARK: tags (issue #15)
+
+    /// Preset tag swatches — distinct, theme-aligned hues stored as `0xRRGGBB`.
+    /// A tag colour is a single value (not a light/dark pair); the pill fills it
+    /// at low opacity so it reads in both appearances. The default for a new tag
+    /// is the first entry.
+    static let tagSwatches: [String] = [
+        "0x3A5CE0", "0x6044C0", "0x2F8D5B", "0xA06A12",
+        "0xC0392B", "0x0E7C86", "0xB03A78", "0x556070",
+    ]
+
+    /// Parse a stored tag hex (`0xRRGGBB` or `#RRGGBB`) to an NSColor, falling
+    /// back to a neutral grey when the string is malformed.
+    static func nsTagColor(_ hex: String) -> NSColor {
+        var s = Substring(hex)
+        if s.hasPrefix("0x") || s.hasPrefix("0X") { s = s.dropFirst(2) }
+        else if s.hasPrefix("#") { s = s.dropFirst(1) }
+        if s.count == 6, let v = UInt32(s, radix: 16) { return NSColor(rgb: v) }
+        return NSColor(rgb: 0x8A8B95)
+    }
+}
+
+extension Color {
+    /// A tag colour from its stored `0xRRGGBB`/`#RRGGBB` hex (issue #15).
+    init(tagHex hex: String) { self = Color(nsColor: Theme.nsTagColor(hex)) }
 }

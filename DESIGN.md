@@ -572,6 +572,49 @@ clear them. The top strip stays draggable (hidden title bar) and `openWindow`'s
 single-instance `Window` semantics are unchanged — Cmd-N just brings an existing
 recording window forward.
 
+## Session tags (2026-06-20, issue #15)
+
+Sessions can carry tags. A **tag library** (name + colour) lives in
+`config.json` as `tags: [SavedTag]` — App-side only, like `contexts`, so the
+sidecar never sees it (`TagLibrary` holds the pure upsert/remove/lookup ops).
+Tags are managed in **Preferences ▸ Tags** (add / recolour / delete) and
+*applied* to a session from a **Tags chip** — present on both the live recording
+toolbar and the Sessions browser detail header (the "both surfaces" choice). The
+chip's popover is a pick-list of the library's tags (no free-text entry, no
+colour there): you assign existing tags only, because creation + colour belong in
+one place (Preferences).
+
+A session stores its tags **by name** in note frontmatter (`tags: a, b, c`, one
+collapsed line — the same scalar shape as `context`, formatted by the single
+`SessionArchive.tagsLine`, which trims, squashes the comma/newline separators out
+of names, and de-dups case-insensitively). Colour is resolved at render time by
+looking the name up in the library, which has three consequences we leaned into:
+
+- **Delete is cheap and matches the issue's "just removes them from each card":**
+  rows render only library-known tags, so deleting a tag in Preferences makes its
+  pills vanish everywhere without rewriting a single note.
+- **Rename propagates** so the name reference doesn't orphan. Editing a tag's
+  name (`SessionArchive.renameTag`) rewrites that tag across every *saved* note's
+  frontmatter; the *live* note is skipped on disk and renamed through its writer,
+  driven by the `advisorTagRenamed` notification the recording window observes
+  (which remaps its staged `sessionTags`, cascading to `setOwnedNoteTags`). The
+  editor blocks a rename that would collide with another tag's name. Mass-rewrite
+  is synchronous — fine for a personal archive; revisit if it ever gets large.
+- Pills are drawn by a shared `TagPill` (colour text on a low-opacity capsule, so
+  one stored hex reads in both light and dark) laid out by a small `FlowLayout`
+  (SwiftUI has no built-in flow); colours come from a preset swatch palette in
+  `Theme`, stored as `0xRRGGBB` strings.
+
+Persistence mirrors `name`/`rename`: a *saved* note is tagged by a direct
+frontmatter write (`SessionArchive.setTags`); the *live/just-finished* note is
+tagged through the writer (`SessionWriter.setOwnedNoteTags`, ungated like
+`renameOwnedNote`) so a late card-finish rewrite can't clobber it. Because that
+path is ungated, `endSession` nulls `sessionStart` *before* clearing the staged
+`sessionTags`, or the clear's `onChange` would flush empty tags over the saved
+note. Search includes tag names in the browser's haystack, and a `#tag` token
+(`SessionSearch`) filters by tag specifically rather than matching any transcript
+word.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

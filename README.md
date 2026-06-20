@@ -96,7 +96,9 @@ finalised sentences; cards appear inline when the assistant decides something
 is worth answering, checking, or explaining — or when you ask via the query
 box. The **Context** button (before or during a session) holds an optional
 **name** — a short label that titles the session in the browser — and a context
-prompt that steers the assistant. Transcript text is selectable; **right-click** a selection (or the whole
+prompt that steers the assistant. The **Tags** chip (before or during a session)
+applies tags from your library (pick from the list; create them in Preferences);
+they show as coloured pills in the browser. Transcript text is selectable; **right-click** a selection (or the whole
 sentence) to run **Answer / Context / Fact check** on it directly — the same
 actions the assistant triggers automatically, gated by the same preference
 toggles, with the resulting card anchored under that line. Once a card has
@@ -116,12 +118,16 @@ choose.
 The **Sessions** browser is the app's main window (it opens at launch; the
 recording window's **History** button, clock icon, brings it forward) — a master/
 detail window over past sessions. The left sidebar lists sessions grouped by day
-(Today / Yesterday / Earlier this week / …) with search and an All / This week
+(Today / Yesterday / Earlier this week / …) with search (which also matches tags;
+type `#tag` to filter by tag specifically) and an All / This week
 filter; each row shows the session's title (its name if you gave it one, else the
-context you typed before Listen, else the date), a gist, duration and card count.
+context you typed before Listen, else the date), a gist, duration and card count,
+and any tags as coloured pills.
 Selecting one shows it on the right: title and meta, the questions you asked, and
 the transcript rendered like the live window (with the cards Advisor surfaced
-inline, as in the live view). Give a session a name with the `…` menu → **Rename**
+inline, as in the live view). The detail header's **Tags** chip applies or
+removes tags (picking from your library). Give a session a name with the
+`…` menu → **Rename**
 (top right of the detail) — a short label for an easier-to-scan list; leave it
 blank to fall back to the context. The same menu has **Delete** (behind a
 confirmation — it permanently removes the note from disk); the live session can't
@@ -138,6 +144,8 @@ here until it has fully saved.)
 agent count, connector action permissions, trigger sensitivity
 (conservative/balanced/eager) and per-kind toggles, the agent backend (one
 provider + model shared by the classifier, research, and manual-query lanes),
+saved contexts, the **tag** library (add / rename / recolour / delete, each with a
+preset colour; renaming updates the tag on every session already using it),
 appearance (system/light/dark), system-audio capture, and STT locale. Stored in
 `~/Library/Application Support/Advisor/config.json`; agent settings apply at the
 next session start. The toolbar keeps only in-session controls: the record
