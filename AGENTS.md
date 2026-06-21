@@ -67,3 +67,4 @@ sides locally before committing too.
   — read freely when debugging, never commit their contents.
 - Known limit (don't fight it): overlapping simultaneous speakers on a mono
   feed can't be fully transcribed.
+- Disable able blue focus ring on buttons
