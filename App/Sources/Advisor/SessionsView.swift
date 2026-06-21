@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A saved session paired with its parsed detail, the unit the browser lists.
 private struct LoadedSession: Identifiable, Equatable {
@@ -255,17 +256,50 @@ struct SessionsView: View {
         .buttonStyle(.plain).focusEffectDisabled()
         .contextMenu { folderMenu(folder) }
         // Drop a dragged session row here to file it into this folder (issue #25),
-        // highlighting the header while it's the active target.
-        .dropDestination(for: URL.self) { urls, _ in
-            fileSessions(urls, to: folder)
+        // highlighting the header while it's the active target. Uses the older
+        // `.onDrop`/`NSItemProvider` API, not `.dropDestination`: the latter
+        // silently no-ops when its view is a subview of a `List` (issue #28,
+        // regressed by the #22 sidebar move to a `.sidebar` List). `.draggable`
+        // on the rows is unaffected, so it stays.
+        .onDrop(of: [.fileURL, .url], isTargeted: dropTargetBinding(folder)) { providers in
+            loadDroppedURLs(providers) { urls in
+                fileSessions(urls, to: folder)
+            }
             return true
-        } isTargeted: { isIn in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                // Clear only when *this* folder loses the drag, so a move to the
-                // next folder doesn't blank the new target set just before it.
-                dropTargetFolder = isIn ? folder : (dropTargetFolder == folder ? nil : dropTargetFolder)
+        }
+    }
+
+    /// Binding mirroring `dropTargetFolder` for one folder, so `.onDrop`'s
+    /// `isTargeted:` can highlight the active drop target. Clears only when *this*
+    /// folder loses the drag, so a move to the next folder doesn't blank the new
+    /// target set just before it.
+    private func dropTargetBinding(_ folder: String) -> Binding<Bool> {
+        Binding(
+            get: { dropTargetFolder == folder },
+            set: { isIn in
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    dropTargetFolder = isIn ? folder : (dropTargetFolder == folder ? nil : dropTargetFolder)
+                }
+            })
+    }
+
+    /// Resolve dropped item providers to `URL`s (loaded off the main thread by
+    /// `NSItemProvider`), then deliver them on the main actor. The rows' `.onDrag`
+    /// vends the session-note file URL as an `NSURL`, so `URL.self` round-trips it.
+    private func loadDroppedURLs(_ providers: [NSItemProvider], then handle: @escaping ([URL]) -> Void) {
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var urls: [URL] = []
+        for provider in providers {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url {
+                    lock.lock(); urls.append(url); lock.unlock()
+                }
+                group.leave()
             }
         }
+        group.notify(queue: .main) { handle(urls) }
     }
 
     /// File the sessions identified by the dropped `urls` into `folder`, expanding
@@ -370,64 +404,70 @@ struct SessionsView: View {
     @ViewBuilder private func sessionRow(_ session: LoadedSession) -> some View {
         // The owned note can't be filed (its writer owns the path), so it isn't
         // draggable either — mirrors the disabled "Move to Folder" menu.
+        // `.onDrag`/`NSItemProvider`, not `.draggable`: inside a `List` the new
+        // API never starts the drag from these rows (issue #28), the old one
+        // does; it pairs with the `.onDrop` on the folder headers.
         if session.file.url == ctx.liveFileURL {
             sessionRowBody(session)
         } else {
-            sessionRowBody(session).draggable(session.file.url)
+            sessionRowBody(session)
+                .onDrag { NSItemProvider(object: session.file.url as NSURL) }
         }
     }
 
     private func sessionRowBody(_ session: LoadedSession) -> some View {
         let selected = selection == session.id
         let d = session.detail
-        return Button { selection = session.id } label: {
-            HStack(alignment: .top, spacing: 9) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(d.title)
-                            .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundStyle(Theme.textStrong)
-                            .lineLimit(1)
-                        Spacer(minLength: 6)
-                        Text(Self.rowTime(d.started ?? session.file.date))
-                            .font(.system(size: 11)).foregroundStyle(Theme.textMuted)
-                    }
-                    if !d.gist.isEmpty {
-                        Text(d.gist).font(.system(size: 11.5))
-                            .foregroundStyle(Theme.textTertiary).lineLimit(1)
-                    }
-                    HStack(spacing: 8) {
-                        if let m = d.durationMinutes {
-                            Text("\(m) min").font(.system(size: 11)).foregroundStyle(Theme.textMuted)
-                        }
-                        HStack(spacing: 4) {
-                            Circle().fill(Theme.accent).frame(width: 4, height: 4)
-                            Text("\(d.cards.count) cards").font(.system(size: 11))
-                                .foregroundStyle(Theme.accent)
-                        }
-                    }
-                    tagPills(for: d)
+        // A plain tappable row, not a `Button`: inside a `List` a Button's press
+        // gesture swallows the drag so the row won't lift (issue #28). A bare
+        // `.onTapGesture` coexists with `.onDrag`.
+        return HStack(alignment: .top, spacing: 9) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(d.title)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(Theme.textStrong)
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(Self.rowTime(d.started ?? session.file.date))
+                        .font(.system(size: 11)).foregroundStyle(Theme.textMuted)
                 }
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 11)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(selected ? Theme.surfaceCard : .clear)
-                    .shadow(color: selected ? Theme.cardShadow : .clear, radius: 4, y: 1))
-            .overlay(alignment: .leading) {
-                if selected {
-                    RoundedRectangle(cornerRadius: 2).fill(Theme.accent)
-                        .frame(width: 3).padding(.vertical, 4)
+                if !d.gist.isEmpty {
+                    Text(d.gist).font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textTertiary).lineLimit(1)
                 }
+                HStack(spacing: 8) {
+                    if let m = d.durationMinutes {
+                        Text("\(m) min").font(.system(size: 11)).foregroundStyle(Theme.textMuted)
+                    }
+                    HStack(spacing: 4) {
+                        Circle().fill(Theme.accent).frame(width: 4, height: 4)
+                        Text("\(d.cards.count) cards").font(.system(size: 11))
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
+                tagPills(for: d)
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(selected ? Theme.accent.opacity(0.22) : .clear, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 11)
+        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(selected ? Theme.surfaceCard : .clear)
+                .shadow(color: selected ? Theme.cardShadow : .clear, radius: 4, y: 1))
+        .overlay(alignment: .leading) {
+            if selected {
+                RoundedRectangle(cornerRadius: 2).fill(Theme.accent)
+                    .frame(width: 3).padding(.vertical, 4)
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(selected ? Theme.accent.opacity(0.22) : .clear, lineWidth: 1))
         .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+        .onTapGesture { selection = session.id }
         .contextMenu { rowMenu(session) }
     }
 
