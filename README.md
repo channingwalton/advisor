@@ -124,6 +124,14 @@ type `#tag` to filter by tag specifically), an All / This week
 filter and a recent/oldest sort toggle; each row shows the session's title (its name if you gave it one, else the
 context you typed before Listen, else the date), a gist, duration and card count,
 and any tags as coloured pills.
+Organise sessions into **folders**: the sidebar's **FOLDERS** bar (with a `+` to
+add one) lists collapsible folder sections above the date-grouped sessions. File
+a session by dragging its row onto a folder, or via its **right-click** menu →
+**Move to Folder** (existing folders, **No Folder** to take it back out, or
+**New Folder…**). Right-click a folder header to rename or delete it — deleting a
+folder moves its sessions back out and keeps them. Folders are real
+sub-directories under the storage folder, so they show in Finder too. The session
+currently being recorded can't be filed until it has finished.
 Selecting one shows it on the right: title and meta, the questions you asked, and
 the transcript rendered like the live window (with the cards Advisor surfaced
 inline, as in the live view). The detail header's **Tags** chip applies or

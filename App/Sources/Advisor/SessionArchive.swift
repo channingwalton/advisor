@@ -1,11 +1,14 @@
 import Foundation
 
 /// A saved session note on disk: the file and its start time, parsed from the
-/// `yyyy-MM-dd-HHmmss.md` filename `SessionWriter` assigns.
+/// `yyyy-MM-dd-HHmmss.md` filename `SessionWriter` assigns. `folder` is the name
+/// of the immediate sub-directory the note lives in (issue #25), or `nil` when it
+/// sits directly in the archive root (un-foldered).
 struct SessionFile: Identifiable, Hashable {
     var id: URL { url }
     let url: URL
     let date: Date
+    var folder: String?
 }
 
 /// Reads back the session notes `SessionWriter` saves, for browsing past
@@ -59,14 +62,60 @@ enum SessionArchive {
     }
 
     /// Session notes in `directory`, newest first; non-session files are skipped.
+    /// Descends one level into sub-directories (issue #25): a note in `<dir>/Work`
+    /// is returned with `folder == "Work"`, a note directly in `dir` with `folder
+    /// == nil`. Only one level is scanned — deeper nesting and dot-directories are
+    /// ignored.
     static func list(in directory: URL = SessionArchive.directory) -> [SessionFile] {
-        let urls = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil)) ?? []
-        return urls
-            .compactMap { url -> SessionFile? in
-                date(from: url.lastPathComponent).map { SessionFile(url: url, date: $0) }
+        let fm = FileManager.default
+        let entries = (try? fm.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        var files: [SessionFile] = []
+        for entry in entries {
+            let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if isDir {
+                let folder = entry.lastPathComponent
+                guard !folder.hasPrefix(".") else { continue }
+                let inner = (try? fm.contentsOfDirectory(
+                    at: entry, includingPropertiesForKeys: nil)) ?? []
+                for url in inner {
+                    if let date = date(from: url.lastPathComponent) {
+                        files.append(SessionFile(url: url, date: date, folder: folder))
+                    }
+                }
+            } else if let date = date(from: entry.lastPathComponent) {
+                files.append(SessionFile(url: entry, date: date, folder: nil))
             }
-            .sorted { $0.date > $1.date }
+        }
+        return files.sorted { $0.date > $1.date }
+    }
+
+    /// The folder names in `directory` (issue #25): every immediate sub-directory,
+    /// dot-directories excluded, case-insensitively sorted. Empty folders are
+    /// included — the folder list is derived from disk, so an empty folder simply
+    /// persists as an empty directory (no separate config registry, unlike tags).
+    static func folders(in directory: URL = SessionArchive.directory) -> [String] {
+        let fm = FileManager.default
+        let entries = (try? fm.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        return entries
+            .compactMap { entry -> String? in
+                let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                let name = entry.lastPathComponent
+                return (isDir && !name.hasPrefix(".")) ? name : nil
+            }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// A folder name reduced to a safe single path component, or `nil` if unusable.
+    /// Trims, then rejects empty, dot-leading (hidden / `.`/`..`), and names
+    /// carrying a path separator (`/`) or HFS separator (`:`). The single gate
+    /// behind `createFolder`/`renameFolder`/`setFolder`.
+    static func sanitiseFolderName(_ name: String) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("."),
+            !trimmed.contains("/"), !trimmed.contains(":") else { return nil }
+        return trimmed
     }
 
     /// The note's raw markdown, or "" if it can't be read.
@@ -256,8 +305,15 @@ enum SessionArchive {
         for file in list(in: source) {
             if let excluding,
                 file.url.standardizedFileURL == excluding.standardizedFileURL { continue }
-            let target = dest.appendingPathComponent(file.url.lastPathComponent)
+            // Preserve folder structure (issue #25): a note in `source/Work` lands
+            // in `dest/Work`, an un-foldered note directly in `dest`.
+            let targetDir = file.folder.map {
+                dest.appendingPathComponent($0, isDirectory: true)
+            } ?? dest
+            let target = targetDir.appendingPathComponent(file.url.lastPathComponent)
             if FileManager.default.fileExists(atPath: target.path) { skipped += 1; continue }
+            try? FileManager.default.createDirectory(
+                at: targetDir, withIntermediateDirectories: true)
             if (try? FileManager.default.moveItem(at: file.url, to: target)) != nil {
                 moved += 1
             } else {
@@ -265,6 +321,94 @@ enum SessionArchive {
             }
         }
         return (moved, skipped)
+    }
+
+    /// Create folder `name` under `directory` (issue #25). Returns false for an
+    /// unusable name (`sanitiseFolderName`) or a failed `createDirectory`.
+    /// Idempotent: creating a folder that already exists succeeds.
+    @discardableResult
+    static func createFolder(_ name: String, in directory: URL = SessionArchive.directory) -> Bool {
+        guard let folder = sanitiseFolderName(name) else { return false }
+        let url = directory.appendingPathComponent(folder, isDirectory: true)
+        return (try? FileManager.default.createDirectory(
+            at: url, withIntermediateDirectories: true)) != nil
+    }
+
+    /// File `file` into `folder` (issue #25) by moving the note on disk: into
+    /// `<root>/<folder>/` when set, back to `<root>` when `nil`. Creates the folder
+    /// directory if needed. Never clobbers an existing note at the destination
+    /// (returns `nil`); returns `file` unchanged if it is already there. Returns the
+    /// relocated `SessionFile` (new URL + folder) on success, `nil` on an invalid
+    /// folder name or a failed move. Saved-note counterpart to the live note's
+    /// exclusion — the owned note is filed through the recording window, not here.
+    static func setFolder(
+        _ folder: String?, for file: SessionFile, root: URL = SessionArchive.directory
+    ) -> SessionFile? {
+        let fm = FileManager.default
+        let folderName: String?
+        if let folder {
+            guard let safe = sanitiseFolderName(folder) else { return nil }
+            folderName = safe
+        } else {
+            folderName = nil
+        }
+        // Un-filing the last note leaves its source folder behind empty by design:
+        // empty folders persist (see `folders`), so the folder doesn't vanish from
+        // the sidebar just because its final session moved out.
+        let targetDir = folderName.map { root.appendingPathComponent($0, isDirectory: true) } ?? root
+        let dest = targetDir.appendingPathComponent(file.url.lastPathComponent)
+        if dest.standardizedFileURL == file.url.standardizedFileURL {
+            return SessionFile(url: file.url, date: file.date, folder: folderName)
+        }
+        if fm.fileExists(atPath: dest.path) { return nil }
+        do {
+            try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+            try fm.moveItem(at: file.url, to: dest)
+            return SessionFile(url: dest, date: file.date, folder: folderName)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Rename folder `old` to `new` under `directory` (issue #25) by moving the
+    /// directory — its notes travel with it. Returns false for an unusable `new`
+    /// name, a missing source, or a collision with a *different* existing folder. A
+    /// case-only rename (`work` → `Work`) on a case-insensitive volume is allowed.
+    @discardableResult
+    static func renameFolder(
+        from old: String, to new: String, in directory: URL = SessionArchive.directory
+    ) -> Bool {
+        guard let newName = sanitiseFolderName(new) else { return false }
+        let fm = FileManager.default
+        let src = directory.appendingPathComponent(old, isDirectory: true)
+        let dst = directory.appendingPathComponent(newName, isDirectory: true)
+        guard fm.fileExists(atPath: src.path) else { return false }
+        if src.standardizedFileURL == dst.standardizedFileURL { return true }
+        // Block only a collision with a genuinely different folder; a case-only
+        // rename resolves to the same path case-insensitively and must go through.
+        let sameNameCaseInsensitive = src.standardizedFileURL.path
+            .compare(dst.standardizedFileURL.path, options: .caseInsensitive) == .orderedSame
+        if !sameNameCaseInsensitive, fm.fileExists(atPath: dst.path) { return false }
+        return (try? fm.moveItem(at: src, to: dst)) != nil
+    }
+
+    /// Delete folder `name` (issue #25) without deleting its sessions: each note is
+    /// un-filed back to `directory` (collisions skipped), then the directory is
+    /// removed only if nothing remains in it — so unknown non-session files there
+    /// are never destroyed. Returns true when the directory was removed.
+    @discardableResult
+    static func deleteFolder(_ name: String, in directory: URL = SessionArchive.directory) -> Bool {
+        let fm = FileManager.default
+        let folderURL = directory.appendingPathComponent(name, isDirectory: true)
+        for file in list(in: folderURL) {
+            let dest = directory.appendingPathComponent(file.url.lastPathComponent)
+            if fm.fileExists(atPath: dest.path) { continue }
+            try? fm.moveItem(at: file.url, to: dest)
+        }
+        let remaining = (try? fm.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: nil)) ?? []
+        guard remaining.isEmpty else { return false }
+        return (try? fm.removeItem(at: folderURL)) != nil
     }
 
     /// Delete `file` from disk. Returns false if removal fails (e.g. the note is

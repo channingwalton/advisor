@@ -676,6 +676,57 @@ inline `askNote`, since the row has no such inline surface — one error path fo
 both. This keeps the "actions belong in a menu, not per-row icons" decision from
 the Delete section above, just adding a second way to open that menu.
 
+## Session folders (2026-06-21, issue #25)
+
+Sessions can be filed into **folders**. Unlike tags (a config-side library of
+names + colours, many-per-session), a folder is a **real sub-directory** of the
+storage folder and a session lives in **exactly one** (or none). So folders need
+no `config.json` registry — the folder list is derived from disk, and an empty
+folder simply persists as an empty directory. They show in Finder too, which is
+why the real-directory model was chosen over a virtual `folder:` frontmatter key.
+
+`SessionArchive` owns the on-disk shape. `list` now descends **one level**: a
+note in `<root>/Work` comes back as a `SessionFile` with `folder == "Work"`, one
+directly in `<root>` with `folder == nil` (deeper nesting and dot-directories are
+ignored). `folders` returns the immediate sub-directory names (empty ones
+included). Every mutation is a `moveItem` with a pre-move `fileExists` clobber
+guard, so nothing is ever overwritten or half-written:
+
+- `setFolder(_:for:)` moves a note between `<root>` and `<root>/<folder>`,
+  returning the relocated `SessionFile` (or `nil` on a name clash / invalid name).
+  Un-filing the last note leaves its folder behind empty **by design** (folders
+  persist).
+- `createFolder` / `renameFolder` / `deleteFolder` manage the directories.
+  `renameFolder` allows a case-only rename on a case-insensitive volume but blocks
+  a collision with a *different* folder. `deleteFolder` **never deletes sessions**:
+  it un-files them back to the root (collisions skipped) and removes the directory
+  only if nothing remains — an unmovable note keeps both the note and the folder.
+- `sanitiseFolderName` is the single gate (trims; rejects empty, dot-leading, and
+  `/` or `:`), so a folder name can't escape its single path component.
+
+The **live/just-finished owned note is excluded from filing**, the same exemption
+Delete and the issue-#16 storage move already apply: its `SessionWriter` owns the
+file path, so moving the file out from under it would be clobbered by the next
+debounced rewrite. The Sessions browser enforces this three ways — the row isn't
+`.draggable`, the "Move to Folder" menu is `.disabled`, and `fileSession` guards
+on `ctx.liveFileURL`. (A saved note is filed by the direct disk move; there's no
+writer-routed path for folders, unlike rename/tags, because you simply can't file
+the note that's still being written.) The #16 storage-relocation `move` now
+**preserves folder structure** — a note in `source/Work` lands in `dest/Work`.
+
+In the sidebar (`SessionsView`), folders render as collapsible `Section`s above
+the date-grouped un-foldered list: `grouped` only buckets `folder == nil`
+sessions, `sessions(in:)` supplies each folder's flat list, and `visibleFolders`
+shows every folder when unfiltered but only folders with a match while searching.
+Filing changes a note's URL — the selection key — so `fileSession` re-points
+`selection` to the moved file before the reload. Drag-and-drop carries the row's
+file `URL` and the folder header is a `.dropDestination`; unknown URLs (e.g. a
+file dragged in from Finder) are filtered against the current `sessions` so a
+stray drag can't misfile, and dropped rows are resolved up front since each
+`fileSession` reload reassigns `sessions`. Folder create/rename/delete are inline
+(the FOLDERS bar's `+`, and the folder header's right-click menu) rather than in
+Preferences, since drag-and-drop already makes the sidebar the place you organise.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

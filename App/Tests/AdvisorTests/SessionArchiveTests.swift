@@ -136,3 +136,196 @@ import Foundation
     let file = try #require(SessionArchive.list(in: dir).first)
     #expect(SessionArchive.contents(of: file).contains("hello"))
 }
+
+// MARK: - folders (issue #25)
+
+/// A throwaway archive holding `root`-level notes and `folders` (name → notes),
+/// removed on teardown.
+private func makeFolderedArchive(
+    root: [String] = [], folders: [String: [String]] = [:]
+) throws -> URL {
+    let fm = FileManager.default
+    let dir = fm.temporaryDirectory
+        .appendingPathComponent("advisor-folder-test-\(UUID().uuidString)")
+    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    for name in root {
+        try "x".write(to: dir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+    for (folder, names) in folders {
+        let sub = dir.appendingPathComponent(folder, isDirectory: true)
+        try fm.createDirectory(at: sub, withIntermediateDirectories: true)
+        for name in names {
+            try "x".write(to: sub.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+    }
+    return dir
+}
+
+@Test func listTagsEachSessionWithItsFolder() throws {
+    let dir = try makeFolderedArchive(
+        root: ["2026-06-18-090000.md"],
+        folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let files = SessionArchive.list(in: dir)
+    #expect(files.count == 2)
+    #expect(files.first { $0.url.lastPathComponent == "2026-06-18-090000.md" }?.folder == nil)
+    #expect(files.first { $0.url.lastPathComponent == "2026-06-18-170000.md" }?.folder == "Work")
+}
+
+@Test func listIgnoresNonSessionFilesInsideFolders() throws {
+    let dir = try makeFolderedArchive(
+        folders: ["Work": ["2026-06-18-170000.md", "notes.txt", "README.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let files = SessionArchive.list(in: dir)
+    #expect(files.count == 1)
+    #expect(files.first?.folder == "Work")
+}
+
+@Test func foldersListsSubdirectoriesIncludingEmptyExcludingDotDirs() throws {
+    let dir = try makeFolderedArchive(
+        root: ["2026-06-18-090000.md"],
+        folders: ["Work": ["2026-06-18-170000.md"], "Personal": [], ".hidden": []])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // Both real folders (including the empty "Personal"), case-insensitively
+    // sorted; the dot-directory and the root note are excluded.
+    #expect(SessionArchive.folders(in: dir) == ["Personal", "Work"])
+}
+
+@Test func sanitiseFolderNameTrimsAndRejectsUnsafe() {
+    #expect(SessionArchive.sanitiseFolderName("  Work  ") == "Work")
+    #expect(SessionArchive.sanitiseFolderName("") == nil)
+    #expect(SessionArchive.sanitiseFolderName("   ") == nil)
+    #expect(SessionArchive.sanitiseFolderName("a/b") == nil)
+    #expect(SessionArchive.sanitiseFolderName("a:b") == nil)
+    #expect(SessionArchive.sanitiseFolderName(".hidden") == nil)
+    #expect(SessionArchive.sanitiseFolderName("..") == nil)
+}
+
+@Test func createFolderCreatesDirectoryAndIsIdempotent() throws {
+    let dir = try makeFolderedArchive()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.createFolder("Work", in: dir))
+    #expect(SessionArchive.folders(in: dir) == ["Work"])
+    // Creating it again succeeds; an unusable name is rejected.
+    #expect(SessionArchive.createFolder("Work", in: dir))
+    #expect(!SessionArchive.createFolder("a/b", in: dir))
+    #expect(SessionArchive.folders(in: dir) == ["Work"])
+}
+
+@Test func setFolderMovesNoteIntoSubdirAndBackToRoot() throws {
+    let dir = try makeFolderedArchive(root: ["2026-06-18-170000.md"])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let file = try #require(SessionArchive.list(in: dir).first)
+    let filed = try #require(SessionArchive.setFolder("Work", for: file, root: dir))
+    #expect(filed.folder == "Work")
+    #expect(filed.url == dir.appendingPathComponent("Work/2026-06-18-170000.md"))
+    #expect(FileManager.default.fileExists(atPath: filed.url.path))
+    #expect(!FileManager.default.fileExists(atPath: file.url.path)) // moved, not copied
+
+    let unfiled = try #require(SessionArchive.setFolder(nil, for: filed, root: dir))
+    #expect(unfiled.folder == nil)
+    #expect(unfiled.url == dir.appendingPathComponent("2026-06-18-170000.md"))
+    #expect(SessionArchive.list(in: dir).first?.folder == nil)
+}
+
+@Test func setFolderNeverClobbersExistingNote() throws {
+    let dir = try makeFolderedArchive(
+        root: ["2026-06-18-170000.md"],
+        folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let rootFile = try #require(
+        SessionArchive.list(in: dir).first { $0.folder == nil })
+    // A same-named note already sits in Work → the move is refused, source kept.
+    #expect(SessionArchive.setFolder("Work", for: rootFile, root: dir) == nil)
+    #expect(FileManager.default.fileExists(atPath: rootFile.url.path))
+}
+
+@Test func setFolderRejectsInvalidName() throws {
+    let dir = try makeFolderedArchive(root: ["2026-06-18-170000.md"])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let file = try #require(SessionArchive.list(in: dir).first)
+    #expect(SessionArchive.setFolder("bad/name", for: file, root: dir) == nil)
+    #expect(FileManager.default.fileExists(atPath: file.url.path)) // untouched
+}
+
+@Test func renameFolderMovesDirectoryWithItsNotes() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.renameFolder(from: "Work", to: "Projects", in: dir))
+    #expect(SessionArchive.folders(in: dir) == ["Projects"])
+    #expect(SessionArchive.list(in: dir).first?.folder == "Projects")
+}
+
+@Test func renameFolderRejectsCollisionWithDifferentFolder() throws {
+    let dir = try makeFolderedArchive(
+        folders: ["Work": ["2026-06-18-170000.md"], "Personal": []])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(!SessionArchive.renameFolder(from: "Work", to: "Personal", in: dir))
+    #expect(SessionArchive.folders(in: dir) == ["Personal", "Work"]) // unchanged
+}
+
+@Test func deleteFolderUnfilesSessionsAndRemovesDirectory() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.deleteFolder("Work", in: dir))
+    #expect(SessionArchive.folders(in: dir).isEmpty) // directory gone
+    let files = SessionArchive.list(in: dir)
+    #expect(files.count == 1) // session preserved, not deleted
+    #expect(files.first?.folder == nil) // un-filed back to root
+}
+
+@Test func deleteFolderPreservesSessionThatCannotBeUnfiled() throws {
+    // A same-named note already sits in root, so the folder's note can't move
+    // back without clobbering it. The session must survive and the folder stay.
+    let dir = try makeFolderedArchive(
+        root: ["2026-06-18-170000.md"],
+        folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(!SessionArchive.deleteFolder("Work", in: dir)) // not removed
+    #expect(SessionArchive.folders(in: dir) == ["Work"])   // folder kept
+    // Both notes still exist: the root original and the un-movable foldered one.
+    let files = SessionArchive.list(in: dir)
+    #expect(files.count == 2)
+    #expect(files.contains { $0.folder == "Work" })
+}
+
+@Test func setFolderIntoCurrentFolderIsANoOp() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let file = try #require(SessionArchive.list(in: dir).first)
+    let same = try #require(SessionArchive.setFolder("Work", for: file, root: dir))
+    #expect(same.url == file.url)
+    #expect(same.folder == "Work")
+    #expect(FileManager.default.fileExists(atPath: file.url.path))
+}
+
+@Test func moveRelocationPreservesFolderStructure() throws {
+    let source = try makeFolderedArchive(
+        root: ["2026-06-18-090000.md"],
+        folders: ["Work": ["2026-06-18-170000.md"]])
+    let dest = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-folder-dest-\(UUID().uuidString)")
+    defer {
+        try? FileManager.default.removeItem(at: source)
+        try? FileManager.default.removeItem(at: dest)
+    }
+
+    let result = SessionArchive.move(from: source, to: dest)
+    #expect(result == (moved: 2, skipped: 0))
+    let moved = SessionArchive.list(in: dest)
+    #expect(moved.first { $0.url.lastPathComponent == "2026-06-18-090000.md" }?.folder == nil)
+    #expect(moved.first { $0.url.lastPathComponent == "2026-06-18-170000.md" }?.folder == "Work")
+    #expect(SessionArchive.folders(in: dest) == ["Work"])
+}

@@ -39,6 +39,25 @@ struct SessionsView: View {
     @State private var renameText = ""
     @State private var deleting: LoadedSession?
 
+    /// The folders in the archive (issue #25), derived from disk sub-directories.
+    /// Refreshed alongside `sessions` on appear and on session changes.
+    @State private var folders: [String] = []
+    /// Folders the user has collapsed. Absence = expanded, so new folders default
+    /// open. Kept in view state only (resets per window open), like the selection.
+    @State private var collapsedFolders: Set<String> = []
+    // Folder create/rename/delete are driven from the sidebar inline.
+    @State private var creatingFolder = false
+    @State private var newFolderName = ""
+    /// When a folder is created from a row's "New Folder…", file this session into
+    /// it once created; nil when creating an empty folder from the Folders bar.
+    @State private var fileIntoNewFolder: LoadedSession?
+    @State private var renamingFolder: String?
+    @State private var folderRenameText = ""
+    @State private var deletingFolder: String?
+    /// The folder a row is currently being dragged over, highlighted as the drop
+    /// target so it's clear where the session will land.
+    @State private var dropTargetFolder: String?
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -80,6 +99,29 @@ struct SessionsView: View {
             Text("Delete “\(session.detail.title)”? This permanently removes its transcript "
                 + "and cards, and can't be undone.")
         }
+        .alert("New folder", isPresented: $creatingFolder) {
+            TextField("Folder name", text: $newFolderName)
+            Button("Create") {
+                createFolder(named: newFolderName, fileIn: fileIntoNewFolder)
+                fileIntoNewFolder = nil
+            }
+            Button("Cancel", role: .cancel) { fileIntoNewFolder = nil }
+        } message: {
+            Text("Name the new folder.")
+        }
+        .alert("Rename folder", isPresented: presenting($renamingFolder), presenting: renamingFolder) { folder in
+            TextField("Folder name", text: $folderRenameText)
+            Button("Save") { renameFolder(folder, to: folderRenameText) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Give this folder a new name.")
+        }
+        .alert("Delete folder", isPresented: presenting($deletingFolder), presenting: deletingFolder) { folder in
+            Button("Delete", role: .destructive) { deleteFolder(folder) }
+            Button("Cancel", role: .cancel) {}
+        } message: { folder in
+            Text("Delete the folder “\(folder)”? Its sessions move back out and are kept.")
+        }
     }
 
     /// Bridge an optional-item state to the `Bool` an `.alert` wants: presented
@@ -111,12 +153,24 @@ struct SessionsView: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4, pinnedViews: [.sectionHeaders]) {
-                    if grouped.isEmpty {
+                    if filtered.isEmpty && visibleFolders.isEmpty {
                         Text(query.isEmpty ? "No previous sessions yet." : "No matches.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textTertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 14).padding(.top, 16)
+                    }
+                    if showFoldersBar { foldersBar }
+                    ForEach(visibleFolders, id: \.self) { folder in
+                        Section {
+                            if !collapsedFolders.contains(folder) {
+                                ForEach(sessions(in: folder)) { session in
+                                    sessionRow(session)
+                                }
+                            }
+                        } header: {
+                            folderHeader(folder)
+                        }
                     }
                     ForEach(grouped, id: \.label) { group in
                         Section {
@@ -124,19 +178,123 @@ struct SessionsView: View {
                                 sessionRow(session)
                             }
                         } header: {
-                            Text(group.label)
-                                .font(.system(size: 10.5, weight: .bold)).kerning(0.4)
-                                .foregroundStyle(Theme.textMuted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 14)
-                                .padding(.top, 14).padding(.bottom, 4)
-                                .background(Theme.surfaceTitlebar)
+                            dateHeader(group.label)
                         }
                     }
                 }
                 .padding(.bottom, 12)
             }
         }
+    }
+
+    /// The "FOLDERS" bar with a + to create one. Shown whenever there are folders
+    /// to list, or the list is unfiltered (so the first folder can be created).
+    private var showFoldersBar: Bool {
+        !visibleFolders.isEmpty || query.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var foldersBar: some View {
+        HStack {
+            Text("FOLDERS").font(.system(size: 10.5, weight: .bold)).kerning(0.4)
+                .foregroundStyle(Theme.textMuted)
+            Spacer()
+            Button {
+                newFolderName = ""
+                fileIntoNewFolder = nil
+                creatingFolder = true
+            } label: {
+                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .buttonStyle(.plain).focusEffectDisabled().help("New folder")
+        }
+        .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 2)
+    }
+
+    /// A collapsible folder section header: disclosure chevron, name, count.
+    /// Tapping toggles expansion; right-click renames/deletes the folder.
+    private func folderHeader(_ folder: String) -> some View {
+        let collapsed = collapsedFolders.contains(folder)
+        let count = sessions(in: folder).count
+        let targeted = dropTargetFolder == folder
+        return Button {
+            if collapsed { collapsedFolders.remove(folder) } else { collapsedFolders.insert(folder) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textMuted)
+                    .frame(width: 10)
+                Image(systemName: targeted ? "folder.fill" : "folder")
+                    .font(.system(size: 11)).foregroundStyle(targeted ? Theme.accent : Theme.textSecondary)
+                Text(folder).font(.system(size: 11.5, weight: .bold)).kerning(0.2)
+                    .foregroundStyle(targeted ? Theme.accent : Theme.textSecondary).lineLimit(1)
+                Spacer(minLength: 6)
+                Text("\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textMuted)
+            }
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            // Tint the row and outline it while a session is dragged over, so the
+            // drop target is unmistakable.
+            .background(targeted ? Theme.accent.opacity(0.12) : Theme.surfaceTitlebar)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Theme.accent, lineWidth: 1.5)
+                    .padding(.horizontal, 6)
+                    .opacity(targeted ? 1 : 0))
+        }
+        .buttonStyle(.plain).focusEffectDisabled()
+        .contextMenu { folderMenu(folder) }
+        // Drop a dragged session row here to file it into this folder (issue #25),
+        // highlighting the header while it's the active target.
+        .dropDestination(for: URL.self) { urls, _ in
+            fileSessions(urls, to: folder)
+            return true
+        } isTargeted: { isIn in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                // Clear only when *this* folder loses the drag, so a move to the
+                // next folder doesn't blank the new target set just before it.
+                dropTargetFolder = isIn ? folder : (dropTargetFolder == folder ? nil : dropTargetFolder)
+            }
+        }
+    }
+
+    /// File the sessions identified by the dropped `urls` into `folder`, expanding
+    /// it so the result is visible. Unknown URLs (anything not a current session
+    /// row, e.g. a file dragged in from Finder) are ignored, so a stray drag can't
+    /// misfile. The matching sessions are resolved up front: each `fileSession`
+    /// triggers a reload that reassigns `sessions`, so resolving inside the loop
+    /// could miss later rows.
+    private func fileSessions(_ urls: [URL], to folder: String) {
+        collapsedFolders.remove(folder)
+        let toFile = urls.compactMap { url in sessions.first { $0.file.url == url } }
+        for session in toFile {
+            fileSession(session, to: folder)
+        }
+    }
+
+    private func dateHeader(_ label: String) -> some View {
+        Text(label)
+            .font(.system(size: 10.5, weight: .bold)).kerning(0.4)
+            .foregroundStyle(Theme.textMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.top, 14).padding(.bottom, 4)
+            .background(Theme.surfaceTitlebar)
+    }
+
+    @ViewBuilder private func folderMenu(_ folder: String) -> some View {
+        Button("Rename Folder…") {
+            folderRenameText = folder
+            renamingFolder = folder
+        }
+        Button("New Folder…") {
+            newFolderName = ""
+            fileIntoNewFolder = nil
+            creatingFolder = true
+        }
+        Divider()
+        Button("Delete Folder", role: .destructive) { deletingFolder = folder }
     }
 
     /// Primary action: open (or bring forward) the single recording window. The
@@ -204,7 +362,17 @@ struct SessionsView: View {
         .buttonStyle(.plain)
     }
 
-    private func sessionRow(_ session: LoadedSession) -> some View {
+    @ViewBuilder private func sessionRow(_ session: LoadedSession) -> some View {
+        // The owned note can't be filed (its writer owns the path), so it isn't
+        // draggable either — mirrors the disabled "Move to Folder" menu.
+        if session.file.url == ctx.liveFileURL {
+            sessionRowBody(session)
+        } else {
+            sessionRowBody(session).draggable(session.file.url)
+        }
+    }
+
+    private func sessionRowBody(_ session: LoadedSession) -> some View {
         let selected = selection == session.id
         let d = session.detail
         return Button { selection = session.id } label: {
@@ -265,6 +433,7 @@ struct SessionsView: View {
             renameText = session.detail.name
             renaming = session
         }
+        moveToFolderMenu(session)
         Button("Export…") { exportSession(session.file) }
         Button("Reveal in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([session.file.url])
@@ -273,6 +442,30 @@ struct SessionsView: View {
         // The live note is exempt: its writer would just recreate the deleted file.
         Button("Delete…", role: .destructive) { deleting = session }
             .disabled(session.file.url == ctx.liveFileURL)
+    }
+
+    /// "Move to Folder" submenu (issue #25): existing folders, "No Folder" to
+    /// un-file, and "New Folder…" to create-and-file. Disabled for the live/owned
+    /// note — filing it would move the file out from under its writer (mirrors the
+    /// Delete exemption and the #16 storage move, which also skip the live note).
+    @ViewBuilder private func moveToFolderMenu(_ session: LoadedSession) -> some View {
+        Menu("Move to Folder") {
+            if session.file.folder != nil {
+                Button("No Folder") { fileSession(session, to: nil) }
+                Divider()
+            }
+            ForEach(folders, id: \.self) { folder in
+                Button(folder) { fileSession(session, to: folder) }
+                    .disabled(folder == session.file.folder)
+            }
+            if !folders.isEmpty { Divider() }
+            Button("New Folder…") {
+                newFolderName = ""
+                fileIntoNewFolder = session
+                creatingFolder = true
+            }
+        }
+        .disabled(session.file.url == ctx.liveFileURL)
     }
 
     /// Coloured pills for a row's tags. Only tags still in the library render —
@@ -311,6 +504,7 @@ struct SessionsView: View {
 
     private func reload() {
         tagLibrary = AdvisorConfig.load().tags
+        folders = SessionArchive.folders()
         sessions = SessionArchive.list().map { file in
             let contents = SessionArchive.contents(of: file)
             let detail = SessionDetail.parse(
@@ -325,6 +519,46 @@ struct SessionsView: View {
         if selection == nil || !sessions.contains(where: { $0.id == selection }) {
             selection = filtered.first?.id
         }
+    }
+
+    // MARK: folder actions (issue #25)
+
+    /// File `session` into `folder` (nil un-files it), moving the note on disk. The
+    /// owned note is skipped (its move menu is disabled too). Re-points selection
+    /// when the moved note was selected, since its URL — the selection key —
+    /// changes, then reloads from disk.
+    private func fileSession(_ session: LoadedSession, to folder: String?) {
+        guard session.file.url != ctx.liveFileURL else { return }
+        if let moved = SessionArchive.setFolder(folder, for: session.file) {
+            if selection == session.file.url { selection = moved.url }
+        }
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+    }
+
+    /// Create `name`; if `session` is set (from a row's "New Folder…"), file it in.
+    private func createFolder(named name: String, fileIn session: LoadedSession?) {
+        guard SessionArchive.createFolder(name) else { return }
+        if let session, let folder = SessionArchive.sanitiseFolderName(name) {
+            fileSession(session, to: folder) // posts the reload notification
+        } else {
+            NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+        }
+    }
+
+    /// Rename a folder (its notes travel with the directory). Selection may reset
+    /// to the first visible session if it pointed inside the folder, since those
+    /// notes' URLs change — reload reconciles it.
+    private func renameFolder(_ old: String, to new: String) {
+        SessionArchive.renameFolder(from: old, to: new)
+        collapsedFolders.remove(old)
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+    }
+
+    /// Delete a folder; its sessions are un-filed back to the root, not deleted.
+    private func deleteFolder(_ folder: String) {
+        SessionArchive.deleteFolder(folder)
+        collapsedFolders.remove(folder)
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
     /// Filtered + sorted sessions (search + this-week chip + sort order).
@@ -348,11 +582,26 @@ struct SessionsView: View {
             }
     }
 
-    /// Filtered sessions grouped into relative-date sections, in list order.
+    /// Filtered sessions that sit in `folder`, in sort order (folders show a flat
+    /// list, not date-grouped — date grouping is for the un-foldered area).
+    private func sessions(in folder: String) -> [LoadedSession] {
+        filtered.filter { $0.file.folder == folder }
+    }
+
+    /// Which folders to show: all of them when unfiltered (so empty folders still
+    /// appear and can be managed), only folders with a match when searching.
+    private var visibleFolders: [String] {
+        query.trimmingCharacters(in: .whitespaces).isEmpty
+            ? folders
+            : folders.filter { !sessions(in: $0).isEmpty }
+    }
+
+    /// Un-foldered filtered sessions grouped into relative-date sections, in list
+    /// order. Foldered sessions are shown under their folder instead.
     private var grouped: [(label: String, sessions: [LoadedSession])] {
         var order: [String] = []
         var byLabel: [String: [LoadedSession]] = [:]
-        for session in filtered {
+        for session in filtered where session.file.folder == nil {
             let label = Self.bucket(session.detail.started ?? session.file.date)
             if byLabel[label] == nil { order.append(label) }
             byLabel[label, default: []].append(session)
