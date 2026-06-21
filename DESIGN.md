@@ -739,6 +739,31 @@ stray drag can't misfile, and dropped rows are resolved up front since each
 (the FOLDERS bar's `+`, and the folder header's right-click menu) rather than in
 Preferences, since drag-and-drop already makes the sidebar the place you organise.
 
+## Card text via AppKit, link cursor (2026-06-21, issue #26)
+
+Card bodies (live feed, the Sessions-browser cards, and the ask-and-append
+answer) rendered through `MarkdownUI`, which builds the text as a SwiftUI `Text`.
+SwiftUI/`Text` never shows the pointing-hand cursor over a link on macOS — links
+are `.link` runs inside one `Text`, with no per-link view to attach a
+`pointerStyle` to — so links read as plain text. `NSTextView` shows the native
+link cursor (and handles clicks) for free over `.link` attributed runs.
+
+So card text now renders through **`MarkdownText`** (`MarkdownText.swift`), an
+`NSViewRepresentable` over a read-only, selectable `NSTextView` — the same
+height-via-`intrinsicContentSize` pattern as the transcript's `SelectableTranscriptText`/
+`ActionTextView` (issue #12), so it lays out like a wrapping label. It is an
+**inline-first** markdown renderer, not a full one: blocks split on blank lines,
+each parsed with `AttributedString(markdown:.inlineOnly)` (bold/italic/code/links),
+then `inlinePresentationIntent` runs are mapped to real fonts and `Theme` colours
+(NSColor twins added for accent/code/muted). Soft breaks collapse to spaces;
+lists get `•`/kept ordering, headings render bold, `---` becomes a rule. This
+suits the app's concise card bodies (the research prompt cites sources inline as
+markdown links); nested lists/tables degrade to plain lines — acceptable, and
+revisit if card bodies grow richer. `MarkdownUI` is now unused and the dependency
+is dropped. The footer's discrete source `Link`s (live feed) keep a SwiftUI
+`linkCursor()` (`NSCursor.pointingHand` on hover) since they aren't `NSTextView`
+links.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

@@ -1,5 +1,4 @@
 import AppKit
-import MarkdownUI
 import SwiftUI
 
 /// A saved session paired with its parsed detail, the unit the browser lists.
@@ -887,14 +886,7 @@ private struct SessionDetailPane: View {
     }
 
     private func cardBlock(_ markdown: String) -> some View {
-        Markdown(markdown)
-            .textSelection(.enabled)
-            .markdownTextStyle(\.text) {
-                FontSize(Theme.Metric.cardBodySize)
-                ForegroundColor(Theme.textBody)
-            }
-            .markdownTextStyle(\.link) { ForegroundColor(Theme.accent) }
-            .markdownTextStyle(\.emphasis) { ForegroundColor(Theme.textMuted) }
+        MarkdownText(markdown: markdown, style: .saved)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
@@ -927,13 +919,8 @@ private struct SessionDetailPane: View {
                         .font(.system(size: 11, weight: .bold)).kerning(0.5)
                         .foregroundStyle(answerState == "failed" ? Theme.factRed : Theme.accent)
                 }
-                Markdown(answerBody)
-                    .textSelection(.enabled)
-                    .markdownTextStyle(\.text) {
-                        FontSize(Theme.Metric.cardBodySize)
-                        ForegroundColor(Theme.textBody)
-                    }
-                    .markdownTextStyle(\.link) { ForegroundColor(Theme.accent) }
+                MarkdownText(markdown: answerBody, style: .answer)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)

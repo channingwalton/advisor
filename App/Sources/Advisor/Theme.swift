@@ -54,6 +54,15 @@ enum Theme {
     static let textMuted = dyn(0xAEAFB8, 0x6F7079)
     /// NSColor twin of `textBody`, for the AppKit-backed transcript text view.
     static let nsTextBody = NSColor.dynamic(NSColor(rgb: 0x3A3B44), NSColor(rgb: 0xDCDDE3))
+    /// NSColor twins for the AppKit-backed card text view (`MarkdownText`).
+    /// Explicit twins (not `NSColor(Color)`) so light/dark resolves correctly.
+    static let nsTextMuted = NSColor.dynamic(NSColor(rgb: 0xAEAFB8), NSColor(rgb: 0x6F7079))
+    static let nsAccent = NSColor.dynamic(NSColor(rgb: 0x3A5CE0), NSColor(rgb: 0x6E8BFF))
+    static let nsAccentTint = NSColor.dynamic(
+        NSColor(rgb: 0xEEF1FB), NSColor(rgb: 0x6E8BFF, alpha: 0.16))
+    static let nsContextCodeText = NSColor.dynamic(NSColor(rgb: 0x6E54B8), NSColor(rgb: 0xCCBEFF))
+    static let nsContextCodeBg = NSColor.dynamic(
+        NSColor(rgb: 0xF1F0F6), NSColor(rgb: 0xB9A4FF, alpha: 0.14))
 
     // MARK: accent (blue)
     static let accent = dyn(0x3A5CE0, 0x6E8BFF)

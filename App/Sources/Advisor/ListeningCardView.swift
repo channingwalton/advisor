@@ -1,4 +1,3 @@
-import MarkdownUI
 import SwiftUI
 
 /// An injected card in the transcript stream: context / answer / fact-check.
@@ -137,21 +136,7 @@ struct ListeningCardView: View {
     // MARK: body
 
     private var bodyMarkdown: some View {
-        let codeText = card.kind == "context" ? Theme.contextCodeText : Theme.accent
-        let codeBg = card.kind == "context" ? Theme.contextCodeBg : Theme.accentTint
-        return Markdown(card.body)
-            .textSelection(.enabled)
-            .markdownTextStyle(\.text) {
-                FontSize(Theme.Metric.cardBodySize)
-                ForegroundColor(Theme.textBody)
-            }
-            .markdownTextStyle(\.code) {
-                FontFamilyVariant(.monospaced)
-                FontSize(11.5)
-                ForegroundColor(codeText)
-                BackgroundColor(codeBg)
-            }
-            .markdownTextStyle(\.link) { ForegroundColor(Theme.accent) }
+        MarkdownText(markdown: card.body, style: card.kind == "context" ? .context : .answer)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -173,10 +158,22 @@ struct ListeningCardView: View {
                     Link(src.label, destination: URL(string: src.url) ?? URL(string: "about:blank")!)
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.accent)
-                        .pointerStyle(.link)
+                        .linkCursor()
                 }
             }
             .padding(.top, 2)
+        }
+    }
+}
+
+extension View {
+    /// Shows the standard pointing-hand cursor while the pointer is over the
+    /// view. SwiftUI `Link`/markdown links don't change the cursor on macOS, so
+    /// we drive `NSCursor` from the hover state. Push/pop stays balanced because
+    /// reaching any other control means moving off this view first.
+    func linkCursor() -> some View {
+        onHover { inside in
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
     }
 }
