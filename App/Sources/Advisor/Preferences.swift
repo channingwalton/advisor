@@ -505,59 +505,171 @@ private struct TagEditorSheet: View {
     }
 }
 
+/// The preferences window: one tab per subject area (issue #22), replacing the
+/// former single scrolling form. `config` and the persistence wiring live here
+/// so a change made in any tab rides the same save + notification; each tab is a
+/// thin `Form` over the relevant bindings.
 struct PreferencesView: View {
     @State private var config = AdvisorConfig.load()
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("captureSystem") private var captureSystem = true
 
     var body: some View {
+        TabView {
+            AgentSettingsView(
+                provider: $config.provider, model: $config.model,
+                authMode: $config.authMode, allowMcpActions: $config.allowMcpActions,
+                agentLanes: $agentLanes
+            )
+            .tabItem { Label("Agent", systemImage: "brain") }
+
+            TriggersSettingsView(
+                sensitivity: $config.triggerSensitivity, triggers: $config.triggers
+            )
+            .tabItem { Label("Triggers", systemImage: "bolt") }
+
+            TranscriptionSettingsView(captureSystem: $captureSystem, sttLocale: $config.sttLocale)
+                .tabItem { Label("Transcription", systemImage: "waveform") }
+
+            ContextsSettingsView(contexts: $config.contexts)
+                .tabItem { Label("Contexts", systemImage: "text.book.closed") }
+
+            TagsSettingsView(tags: $config.tags)
+                .tabItem { Label("Tags", systemImage: "tag") }
+
+            GeneralSettingsView(appearance: $config.appearance, sessionDir: $config.sessionDir)
+                .tabItem { Label("General", systemImage: "gearshape") }
+        }
+        .frame(width: 480, height: 420)
+        .onChange(of: config) { _, new in
+            new.save()
+            NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+        }
+        // Contexts can also be saved from the recording window's Context popover.
+        // Pull any such on-disk change in so a later Preferences edit doesn't
+        // write back a stale (context-less) config. Guarded on inequality so it
+        // never reacts to this view's own posts (no save loop).
+        .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
+            let disk = AdvisorConfig.load().contexts
+            if disk != config.contexts { config.contexts = disk }
+        }
+    }
+}
+
+/// Agent backend tab: provider/model picker, authentication, parallel-agent
+/// count and the connector-actions toggle.
+private struct AgentSettingsView: View {
+    @Binding var provider: String
+    @Binding var model: String
+    @Binding var authMode: String
+    @Binding var allowMcpActions: Bool
+    @Binding var agentLanes: Int
+
+    var body: some View {
         Form {
             Section("Agent backend") {
-                AgentBackendView(provider: $config.provider, model: $config.model)
-                AuthModeView(provider: config.provider, authMode: $config.authMode)
+                AgentBackendView(provider: $provider, model: $model)
+                AuthModeView(provider: provider, authMode: $authMode)
                 Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
-                Toggle("Allow connector actions", isOn: $config.allowMcpActions)
+                Toggle("Allow connector actions", isOn: $allowMcpActions)
                 Text("Off: connectors (Slack, Jira, …) are read/search only. On: agents may also send, create, and update — use with care. Claude only.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
+            Text("Agent settings apply at the start of the next session.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Automatic-triggers tab: sensitivity plus the per-card-type toggles.
+private struct TriggersSettingsView: View {
+    @Binding var sensitivity: String
+    @Binding var triggers: AdvisorConfig.Triggers
+
+    var body: some View {
+        Form {
             Section("Automatic triggers") {
-                Picker("Sensitivity", selection: $config.triggerSensitivity) {
+                Picker("Sensitivity", selection: $sensitivity) {
                     Text("Conservative").tag("conservative")
                     Text("Balanced").tag("balanced")
                     Text("Eager").tag("eager")
                 }
                 .pickerStyle(.segmented)
-                Toggle("Answer questions", isOn: $config.triggers.question)
-                Toggle("Surface background context", isOn: $config.triggers.context)
-                Toggle("Fact-check claims", isOn: $config.triggers.factcheck)
+                Toggle("Answer questions", isOn: $triggers.question)
+                Toggle("Surface background context", isOn: $triggers.context)
+                Toggle("Fact-check claims", isOn: $triggers.factcheck)
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
+/// Transcription tab: system-audio capture and the speech locale.
+private struct TranscriptionSettingsView: View {
+    @Binding var captureSystem: Bool
+    @Binding var sttLocale: String
+
+    var body: some View {
+        Form {
+            Section("Transcription") {
+                Toggle("Capture system audio", isOn: $captureSystem)
+                TextField("Locale", text: $sttLocale)
+                    .frame(maxWidth: 160)
+                Text("Apple speech locale, e.g. en_GB. Locale applies on next Listen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Saved-contexts tab — the reusable session-context library (issue #10).
+private struct ContextsSettingsView: View {
+    @Binding var contexts: [SavedContext]
+
+    var body: some View {
+        Form {
             Section("Saved contexts") {
-                SavedContextsView(contexts: $config.contexts)
+                SavedContextsView(contexts: $contexts)
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
+/// Tags tab — the session-tag library (issue #15).
+private struct TagsSettingsView: View {
+    @Binding var tags: [SavedTag]
+
+    var body: some View {
+        Form {
             Section("Tags") {
-                SavedTagsView(tags: $config.tags)
+                SavedTagsView(tags: $tags)
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
+/// General tab: window appearance and the session-storage folder (issue #16).
+private struct GeneralSettingsView: View {
+    @Binding var appearance: String
+    @Binding var sessionDir: String
+
+    var body: some View {
+        Form {
             Section("Appearance") {
-                Picker("Theme", selection: $config.appearance) {
+                Picker("Theme", selection: $appearance) {
                     Text("System").tag("system")
                     Text("Light").tag("light")
                     Text("Dark").tag("dark")
                 }
                 .pickerStyle(.segmented)
-            }
-
-            Section("Transcription") {
-                Toggle("Capture system audio", isOn: $captureSystem)
-                TextField("Locale", text: $config.sttLocale)
-                    .frame(maxWidth: 160)
-                Text("Apple speech locale, e.g. en_GB. Locale applies on next Listen.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section("Session storage") {
@@ -576,38 +688,20 @@ struct PreferencesView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            Text("Agent settings apply at the start of the next session.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
-        .frame(width: 480)
-        .padding()
-        .onChange(of: config) { _, new in
-            new.save()
-            NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
-        }
-        // Contexts can also be saved from the recording window's Context popover.
-        // Pull any such on-disk change in so a later Preferences edit doesn't
-        // write back a stale (context-less) config. Guarded on inequality so it
-        // never reacts to this view's own posts (no save loop).
-        .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
-            let disk = AdvisorConfig.load().contexts
-            if disk != config.contexts { config.contexts = disk }
-        }
     }
 
     /// The resolved storage folder shown in Preferences — the chosen path or the
     /// built-in default when none is set.
     private var sessionFolderDisplay: String {
-        SessionArchive.directory(for: config.sessionDir).path
+        SessionArchive.directory(for: sessionDir).path
     }
 
     /// Pick a new transcript folder (issue #16). When the current folder holds
     /// transcripts, offer to move them across (the live note, still owned by its
     /// writer, is left behind). Cancelling the move-prompt leaves the folder
-    /// unchanged. Writing `config.sessionDir` fires the form's `onChange` →
+    /// unchanged. Writing `sessionDir` fires the parent form's `onChange` →
     /// `save()` + `advisorConfigChanged`, which the Sessions browser reloads on.
     private func chooseSessionFolder() {
         let panel = NSOpenPanel()
@@ -617,10 +711,10 @@ struct PreferencesView: View {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.directoryURL = SessionArchive.directory(for: config.sessionDir)
+        panel.directoryURL = SessionArchive.directory(for: sessionDir)
         guard panel.runModal() == .OK, let chosen = panel.url else { return }
 
-        let oldDir = SessionArchive.directory(for: config.sessionDir)
+        let oldDir = SessionArchive.directory(for: sessionDir)
         guard chosen.standardizedFileURL != oldDir.standardizedFileURL else { return }
 
         let live = TranscriptWindowContext.shared.liveFileURL
@@ -654,7 +748,7 @@ struct PreferencesView: View {
                 return // Cancel: leave the storage folder unchanged
             }
         }
-        config.sessionDir = chosen.path
+        sessionDir = chosen.path
     }
 
     /// Tell the user a move didn't fully complete (a same-named note already in
