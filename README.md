@@ -71,6 +71,16 @@ The script runs a release `swift build`, builds the sidecar (`npm install` +
 `tsc`), assembles the `.app`, and ad-hoc signs it. Re-run it any time; it
 rebuilds `dist/Advisor.app` from scratch.
 
+To clean-build **and** install over your own copy in one step:
+
+```sh
+cd App && sh install.sh        # → ~/Applications/Advisor.app
+```
+
+`install.sh` wipes prior build artefacts, runs `package.sh`, quits a running
+Advisor, then replaces `~/Applications/Advisor.app` and clears its quarantine
+flag.
+
 **Install on another Mac** (macOS 26+, Apple Silicon):
 
 1. Copy `Advisor.app` across (e.g. to `/Applications`).

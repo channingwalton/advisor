@@ -30,6 +30,7 @@ cd App && swift build                  # app
 cd sidecar && npm run build            # tsc (npm install --include=dev first)
 sh test/replay.sh                      # replay fragments through the pipeline
 cd App && sh package.sh                # → dist/Advisor.app (self-contained, ad-hoc signed)
+cd App && sh install.sh                # clean build + install to ~/Applications
 ```
 
 Resource paths resolve via `AppResources` (bundle when packaged, `repoRoot`
@@ -38,6 +39,26 @@ in a dev checkout) — keep new runtime-resource lookups going through it.
 CI (`.github/workflows/ci.yml`) builds and tests both sides on push to `main`
 and on PRs (App on `macos-26`, sidecar on `ubuntu-latest`). Always build both
 sides locally before committing too.
+
+## Verifying UI changes
+
+Native macOS GUI — not browser-drivable, and most visual/runtime behaviour
+(recording, STT, window lifecycle, cards) isn't unit-testable. "`swift build` +
+tests green" is **not** done for these: observe it in the running app or report
+it unverified — never frame test-green as done for a visual/runtime ticket (this
+drove the #21 rework and #12 churn).
+
+- Screenshot the dev build: `cd App && swift build`, launch the `.build` binary,
+  capture a window with `screencapture -l <windowid>` (ids via CGWindowList).
+  Full-screen `screencapture` / `osascript` clicks need Accessibility /
+  Screen-Recording grants and usually fail.
+- **Verify the binary the user runs.** A packaged `dist/Advisor.app` can predate
+  your edits — confirm it's rebuilt (mtime / `package.sh`) before trusting a
+  "still happening" or a colour/layout mismatch (#21 red-vs-blue, #12 stale).
+- A screenshot Read into the session is re-injected on every later turn (one
+  127KB PNG became ~50 identical attachments in #12). Capture cropped/small, and
+  prefer delegating a visual check to a subagent (it returns a text verdict; the
+  image dies with it) over Reading many screenshots into the main loop.
 
 ## Conventions & constraints
 
