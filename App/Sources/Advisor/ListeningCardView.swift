@@ -173,6 +173,7 @@ struct ListeningCardView: View {
                     Link(src.label, destination: URL(string: src.url) ?? URL(string: "about:blank")!)
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.accent)
+                        .pointerStyle(.link)
                 }
             }
             .padding(.top, 2)
