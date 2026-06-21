@@ -87,8 +87,8 @@ rebuilds `dist/Advisor.app` from scratch.
 ## Use
 
 Advisor opens on the **Sessions** browser — your past sessions (see below). Click
-**New** (top right) to open a recording window; only one recording window exists
-at a time, so clicking New again just brings it forward.
+**Record** (top right) to open a recording window; only one recording window exists
+at a time, so clicking Record again just brings it forward.
 
 In the recording window, click **Listen**. Words appear live in grey as they're
 spoken, replaced by

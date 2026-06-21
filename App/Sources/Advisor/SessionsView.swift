@@ -99,14 +99,14 @@ struct SessionsView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                HStack { newRecordingButton; Spacer() }
+                HStack { Spacer(); newRecordingButton }
                 searchField
                 filterRow
             }
             .padding(.horizontal, 14)
-            // Clear the hidden title bar's traffic lights, which overlay the
-            // top-left of the content now that the custom title panel is gone.
-            .padding(.top, 38)
+            // Sit the Record button in the hidden title bar's row, aligned with
+            // the traffic lights (which occupy the top-left) on the far right.
+            .padding(.top, 14)
             .padding(.bottom, 10)
             Divider()
             ScrollView {
@@ -140,22 +140,22 @@ struct SessionsView: View {
     }
 
     /// Primary action: open (or bring forward) the single recording window. The
-    /// ⌘N glyph is a hint only — the shortcut itself is bound globally by
-    /// `RecordingCommands` (menu bar), so it isn't re-bound here to avoid a
-    /// duplicate-binding conflict.
+    /// ⌘N shortcut is bound globally by `RecordingCommands` (menu bar), so it
+    /// isn't re-bound here to avoid a duplicate-binding conflict — the tooltip
+    /// carries the hint instead.
     private var newRecordingButton: some View {
         Button { openWindow(id: "recording") } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "record.circle.fill").font(.system(size: 13))
-                Text("New Recording").font(.system(size: 13, weight: .semibold))
-                Text("⌘N").font(.system(size: 11, weight: .medium)).opacity(0.75)
+            HStack(spacing: 8) {
+                Circle().fill(Color.white).frame(width: 10, height: 10)
+                Text("Record").font(.system(size: 13, weight: .semibold))
             }
             .foregroundStyle(Color.white)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 16)
             .frame(height: 34)
-            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 9))
+            .background(Theme.recordRed, in: RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
         .help("Start a new recording (⌘N)")
     }
 
