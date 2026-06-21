@@ -435,6 +435,7 @@ struct SessionsView: View {
         }
         moveToFolderMenu(session)
         Button("Export…") { exportSession(session.file) }
+        ShareLink("Share…", item: session.file.url, preview: SharePreview(session.detail.title))
         Button("Reveal in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([session.file.url])
         }
@@ -752,6 +753,7 @@ private struct SessionDetailPane: View {
                         renaming = true
                     }
                     Button("Export…") { exportSession(file) }
+                    ShareLink("Share…", item: file.url, preview: SharePreview(detail.title))
                     Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([file.url])
                     }

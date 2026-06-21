@@ -676,6 +676,18 @@ inline `askNote`, since the row has no such inline surface — one error path fo
 both. This keeps the "actions belong in a menu, not per-row icons" decision from
 the Delete section above, just adding a second way to open that menu.
 
+## Share a session (2026-06-21, issue #23)
+
+Both session menus (the list row's `.contextMenu` and the detail pane's `…`
+menu) gain a **Share…** entry beside Export: a SwiftUI `ShareLink` over the
+note's file `URL`, which presents the standard macOS share sheet (Mail, AirDrop,
+Messages, …). `SharePreview(detail.title)` gives the sheet the session's title
+rather than the `yyyy-MM-dd-HHmmss.md` filename. This is distinct from Export:
+Export copies the markdown to a chosen path (`NSSavePanel`); Share hands the
+*same on-disk file* to a share service, so AirDrop sends it and Mail/Messages
+attach it. `ShareLink` is a view, so it drops straight into the menu builders —
+no shared free-function helper like `exportSession` is needed.
+
 ## Session folders (2026-06-21, issue #25)
 
 Sessions can be filed into **folders**. Unlike tags (a config-side library of

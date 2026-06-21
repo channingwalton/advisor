@@ -139,7 +139,8 @@ removes tags (picking from your library). Give a session a name with the
 `…` menu → **Rename**
 (top right of the detail) — a short label for an easier-to-scan list; leave it
 blank to fall back to the context. The same menu has **Export…** (save a copy of
-the markdown elsewhere), **Reveal in Finder** (opens
+the markdown elsewhere), **Share…** (the macOS share sheet — Mail, AirDrop,
+Messages, etc.), **Reveal in Finder** (opens
 the session's markdown file) and **Delete** (behind a confirmation — it
 permanently removes the note from disk); the live session can't be deleted. The
 same actions are also on each list row's **right-click** menu.
