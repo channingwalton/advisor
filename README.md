@@ -94,6 +94,29 @@ flag.
 4. Launch. First run prompts for Microphone and Screen & System Audio
    Recording permissions.
 
+**Distribute (signed + notarised):** for sharing beyond your own Macs, ad-hoc
+signing isn't enough — Gatekeeper wants a Developer ID signature + notarisation.
+
+```sh
+cd App && sh notarize.sh       # → App/dist/Advisor.app (stapled) + Advisor.zip
+```
+
+`notarize.sh` runs `package.sh`, then re-signs the bundle (and its nested Node
+runtime + native addons) with your **Developer ID Application** certificate under
+the hardened runtime (`Resources/entitlements.plist`), submits it to Apple's
+notary service, staples the ticket and runs a Gatekeeper check. One-off setup
+first: an Apple Developer Program membership, a Developer ID Application cert in
+your keychain, and stored notary credentials —
+
+```sh
+xcrun notarytool store-credentials "advisor-notary" \
+  --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
+```
+
+It exits early with guidance if no Developer ID cert is found, so it's safe to
+run before you're set up. (Mac App Store isn't viable — the App Sandbox fights
+the bundled Node sidecar and `$HOME` reads.)
+
 ## Use
 
 Advisor opens on the **Sessions** browser — your past sessions (see below). Click

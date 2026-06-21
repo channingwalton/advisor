@@ -31,6 +31,7 @@ cd sidecar && npm run build            # tsc (npm install --include=dev first)
 sh test/replay.sh                      # replay fragments through the pipeline
 cd App && sh package.sh                # → dist/Advisor.app (self-contained, ad-hoc signed)
 cd App && sh install.sh                # clean build + install to ~/Applications
+cd App && sh notarize.sh               # Developer ID sign + notarise + staple (distribution)
 ```
 
 Resource paths resolve via `AppResources` (bundle when packaged, `repoRoot`

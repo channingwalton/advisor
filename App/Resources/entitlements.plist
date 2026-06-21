@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Hardened-runtime entitlements for Developer ID distribution (see notarize.sh).
+    The app is NOT sandboxed (it spawns a Node sidecar and reads $HOME), so this
+    is the non-MAS set. TCC access (microphone, speech, screen recording) is
+    driven by the Info.plist usage strings, not entitlements.
+
+    The three below exist because the app bundles a Node runtime + the sidecar's
+    node_modules (some with native addons):
+      - allow-jit / allow-unsigned-executable-memory: V8's JIT needs writable+
+        executable memory, which hardened runtime forbids by default.
+      - disable-library-validation: lets the hardened main app load the bundled
+        node binary and native .node/.dylib addons that aren't all signed by this
+        Team ID; without it the loader rejects them.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
