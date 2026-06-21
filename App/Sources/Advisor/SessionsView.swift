@@ -312,14 +312,10 @@ struct SessionsView: View {
     /// carries the hint instead.
     private var newRecordingButton: some View {
         Button { openWindow(id: "recording") } label: {
-            HStack(spacing: 8) {
-                Circle().fill(Color.white).frame(width: 10, height: 10)
-                Text("Record").font(.system(size: 13, weight: .semibold))
-            }
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 16)
-            .frame(height: 34)
-            .background(Theme.recordRed, in: RoundedRectangle(cornerRadius: 9))
+            Image(systemName: "record.circle.fill")
+                .font(.system(size: 17))
+                .foregroundStyle(Theme.recordRed)
+                .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
