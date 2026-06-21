@@ -81,6 +81,16 @@ cd App && sh install.sh        # → ~/Applications/Advisor.app
 Advisor, then replaces `~/Applications/Advisor.app` and clears its quarantine
 flag.
 
+**Persistent permissions across rebuilds (optional).** Ad-hoc signing gives the
+app a new code hash every build, so macOS treats each rebuild as a new app and
+**drops its Microphone / Screen-Recording grants** — you'd re-approve every time.
+To avoid that, create a one-off self-signed code-signing certificate named
+**`Advisor Dev`** (Keychain Access ▸ Certificate Assistant ▸ *Create a
+Certificate…* → name `Advisor Dev`, Identity Type *Self-Signed Root*, Certificate
+Type *Code Signing*). `install.sh` then re-signs with it automatically, the
+Designated Requirement stays constant, and you grant the permissions just once.
+(A Developer ID cert, if present, is preferred over the self-signed one.)
+
 **Install on another Mac** (macOS 26+, Apple Silicon):
 
 1. Copy `Advisor.app` across (e.g. to `/Applications`).

@@ -14,6 +14,21 @@ final class AudioCapture {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
+    /// The system default input device, or nil if it can't be read. Used to skip a
+    /// redundant (and on macOS 26, input-wedging) device switch when the chosen
+    /// device is already the default.
+    private static func defaultInputDeviceID() -> AudioDeviceID? {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var id = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let err = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &id)
+        return err == noErr ? id : nil
+    }
+
     /// - Parameter echoCancellation: enable Apple voice processing (AEC) so
     ///   speaker output (e.g. call audio) is removed from the mic signal.
     ///   Voice processing fails on some output devices (e.g. multichannel
@@ -41,7 +56,13 @@ final class AudioCapture {
                 throw AdvisorError.audioSetup("voice processing unavailable: \(error)")
             }
         }
-        if var deviceID, let au = input.audioUnit {
+        // `inputNode` is already bound to the system default input, so only switch
+        // the AU's device when the user picked a *different* one. Redundantly
+        // setting CurrentDevice to the device that is already the default wedges
+        // the input on macOS 26 — the engine runs and reports a valid format, but
+        // the tap never fires (no buffers at all). Selecting a genuine non-default
+        // device still goes through the set.
+        if var deviceID, deviceID != Self.defaultInputDeviceID(), let au = input.audioUnit {
             let err = AudioUnitSetProperty(
                 au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                 &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size))

@@ -791,6 +791,33 @@ chevron, no native double-disclosure). Row click / drag / collapse are
 runtime-only and weren't automatable (synthetic clicks need an Accessibility
 grant) — confirm by hand in the running app.
 
+## Mic capture wedge + stable signing (2026-06-21)
+
+Two separate faults surfaced while debugging "the mic stopped working", worth
+recording because both are easy to misdiagnose as each other.
+
+**The silent mic was an AVAudioEngine bug, not permissions.** `AudioCapture`
+selected the input device by setting `kAudioOutputUnitProperty_CurrentDevice` on
+`engine.inputNode.audioUnit` for *any* chosen device. On macOS 26, setting that
+to a device that is **already the system default input** wedges the input: the
+engine starts, `isRunning` is true and `inputFormat` is valid, but the tap never
+fires — zero buffers, no error. (Diagnosed by logging tap callbacks: none.) Fix:
+only switch the AU's device when the chosen one differs from the default
+(`AudioCapture.defaultInputDeviceID()`); the node is already bound to the default,
+so the common case needs no set at all. Selecting a genuine non-default device
+still goes through the property set. Symwise it presents as "system audio
+transcribes but mic is silent" because system audio uses ScreenCaptureKit, a
+different path. *Not* caused by the Studio Display, AEC, or STT.
+
+**TCC grants resetting was the ad-hoc signature.** Separately, the app's mic /
+screen-recording approvals kept lapsing because the local build is ad-hoc signed
+— its code hash rotates every build, so macOS sees each rebuild (and each of the
+duplicate dev-binary / installed-`.app`, which share the bundle id) as a different
+app and drops the grant, while still *showing* it enabled in System Settings.
+Fix: `install.sh` re-signs with a stable identity (a self-signed **`Advisor Dev`**
+cert, or a Developer ID if present), keeping the Designated Requirement constant
+so grants persist. See README. Distribution-grade signing is `notarize.sh`.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
