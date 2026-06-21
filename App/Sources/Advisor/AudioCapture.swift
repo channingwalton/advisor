@@ -23,8 +23,7 @@ final class AudioCapture {
         do {
             try doStart(deviceID: deviceID, echoCancellation: echoCancellation)
         } catch where echoCancellation {
-            FileHandle.standardError.write(
-                Data("[advisor] AEC start failed (\(error)); retrying without AEC\n".utf8))
+            appLog.write("[advisor] AEC start failed (\(error)); retrying without AEC")
             try doStart(deviceID: deviceID, echoCancellation: false)
         }
     }

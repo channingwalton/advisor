@@ -144,9 +144,10 @@ final class SidecarManager {
         }
         errPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            if !data.isEmpty { FileHandle.standardError.write(data) }
+            if !data.isEmpty { appLog.appendSidecar(data) }
         }
         p.terminationHandler = { [weak self] proc in
+            appLog.flushSidecar()   // emit any buffered partial stderr line
             Task { @MainActor in self?.handleTermination(proc.terminationStatus) }
         }
         do {

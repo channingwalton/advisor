@@ -86,8 +86,7 @@ final class AppleSpeechEngine {
                     }
                 }
             } catch {
-                FileHandle.standardError.write(
-                    Data("[advisor] apple-stt(\(name)) results ended: \(error)\n".utf8))
+                appLog.write("[advisor] apple-stt(\(name)) results ended: \(error)")
             }
         }
         log("ready (locale \(locale.identifier))")
@@ -142,6 +141,6 @@ final class AppleSpeechEngine {
     }
 
     private func log(_ message: String) {
-        FileHandle.standardError.write(Data("[advisor] apple-stt(\(name)): \(message)\n".utf8))
+        appLog.write("[advisor] apple-stt(\(name)): \(message)")
     }
 }

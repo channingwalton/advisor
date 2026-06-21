@@ -201,6 +201,16 @@ gated. File search (Grep/Glob) must be scoped to a specific subdirectory — an
 unscoped home-wide search is refused so a recursive pattern can't reach a denied
 path. On **Codex** the sandbox is coarser (see above) — no per-call policy.
 
+## Logs
+
+Diagnostics from both the app and the sidecar are written to
+`~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so
+it also appears in Console.app under **Log Reports**. Tail it live with
+`tail -f ~/Library/Logs/Advisor/advisor.log`. The file rotates at ~5 MB, keeping
+one previous copy (`advisor.log.1`). Diagnostic lines include recognised
+utterance text, so treat it as session data — like the transcripts themselves,
+it stays on your machine.
+
 ## Documents
 
 - [FEATURES.md](FEATURES.md) — the feature list, in plain language

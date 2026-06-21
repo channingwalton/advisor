@@ -105,8 +105,7 @@ final class Recorder {
     /// session has since moved on.
     private func acceptAsync(_ text: String, from source: Source, gen: Int) {
         let spokenEnd = Date()
-        FileHandle.standardError.write(
-            Data("[advisor] apple(\(source)): \"\(text)\"\n".utf8))
+        appLog.write("[advisor] apple(\(source)): \"\(text)\"")
         Task { @MainActor in
             if gen == self.store.sessionGeneration { self.store.volatile[source] = nil }
         }
@@ -130,8 +129,7 @@ final class Recorder {
             recentThem.append((time: now, tokens: tokens))
         case .me:
             if systemActive.load(ordering: .relaxed), isEcho(tokens) {
-                FileHandle.standardError.write(
-                    Data("[advisor] echo suppressed: \"\(text)\"\n".utf8))
+                appLog.write("[advisor] echo suppressed: \"\(text)\"")
                 return
             }
         }
