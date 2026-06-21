@@ -58,19 +58,22 @@ struct SessionsView: View {
     @State private var dropTargetFolder: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                sidebar
-                    .frame(width: 350)
-                    .background(Theme.surfaceTitlebar)
-                Divider()
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.surfaceWindow)
-            }
-        }
+        // Native NavigationSplitView: on macOS 26 (Tahoe) the sidebar column
+        // renders as a floating Liquid-Glass panel over the full-bleed detail —
+        // the "floating sidebar" look (Calendar/Notes). No opaque background on
+        // the sidebar, or it would paint over the glass; the detail keeps its
+        // solid surface. The recording controls live in the sidebar's top block,
+        // aligned with the window controls in the title-bar row.
+        NavigationSplitView(sidebar: {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 320, ideal: 350, max: 420)
+        }, detail: {
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.surfaceWindow)
+        })
+        .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 860, minHeight: 560)
-        .background(Theme.surfaceWindow)
         .onAppear(perform: reload)
         .onReceive(NotificationCenter.default.publisher(for: .advisorSessionsChanged)) { _ in
             reload()
@@ -140,49 +143,56 @@ struct SessionsView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                HStack { Spacer(); newRecordingButton }
                 searchField
                 filterRow
             }
             .padding(.horizontal, 14)
-            // Sit the Record button in the hidden title bar's row, aligned with
-            // the traffic lights (which occupy the top-left) on the far right.
-            .padding(.top, 14)
+            .padding(.top, 8)
             .padding(.bottom, 10)
-            Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4, pinnedViews: [.sectionHeaders]) {
-                    if filtered.isEmpty && visibleFolders.isEmpty {
-                        Text(query.isEmpty ? "No previous sessions yet." : "No matches.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textTertiary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14).padding(.top, 16)
-                    }
-                    if showFoldersBar { foldersBar }
-                    ForEach(visibleFolders, id: \.self) { folder in
-                        Section {
-                            if !collapsedFolders.contains(folder) {
-                                ForEach(sessions(in: folder)) { session in
-                                    sessionRow(session)
-                                }
+            // A real `.sidebar` List, not a custom ScrollView — this is what
+            // makes macOS 26 render the column as a floating Liquid-Glass panel.
+            // Rows keep their bespoke look via cleared row insets/separators/
+            // background; the glass shows through (`scrollContentBackground`).
+            List {
+                if filtered.isEmpty && visibleFolders.isEmpty {
+                    Text(query.isEmpty ? "No previous sessions yet." : "No matches.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.top, 16)
+                        .plainSidebarRow()
+                }
+                if showFoldersBar { foldersBar.plainSidebarRow() }
+                ForEach(visibleFolders, id: \.self) { folder in
+                    Section {
+                        if !collapsedFolders.contains(folder) {
+                            ForEach(sessions(in: folder)) { session in
+                                sessionRow(session).plainSidebarRow()
                             }
-                        } header: {
-                            folderHeader(folder)
                         }
-                    }
-                    ForEach(grouped, id: \.label) { group in
-                        Section {
-                            ForEach(group.sessions) { session in
-                                sessionRow(session)
-                            }
-                        } header: {
-                            dateHeader(group.label)
-                        }
+                    } header: {
+                        folderHeader(folder).plainSidebarRow()
                     }
                 }
-                .padding(.bottom, 12)
+                ForEach(grouped, id: \.label) { group in
+                    Section {
+                        ForEach(group.sessions) { session in
+                            sessionRow(session).plainSidebarRow()
+                        }
+                    } header: {
+                        dateHeader(group.label).plainSidebarRow()
+                    }
+                }
             }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 0)
+        }
+        // Record lives in the sidebar's toolbar so it sits in the title-bar row,
+        // aligned with the window controls (the Calendar layout the user asked
+        // for) rather than a row below them.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { newRecordingButton }
         }
     }
 
@@ -636,6 +646,20 @@ struct SessionsView: View {
     /// Fallback title (no context in the note): date + time.
     private static func rowTitle(_ date: Date) -> String {
         date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+    }
+}
+
+// MARK: - Sidebar list-row styling
+
+private extension View {
+    /// Strip a List row's default chrome (insets, separator, background) so the
+    /// sidebar's bespoke rows and headers render as before while the column
+    /// itself stays a real `.sidebar` List (floating glass).
+    func plainSidebarRow() -> some View {
+        self
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 }
 

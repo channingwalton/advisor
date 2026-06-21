@@ -572,7 +572,8 @@ shortcut belongs in the menu bar, and there's no document to "new"). It's a
 from the environment, which the `App` struct can't. The Sessions window keeps
 `.hiddenTitleBar`; with the panel gone its traffic lights now overlay the
 sidebar's top-left, so the search/filter block gains `.padding(.top, 38)` to
-clear them. The top strip stays draggable (hidden title bar) and `openWindow`'s
+clear them (superseded 2026-06-21 — the toolbar now owns that row; see *Floating
+sidebar*). The top strip stays draggable (hidden title bar) and `openWindow`'s
 single-instance `Window` semantics are unchanged — Cmd-N just brings an existing
 recording window forward.
 
@@ -763,6 +764,32 @@ revisit if card bodies grow richer. `MarkdownUI` is now unused and the dependenc
 is dropped. The footer's discrete source `Link`s (live feed) keep a SwiftUI
 `linkCursor()` (`NSCursor.pointingHand` on hover) since they aren't `NSTextView`
 links.
+
+## Floating sidebar (2026-06-21)
+
+`SessionsView` moved from a hand-rolled `HStack { sidebar(350) | Divider |
+detail }` to a native **`NavigationSplitView`**. On macOS 26 (Tahoe) that renders
+the sidebar column as a floating Liquid-Glass panel over the full-bleed detail —
+the Calendar/Notes look — which two opaque side-by-side columns could never do.
+The float is tied to the column being a real **`.sidebar` `List`**, so the
+custom `ScrollView`/`LazyVStack` became a `List` (same `Section`s for folders and
+date groups); rows keep their bespoke look via `plainSidebarRow()` (cleared row
+insets/separator/background) and the glass shows through
+(`.scrollContentBackground(.hidden)`). Selection, folder collapse and row
+drag-to-folder are unchanged code, just re-homed in the `List`.
+
+The **Record** button moved out of the sidebar's content top block into the
+sidebar `.toolbar` (`ToolbarItem(.primaryAction)`), so it sits in the title-bar
+row aligned with the traffic lights (the user's ask) rather than a row below
+them. Knock-ons, accepted: the sidebar is now user-resizable (320–420, was a
+fixed 350); section headers are no longer pinned/sticky (was
+`pinnedViews: [.sectionHeaders]`) — native sidebar behaviour.
+
+Layout-only change, verified by screenshotting the dev build (sidebar floats with
+a soft shadow, no hard divider; Record on the traffic-light row; single folder
+chevron, no native double-disclosure). Row click / drag / collapse are
+runtime-only and weren't automatable (synthetic clicks need an Accessibility
+grant) — confirm by hand in the running app.
 
 ## Revisit as it grows
 
