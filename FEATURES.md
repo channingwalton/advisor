@@ -84,9 +84,10 @@ The app opens on a master/detail browser of your past sessions:
 - **Ask-and-append** — ask a question about a past session; the answer streams
   in and is appended to that session's note under a **Follow-ups** heading, so
   the saved transcript grows with the questions you ask of it.
-- **Rename, reveal & delete** — give a session a short name for an
-  easier-to-scan list, reveal its markdown file in Finder, or delete it (behind
-  a confirmation).
+- **Rename, export, reveal & delete** — give a session a short name for an
+  easier-to-scan list, export a copy of its markdown, reveal its markdown file
+  in Finder, or delete it (behind a confirmation). Available from the detail
+  header's `…` menu and from each list row's right-click menu.
 
 ## Organisation
 

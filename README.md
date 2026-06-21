@@ -130,9 +130,11 @@ inline, as in the live view). The detail header's **Tags** chip applies or
 removes tags (picking from your library). Give a session a name with the
 `…` menu → **Rename**
 (top right of the detail) — a short label for an easier-to-scan list; leave it
-blank to fall back to the context. The same menu has **Reveal in Finder** (opens
+blank to fall back to the context. The same menu has **Export…** (save a copy of
+the markdown elsewhere), **Reveal in Finder** (opens
 the session's markdown file) and **Delete** (behind a confirmation — it
-permanently removes the note from disk); the live session can't be deleted.
+permanently removes the note from disk); the live session can't be deleted. The
+same actions are also on each list row's **right-click** menu.
 Ask a question about the selected session in the box at the bottom: the answer
 streams in and, once finished, is appended to that session's note under a
 `# Follow-ups` heading, so the saved transcript grows with

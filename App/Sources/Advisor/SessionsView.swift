@@ -31,6 +31,14 @@ struct SessionsView: View {
     @State private var tagLibrary: [SavedTag] = []
     @Environment(\.openWindow) private var openWindow
 
+    /// For the row context menu's live-note awareness (mirrors the detail pane).
+    @ObservedObject private var ctx = TranscriptWindowContext.shared
+    // Rename/delete are driven from the right-clicked row, so their alerts are
+    // presented against that row rather than the selected one.
+    @State private var renaming: LoadedSession?
+    @State private var renameText = ""
+    @State private var deleting: LoadedSession?
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -58,6 +66,26 @@ struct SessionsView: View {
         // so the detail and sidebar stay consistent.
         .onChange(of: query) { _, _ in reconcileSelection() }
         .onChange(of: thisWeekOnly) { _, _ in reconcileSelection() }
+        .alert("Rename session", isPresented: presenting($renaming), presenting: renaming) { session in
+            TextField("Session name", text: $renameText)
+            Button("Save") { renameSession(session.file, to: renameText, ctx: ctx) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Give this session a name. Leave blank to fall back to its context.")
+        }
+        .alert("Delete session", isPresented: presenting($deleting), presenting: deleting) { session in
+            Button("Delete", role: .destructive) { deleteSession(session.file) }
+            Button("Cancel", role: .cancel) {}
+        } message: { session in
+            Text("Delete “\(session.detail.title)”? This permanently removes its transcript "
+                + "and cards, and can't be undone.")
+        }
+    }
+
+    /// Bridge an optional-item state to the `Bool` an `.alert` wants: presented
+    /// when the item is set, cleared back to `nil` on dismiss.
+    private func presenting<T>(_ item: Binding<T?>) -> Binding<Bool> {
+        Binding(get: { item.wrappedValue != nil }, set: { if !$0 { item.wrappedValue = nil } })
     }
 
     private func reconcileSelection() {
@@ -227,6 +255,24 @@ struct SessionsView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 8)
+        .contextMenu { rowMenu(session) }
+    }
+
+    /// Right-click actions for a list row — the same set as the detail pane's
+    /// ellipsis menu (issue #20), sharing its action helpers.
+    @ViewBuilder private func rowMenu(_ session: LoadedSession) -> some View {
+        Button("Rename…") {
+            renameText = session.detail.name
+            renaming = session
+        }
+        Button("Export…") { exportSession(session.file) }
+        Button("Reveal in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([session.file.url])
+        }
+        Divider()
+        // The live note is exempt: its writer would just recreate the deleted file.
+        Button("Delete…", role: .destructive) { deleting = session }
+            .disabled(session.file.url == ctx.liveFileURL)
     }
 
     /// Coloured pills for a row's tags. Only tags still in the library render —
@@ -344,6 +390,51 @@ struct SessionsView: View {
     }
 }
 
+// MARK: - Session actions (shared by the browser list's context menu and the
+// detail pane's ellipsis menu, so their live-note handling can't diverge).
+
+/// Live-note-aware rename: routes through the recording writer when `file` is the
+/// note being recorded right now (so its next debounced rewrite carries the new
+/// name), else edits the saved note on disk. Posts `advisorSessionsChanged` so the
+/// browser reloads from disk.
+@MainActor private func renameSession(_ file: SessionFile, to name: String, ctx: TranscriptWindowContext) {
+    let new = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    if file.url == ctx.liveFileURL, let writer = ctx.writer {
+        writer.renameOwnedNote(new)
+    } else {
+        SessionArchive.setName(new, in: file)
+    }
+    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+}
+
+/// Delete a saved note from disk and reload the browser. The live note is never
+/// passed here — both menus disable its Delete entry — because its writer would
+/// just recreate the file.
+@MainActor private func deleteSession(_ file: SessionFile) {
+    SessionArchive.delete(file)
+    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+}
+
+/// Copy a session note to a user-chosen destination. Atomic write (read source,
+/// then replace) never pre-deletes the destination, so a failure can't leave a
+/// chosen file gone, and exporting onto the source itself is harmless. Failures
+/// surface as a modal alert.
+@MainActor private func exportSession(_ file: SessionFile) {
+    let panel = NSSavePanel()
+    panel.title = "Export Session"
+    panel.nameFieldStringValue = file.url.lastPathComponent
+    panel.canCreateDirectories = true
+    guard panel.runModal() == .OK, let dest = panel.url else { return }
+    do {
+        try Data(contentsOf: file.url).write(to: dest, options: .atomic)
+    } catch {
+        let alert = NSAlert()
+        alert.messageText = "Export failed"
+        alert.informativeText = error.localizedDescription
+        alert.runModal()
+    }
+}
+
 /// The right-hand detail: a selected session rendered like the live window —
 /// header + meta, the cards it surfaced, the questions asked of it, and the full
 /// transcript — with the ask bar kept (answers append to the note on disk).
@@ -411,7 +502,7 @@ private struct SessionDetailPane: View {
                         renameText = detail.name
                         renaming = true
                     }
-                    Button("Export…", action: exportSession)
+                    Button("Export…") { exportSession(file) }
                     Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([file.url])
                     }
@@ -440,7 +531,7 @@ private struct SessionDetailPane: View {
             Text("Give this session a name. Leave blank to fall back to its context.")
         }
         .alert("Delete session", isPresented: $confirmingDelete) {
-            Button("Delete", role: .destructive, action: deleteSession)
+            Button("Delete", role: .destructive) { deleteSession(file) }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Delete “\(detail.title)”? This permanently removes its transcript "
@@ -481,26 +572,8 @@ private struct SessionDetailPane: View {
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
-    /// Delete this session's note from disk, then refresh the browser (which drops
-    /// the row and reconciles the selection). Guarded against the live note by the
-    /// menu's `disabled(isLive)`.
-    private func deleteSession() {
-        SessionArchive.delete(file)
-        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
-    }
-
-    /// Persist the renamed title. The live/just-finished note is renamed through
-    /// its writer (so the rewrite carries the name); any other note is edited on
-    /// disk directly. Either way, reload the browser from disk.
-    private func saveName() {
-        let new = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if isLive, let writer = ctx.writer {
-            writer.renameOwnedNote(new)
-        } else {
-            SessionArchive.setName(new, in: file)
-        }
-        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
-    }
+    /// Persist the renamed title via the shared, live-note-aware helper.
+    private func saveName() { renameSession(file, to: renameText, ctx: ctx) }
 
     private var metaLine: String {
         var parts: [String] = []
@@ -678,21 +751,5 @@ private struct SessionDetailPane: View {
             return
         }
         question = ""
-    }
-
-    private func exportSession() {
-        let panel = NSSavePanel()
-        panel.title = "Export Session"
-        panel.nameFieldStringValue = file.url.lastPathComponent
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let dest = panel.url else { return }
-        do {
-            // Atomic write (read source, then replace) — never pre-deletes the
-            // destination, so a failure can't leave a chosen file gone, and
-            // exporting onto the source itself is harmless.
-            try Data(contentsOf: file.url).write(to: dest, options: .atomic)
-        } catch {
-            askNote = "Export failed: \(error.localizedDescription)"
-        }
     }
 }

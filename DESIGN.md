@@ -656,6 +656,24 @@ sessions started after the change use the new folder, so this only affects an
 in-flight recording; blocking the change mid-session was considered and dropped
 as over-scoped.
 
+## Session list right-click menu (2026-06-21, issue #20)
+
+The browser list rows get a `.contextMenu` with the same four actions as the
+detail pane's `…` menu — Rename / Export / Reveal in Finder / Delete — so you can
+act on a session without first selecting it. The menu acts on the *right-clicked*
+row (the `LoadedSession` captured in the closure), not the selected one, so its
+Rename/Delete alerts are presented against optional `renaming`/`deleting` row
+state in `SessionsView`, separate from the detail pane's own alert state.
+
+The shared part is the *actions*, not the menu chrome: `renameSession` /
+`deleteSession` / `exportSession` are file-private `@MainActor` free functions in
+`SessionsView.swift`, called by both surfaces, so the live-note handling (rename
+routes through the writer; delete is `disabled` for the live note) can't diverge.
+Export now reports failures via an `NSAlert` modal rather than the detail pane's
+inline `askNote`, since the row has no such inline surface — one error path for
+both. This keeps the "actions belong in a menu, not per-row icons" decision from
+the Delete section above, just adding a second way to open that menu.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
