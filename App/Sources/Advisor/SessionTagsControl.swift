@@ -84,6 +84,8 @@ struct SessionTagsEditor: View {
 struct TagsChip: View {
     let tags: [String]
     let library: [SavedTag]
+    /// Hide the "Tags" label (icon + count only) when the host strip is narrow.
+    var compact: Bool = false
     let onChange: ([String]) -> Void
 
     @State private var show = false
@@ -93,8 +95,11 @@ struct TagsChip: View {
             HStack(spacing: 6) {
                 Image(systemName: "tag").font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
-                Text("Tags").font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textBody)
+                if !compact {
+                    Text("Tags").font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textBody)
+                        .lineLimit(1)
+                }
                 if !tags.isEmpty {
                     Text("\(tags.count)").font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.accent)

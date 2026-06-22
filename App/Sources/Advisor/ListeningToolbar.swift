@@ -4,6 +4,8 @@ import SwiftUI
 /// timer + mic mute + stop) and audio-source button. Right: Focus chip, Auto-cards
 /// toggle, Float, Sessions. Idle collapses the cluster to a single Listen pill; a
 /// stopped-but-resumable session shows a frozen-timer Resume cluster (issue #6).
+/// When the window is too narrow to fit the labelled chips, the secondary controls
+/// collapse to icon-only (ViewThatFits) rather than letting their text wrap/squash.
 struct ListeningToolbar: View {
     @ObservedObject var store: TranscriptStore
     let sessionStart: Date?
@@ -55,14 +57,14 @@ struct ListeningToolbar: View {
             }
             audioSourceButton
             Spacer(minLength: 8)
-            nameChip
-            focusChip
-            TagsChip(tags: sessionTags, library: tagLibrary) { sessionTags = $0 }
-            autoCardsToggle
-            hideTranscriptButton
-            summariseButton
-            floatButton
-            exportButton
+            // Drop the chip labels (icon-only) when the toolbar is too narrow to
+            // fit them, rather than letting the text wrap/squash. ViewThatFits picks
+            // the labelled layout when it fits the leftover width, else the compact
+            // one — adapting to the (variable-length) audio-source name.
+            ViewThatFits(in: .horizontal) {
+                secondaryControls(compact: false)
+                secondaryControls(compact: true)
+            }
         }
         .padding(.horizontal, 14)
         .frame(height: Theme.Metric.toolbarHeight)
@@ -70,6 +72,21 @@ struct ListeningToolbar: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 0.5) }
         // Suppress the system keyboard-focus ring on the toolbar's custom controls.
         .focusEffectDisabled()
+    }
+
+    /// The right-hand control group. `compact` hides the chip text labels (keeping
+    /// the icons and indicators) so the strip degrades gracefully when narrow.
+    private func secondaryControls(compact: Bool) -> some View {
+        HStack(spacing: 12) {
+            nameChip(compact: compact)
+            focusChip(compact: compact)
+            TagsChip(tags: sessionTags, library: tagLibrary, compact: compact) { sessionTags = $0 }
+            autoCardsToggle(compact: compact)
+            hideTranscriptButton
+            summariseButton
+            floatButton
+            exportButton
+        }
     }
 
     // MARK: record cluster
@@ -230,14 +247,22 @@ struct ListeningToolbar: View {
     /// A dedicated control for the optional session name — kept distinct from
     /// Context so it's where someone would look to name a session. Shows the name
     /// once set; click to edit (live too).
-    private var nameChip: some View {
+    private func nameChip(compact: Bool) -> some View {
         Button { showName.toggle() } label: {
             HStack(spacing: 6) {
                 Image(systemName: "tag").font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
-                Text(nameLabel).font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(sessionName.isEmpty ? Theme.textBody : Theme.textStrong)
-                    .lineLimit(1).truncationMode(.tail)
+                if compact {
+                    // A small accent dot signals a name has been set (the label is
+                    // hidden), mirroring the Context chip.
+                    if !sessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Circle().fill(Theme.accent).frame(width: 5, height: 5)
+                    }
+                } else {
+                    Text(nameLabel).font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(sessionName.isEmpty ? Theme.textBody : Theme.textStrong)
+                        .lineLimit(1).truncationMode(.tail)
+                }
             }
             .padding(.horizontal, 11)
             .frame(height: 34)
@@ -266,13 +291,16 @@ struct ListeningToolbar: View {
         .help("Session name")
     }
 
-    private var focusChip: some View {
+    private func focusChip(compact: Bool) -> some View {
         Button { showFocus.toggle() } label: {
             HStack(spacing: 6) {
                 Image(systemName: "text.bubble").font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
-                Text("Context").font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textBody)
+                if !compact {
+                    Text("Context").font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textBody)
+                        .lineLimit(1)
+                }
                 // A small accent dot signals context has been set.
                 if !sessionContext.isEmpty {
                     Circle().fill(Theme.accent).frame(width: 5, height: 5)
@@ -354,15 +382,20 @@ struct ListeningToolbar: View {
 
     // MARK: auto cards / float / sessions
 
-    private var autoCardsToggle: some View {
+    private func autoCardsToggle(compact: Bool) -> some View {
         HStack(spacing: 6) {
-            Text("Auto cards").font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+            if !compact {
+                Text("Auto cards").font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+            }
             Toggle("", isOn: $autoCards)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .tint(Theme.accent)
                 .controlSize(.small)
         }
+        // The label is dropped when compact, so name the control via help.
+        .help("Auto cards")
     }
 
     /// Toggle the transcript off so the feed shows only cards (experiment).
