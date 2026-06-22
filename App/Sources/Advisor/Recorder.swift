@@ -10,7 +10,9 @@ struct Utterance: Identifiable, Equatable {
     let id = UUID()
     let time: Date
     let source: Source
-    let text: String
+    /// Mutable so a transcription error can be corrected in place (issue #32)
+    /// without losing the line's identity, time, or source.
+    var text: String
     let latencyMs: Int
 }
 
@@ -41,6 +43,38 @@ final class TranscriptStore: ObservableObject {
     /// Remove a card from the stream.
     func dismissCard(_ id: String) {
         cards.removeAll { $0.id == id }
+    }
+
+    /// Correct a transcription error in place (issue #32): replace the
+    /// `occurrence`-th match (0-based, within the displayed paragraph) of
+    /// `original` with `replacement`, across the run of utterances
+    /// `utteranceIds` that composes that paragraph, in document order. Text-only —
+    /// the line keeps its id/time/source and nothing is re-sent to the sidecar;
+    /// the session writer's debounced rewrite persists the edited text.
+    func correctOccurrence(
+        _ occurrence: Int, of original: String, with replacement: String,
+        inParagraph utteranceIds: [UUID]
+    ) {
+        let indices = utteranceIds.compactMap { id in utterances.firstIndex { $0.id == id } }
+        let texts = indices.map { utterances[$0].text }
+        guard
+            let updated = TranscriptCorrection.replacingOccurrence(
+                occurrence, of: original, with: replacement, in: texts)
+        else { return }
+        for (slot, index) in indices.enumerated() where updated[slot] != texts[slot] {
+            utterances[index].text = updated[slot]
+        }
+    }
+
+    /// Correct every occurrence of `original` across the whole session's
+    /// transcript (issue #32). Text-only, like `correctOccurrence`.
+    func correctAll(of original: String, with replacement: String) {
+        guard !original.isEmpty else { return }
+        for index in utterances.indices {
+            let corrected = utterances[index].text.replacingOccurrences(
+                of: original, with: replacement)
+            if corrected != utterances[index].text { utterances[index].text = corrected }
+        }
     }
 }
 

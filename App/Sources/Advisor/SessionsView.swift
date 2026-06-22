@@ -927,11 +927,17 @@ private struct SessionDetailPane: View {
     private var transcript: some View {
         VStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
             sectionLabel("TRANSCRIPT", count: nil)
-            ForEach(Array(detail.blocks.enumerated()), id: \.offset) { _, block in
+            ForEach(Array(detail.blocks.enumerated()), id: \.offset) { offset, block in
                 switch block {
                 case .paragraph(let text):
+                    let paragraphIndex = paragraphOrdinal(before: offset)
                     SelectableTranscriptText(
-                        text: text, toolTip: "", actions: [], onAction: { _, _ in })
+                        text: text, toolTip: "", actions: [], onAction: { _, _ in },
+                        // The live note is still owned by its writer; correcting it
+                        // here would be clobbered, so the menu is hidden until saved.
+                        onCorrect: isLive
+                            ? nil
+                            : { request in apply(request, toParagraph: paragraphIndex) })
                 case .card(let markdown):
                     cardBlock(markdown)
                 case .heading(let title) where title != "Transcript":
@@ -954,6 +960,32 @@ private struct SessionDetailPane: View {
                 RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
                     .stroke(Theme.hairline, lineWidth: 0.5))
             .padding(.vertical, 4)
+    }
+
+    /// The 0-based index of the paragraph at block `offset` among paragraph blocks
+    /// only — the index `TranscriptCorrection` keys on (it groups paragraphs the
+    /// same way `TranscriptDoc` does, skipping cards and headings) (issue #32).
+    private func paragraphOrdinal(before offset: Int) -> Int {
+        detail.blocks[..<offset].reduce(0) {
+            if case .paragraph = $1 { return $0 + 1 }
+            return $0
+        }
+    }
+
+    /// Apply a transcription correction to the saved note on disk, then refresh
+    /// the parent list cache (and so this pane's `detail`) so the edit shows.
+    private func apply(_ request: TranscriptCorrectionRequest, toParagraph paragraphIndex: Int) {
+        let changed: Bool
+        switch request.scope {
+        case .thisOccurrence:
+            changed = SessionArchive.correctOccurrence(
+                request.occurrenceInParagraph, of: request.original, with: request.replacement,
+                inParagraph: paragraphIndex, of: file)
+        case .allInSession:
+            changed = SessionArchive.correctAll(
+                of: request.original, with: request.replacement, in: file)
+        }
+        if changed { NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil) }
     }
 
     // MARK: shared bits

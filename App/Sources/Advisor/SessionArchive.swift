@@ -452,4 +452,38 @@ enum SessionArchive {
             return false
         }
     }
+
+    /// Correct a transcription error in a saved note (issue #32): replace the
+    /// `occurrence`-th match of `original` within the transcript paragraph at
+    /// `paragraphIndex` (counting only paragraph blocks) with `replacement`, then
+    /// write the note back. Frontmatter and cards are left untouched. Returns false
+    /// if nothing changed or the write fails. Saved-note only — the live note is
+    /// corrected through its `TranscriptStore` instead, to avoid the writer clobber.
+    @discardableResult
+    static func correctOccurrence(
+        _ occurrence: Int, of original: String, with replacement: String,
+        inParagraph paragraphIndex: Int, of file: SessionFile
+    ) -> Bool {
+        let existing = contents(of: file)
+        let updated = TranscriptCorrection.replacingOccurrence(
+            occurrence, of: original, with: replacement,
+            inParagraph: paragraphIndex, ofMarkdown: existing)
+        guard updated != existing else { return false }
+        return (try? updated.write(to: file.url, atomically: true, encoding: .utf8)) != nil
+    }
+
+    /// Correct every occurrence of `original` in a saved note's transcript with
+    /// `replacement` (issue #32). Only the transcript utterance lines change —
+    /// frontmatter, cards, and follow-ups are left byte-identical. Returns false if
+    /// nothing changed or the write fails.
+    @discardableResult
+    static func correctAll(
+        of original: String, with replacement: String, in file: SessionFile
+    ) -> Bool {
+        let existing = contents(of: file)
+        let updated = TranscriptCorrection.replacingAllInTranscript(
+            of: original, with: replacement, inMarkdown: existing)
+        guard updated != existing else { return false }
+        return (try? updated.write(to: file.url, atomically: true, encoding: .utf8)) != nil
+    }
 }

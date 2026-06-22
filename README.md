@@ -146,7 +146,10 @@ sentence) to run **Answer / Context / Fact check** on it directly — the same
 actions the assistant triggers automatically, gated by the same preference
 toggles, with the resulting card anchored under that line. Once a card has
 finished, a follow-up box appears on it — ask a question about the card and the
-answer is appended in place, so a card becomes a short thread. The menu also lets
+answer is appended in place, so a card becomes a short thread. To fix a
+mis-transcribed word, highlight it and right-click ▸ **Correct "…"** (just that
+instance) or **Replace all "…"** (every occurrence in the session); type the
+correction and it's saved to the transcript in place. The menu also lets
 you copy the text. Each card can be collapsed/expanded or dismissed (fact-checks
 start collapsed); dismissing a card that's still researching cancels its lane.
 The **mic** button in the record cluster mutes the local microphone

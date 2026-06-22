@@ -404,6 +404,9 @@ struct TranscriptView: View {
         let toolTip: String
         /// Last utterance in the run — manual right-click cards anchor here.
         let anchorId: String
+        /// Every utterance in the run, in order — a correction maps a paragraph
+        /// selection back to the utterance(s) that compose it (issue #32).
+        let utteranceIds: [UUID]
     }
 
     private enum RenderItem: Identifiable {
@@ -432,7 +435,8 @@ struct TranscriptView: View {
                         id: first.id.uuidString,
                         text: buf.map(\.text).joined(separator: " "),
                         toolTip: first.time.formatted(date: .omitted, time: .standard),
-                        anchorId: last.id.uuidString)))
+                        anchorId: last.id.uuidString,
+                        utteranceIds: buf.map(\.id))))
             buf.removeAll()
         }
         for item in feed {
@@ -477,6 +481,17 @@ struct TranscriptView: View {
                                 onAction: { kind, selection in
                                     services.sidecar.sendAction(
                                         kind, text: selection, triggerId: p.anchorId)
+                                },
+                                onCorrect: { request in
+                                    switch request.scope {
+                                    case .thisOccurrence:
+                                        store.correctOccurrence(
+                                            request.occurrenceInParagraph, of: request.original,
+                                            with: request.replacement, inParagraph: p.utteranceIds)
+                                    case .allInSession:
+                                        store.correctAll(
+                                            of: request.original, with: request.replacement)
+                                    }
                                 }
                             )
                             .id(item.id)
@@ -807,6 +822,18 @@ struct TranscriptAction {
     let kind: String
 }
 
+/// A transcription correction chosen from the right-click menu (issue #32).
+/// `occurrenceInParagraph` is the 0-based index of the highlighted span among
+/// matches of `original` in the displayed paragraph — used only to pin the exact
+/// instance for `.thisOccurrence`; `.allInSession` ignores it.
+struct TranscriptCorrectionRequest {
+    enum Scope { case thisOccurrence, allInSession }
+    let original: String
+    let replacement: String
+    let occurrenceInParagraph: Int
+    let scope: Scope
+}
+
 /// Selectable transcript line backed by an NSTextView, so the right-click menu
 /// can act on the exact highlighted span (SwiftUI's `Text` selection is opaque
 /// to a `.contextMenu`). Falls back to the whole line when nothing is selected.
@@ -816,6 +843,9 @@ struct SelectableTranscriptText: NSViewRepresentable {
     let actions: [TranscriptAction]
     /// (card kind, selected text) — fired when an AI action is chosen.
     let onAction: (String, String) -> Void
+    /// Fired when a correction is confirmed (issue #32). Nil hides the correction
+    /// menu items — e.g. the still-being-written live note in the browser.
+    var onCorrect: ((TranscriptCorrectionRequest) -> Void)? = nil
 
     func makeNSView(context: Context) -> ActionTextView {
         // Convenience init builds a TextKit stack the view *owns* (storage
@@ -873,6 +903,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
         tv.toolTip = toolTip
         tv.menuActions = actions
         tv.onAction = onAction
+        tv.onCorrect = onCorrect
         // New text at the same width still changes the line count.
         tv.invalidateIntrinsicContentSize()
     }
@@ -884,6 +915,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
 final class ActionTextView: NSTextView {
     var menuActions: [TranscriptAction] = []
     var onAction: ((String, String) -> Void)?
+    var onCorrect: ((TranscriptCorrectionRequest) -> Void)?
     private var lastLaidOutWidth: CGFloat = -1
 
     /// Height that fits the text at the current width; width stays flexible
@@ -931,6 +963,22 @@ final class ActionTextView: NSTextView {
         }
         if !menuActions.isEmpty { menu.addItem(.separator()) }
 
+        // Correction (issue #32): only on a real highlight, and only where a
+        // handler is wired (live feed + saved non-live notes).
+        if onCorrect != nil, selectedRange().length > 0 {
+            let correct = NSMenuItem(
+                title: "Correct “\(label)”…", action: #selector(correctThisOccurrence(_:)),
+                keyEquivalent: "")
+            correct.target = self
+            menu.addItem(correct)
+            let all = NSMenuItem(
+                title: "Replace all “\(label)”…", action: #selector(correctAllOccurrences(_:)),
+                keyEquivalent: "")
+            all.target = self
+            menu.addItem(all)
+            menu.addItem(.separator())
+        }
+
         let copy = NSMenuItem(title: "Copy", action: #selector(copyText(_:)), keyEquivalent: "")
         copy.target = self
         menu.addItem(copy)
@@ -942,6 +990,50 @@ final class ActionTextView: NSTextView {
         let selection = effectiveSelection.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selection.isEmpty else { return }
         onAction?(kind, selection)
+    }
+
+    @objc private func correctThisOccurrence(_ sender: NSMenuItem) {
+        beginCorrection(scope: .thisOccurrence)
+    }
+
+    @objc private func correctAllOccurrences(_ sender: NSMenuItem) {
+        beginCorrection(scope: .allInSession)
+    }
+
+    /// Resolve the highlighted span to a correction request and prompt for the
+    /// replacement. The selected text is trimmed of surrounding whitespace, and
+    /// its paragraph-local occurrence index is taken from where the trimmed text
+    /// starts — so the same word selected twice still pins the right instance.
+    private func beginCorrection(scope: TranscriptCorrectionRequest.Scope) {
+        let range = selectedRange()
+        guard range.length > 0 else { return }
+        let raw = (string as NSString).substring(with: range)
+        let leading = raw.prefix { $0 == " " || $0 == "\t" || $0 == "\n" }.count
+        let original = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !original.isEmpty else { return }
+        let occurrence = TranscriptCorrection.occurrenceIndex(
+            of: original, before: range.location + leading, in: string)
+        guard let replacement = promptForReplacement(of: original), replacement != original
+        else { return }
+        onCorrect?(
+            TranscriptCorrectionRequest(
+                original: original, replacement: replacement,
+                occurrenceInParagraph: occurrence, scope: scope))
+    }
+
+    /// Modal text prompt prefilled with the word being corrected. Nil on cancel.
+    private func promptForReplacement(of original: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Correct transcription"
+        alert.informativeText = "Replace “\(original)” with:"
+        let field = NSTextField(string: original)
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Correct")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        return field.stringValue
     }
 
     @objc private func copyText(_ sender: NSMenuItem) {

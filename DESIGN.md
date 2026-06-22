@@ -818,6 +818,43 @@ Fix: `install.sh` re-signs with a stable identity (a self-signed **`Advisor Dev`
 cert, or a Developer ID if present), keeping the Designated Requirement constant
 so grants persist. See README. Distribution-grade signing is `notarize.sh`.
 
+## Correct a transcription word/phrase (2026-06-22, issue #32)
+
+On-device STT mis-hears words; you can now fix them in place. Highlight text in a
+transcript paragraph and right-click ▸ **Correct "…"** or **Replace all "…"**, type
+the replacement, and it's written back. Scope is chosen in the menu (this
+occurrence vs every occurrence in the session) — the user asked to pick per
+correction rather than have a fixed rule.
+
+The maths lives in a pure, unit-tested `TranscriptCorrection` (no UI), shared by
+both surfaces:
+
+- **Live feed** — the source of truth is the in-memory `TranscriptStore`. A
+  paragraph carries its `utteranceIds`; the menu reports the highlighted span's
+  0-based occurrence index *within that paragraph* (`occurrenceIndex`, UTF-16 so
+  it matches `NSTextView` offsets), and `TranscriptStore.correctOccurrence`
+  rewrites the right utterance's `text` in place (now `var`, keeping id/time/
+  source). The writer's existing `onChange(of: utterances)` debounce persists it.
+  Correction is **text-only** — nothing is re-sent to the sidecar, so no cards
+  regenerate.
+- **Saved sessions** — the source of truth is the markdown file.
+  `SessionArchive.correctOccurrence/correctAll` apply the same primitives to the
+  file body and post `advisorSessionsChanged` to reload. Only the transcript
+  utterance lines (`- HH:MM:SS …`) change; frontmatter, cards, and follow-up
+  blockquotes are left byte-identical. The still-being-written **live note is
+  excluded** in the browser (`onCorrect == nil` when `isLive`), same guard the
+  ask-and-append path uses, to avoid the two-writer clobber.
+
+Paragraph indexing for "this occurrence" must stay in lock-step with how
+`TranscriptDoc` groups display blocks (cards/headings/2s-gap breaks, empty-text
+lines skipped) — the grouping is mirrored in `TranscriptCorrection` and guarded by
+a test, since a drift would silently correct the wrong line.
+
+Out of scope (documented limitation): a selection that straddles a paragraph join
+boundary — a phrase split across two utterances / two transcript lines by the 2s
+rule — isn't matched for single-occurrence correction (it's counted per line).
+Whole-session replace is unaffected.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
