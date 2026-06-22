@@ -10,6 +10,28 @@ conversation on demand (live or from a saved session). The Obsidian vault,
 the web, and connected tools are its sources; nothing is recorded, only
 transcripts are kept.
 
+## Getting started
+
+1. **Install.** Drag `Advisor.app` to `/Applications` and open it. (The first
+   time, right-click ▸ **Open** to clear macOS's unsigned-app warning.)
+2. **Grant permissions.** On first launch Advisor asks for **Microphone** and
+   **Screen & System Audio Recording** — both are needed to hear the
+   conversation.
+3. **Choose your AI backend.** Open Preferences (⌘,) and pick a provider under
+   the agent backend setting:
+   - **Claude** — uses your logged-in Claude Code CLI (a Claude subscription).
+   - **Codex** — uses your logged-in Codex CLI (an OpenAI/ChatGPT subscription).
+
+   Pick whichever you already have signed in on this Mac; that's all the
+   configuration most people need. (No CLI login? Switch **Authentication** to
+   *API key* in Preferences and paste an Anthropic or OpenAI key instead —
+   billed to that key.)
+4. **Record.** Click **Record**, then **Listen**. The conversation transcribes
+   live and Advisor surfaces answer, context and fact-check cards as it goes.
+
+That's it. Everything stays on your Mac — nothing is uploaded except the
+research queries your chosen AI provider runs.
+
 ## How it works
 
 ```
