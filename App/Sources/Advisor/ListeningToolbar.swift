@@ -33,6 +33,10 @@ struct ListeningToolbar: View {
     /// Whether the current session has anything to export (gates the button).
     let canExport: Bool
     let onExport: () -> Void
+    /// Add/update the session's Summary card (issue #30); gated by `canSummarise`
+    /// (no transcript yet, or a summary already in flight).
+    let canSummarise: Bool
+    let onSummarise: () -> Void
 
     @State private var showFocus = false
     @State private var showName = false
@@ -53,6 +57,7 @@ struct ListeningToolbar: View {
             focusChip
             TagsChip(tags: sessionTags, library: tagLibrary) { sessionTags = $0 }
             autoCardsToggle
+            summariseButton
             floatButton
             exportButton
         }
@@ -372,6 +377,23 @@ struct ListeningToolbar: View {
         }
         .buttonStyle(.plain)
         .help("Float window on top")
+    }
+
+    /// Add or update the session's Summary card from the whole conversation.
+    private var summariseButton: some View {
+        Button(action: onSummarise) {
+            Image(systemName: "list.bullet.rectangle")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 34, height: 34)
+                .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
+                        .stroke(Theme.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSummarise)
+        .help("Summarise the conversation (adds or updates a Summary card)")
     }
 
     private var exportButton: some View {

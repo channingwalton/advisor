@@ -43,6 +43,14 @@ export type Inbound =
   // session context, no transcript delta), streamed back as document_answer on
   // the same id.
   | { type: "ask_document"; id: string; question: string; document: string }
+  // Summarise the live session (issue #30). Carries the full transcript (not a
+  // delta) and produces a single "summary" card. `cardId` is set on re-summarise
+  // to the existing summary card, so the sidecar updates it in place rather than
+  // emitting a second card; absent the first time. Streamed back as card/card_update.
+  | { type: "summarise_live"; cardId?: string; transcript: string }
+  // Summarise a saved past transcript (the history browser). Self-contained like
+  // ask_document; streamed back as document_answer on the request id.
+  | { type: "summarise_document"; id: string; transcript: string }
   | { type: "session_end" };
 
 export type CardState = "pending" | "streaming" | "done" | "failed" | "cancelled";
@@ -55,7 +63,7 @@ export type Outbound =
       // Utterance id this card answers, so the app anchors it under that
       // sentence rather than at research-completion time. Absent for user queries.
       trigger?: string;
-      kind: "answer" | "context" | "factcheck" | "query";
+      kind: "answer" | "context" | "factcheck" | "query" | "summary";
       title: string;
       body: string;
       state: CardState;

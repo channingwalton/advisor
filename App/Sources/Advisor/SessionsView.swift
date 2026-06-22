@@ -760,6 +760,9 @@ private struct SessionDetailPane: View {
     @State private var answerBody = ""
     @State private var answerState = "" // "" idle, else pending|streaming|done|failed
     @State private var askNote = ""
+    /// True while the in-flight `liveAnswer` is a summary rather than a Q&A, so its
+    /// header reads "Summary" (issue #30). The Ask path clears it.
+    @State private var summarising = false
 
     // Rename state.
     @State private var renaming = false
@@ -805,6 +808,7 @@ private struct SessionDetailPane: View {
                     .foregroundStyle(Theme.textStrong)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
+                summariseButton
                 TagsChip(tags: detail.tags, library: library, onChange: applyTags)
                 Menu {
                     Button("Rename…") {
@@ -862,6 +866,57 @@ private struct SessionDetailPane: View {
                 }
             }
             .padding(.top, 2)
+        }
+    }
+
+    /// Add or update this session's Summary card (issue #30). Disabled while the
+    /// note is still being recorded (its writer would clobber the upsert) or while
+    /// an ask/summary is already streaming — mirrors the ask bar's gating.
+    private var summariseButton: some View {
+        Button(action: submitSummarise) {
+            Image(systemName: "list.bullet.rectangle")
+                .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                .frame(width: 32, height: 30)
+                .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .disabled(isLive || isAsking)
+        .help(isLive
+            ? "Summarise once the session has fully saved"
+            : "Summarise this conversation (adds or updates a Summary card)")
+    }
+
+    /// Summarise the whole saved transcript into its single `# Summary` section,
+    /// replacing any existing one. Streams into the answer strip, then persists on
+    /// disk and refreshes the browser so the summary card shows.
+    private func submitSummarise() {
+        guard !isAsking, !isLive else { return }
+        guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
+
+        askNote = ""
+        summarising = true
+        answerBody = "…"
+        answerState = "pending"
+        let document = SessionArchive.contents(of: file)
+
+        let sent = sidecar.summariseDocument(transcript: document) { body, state in
+            answerBody = body
+            answerState = state
+            if state == "done" {
+                SessionArchive.upsertSummary(body, to: file)
+                NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                answerBody = ""
+                answerState = ""
+                summarising = false
+            }
+        }
+        if sent == nil {
+            askNote = "Sidecar not running — summary not requested."
+            answerBody = ""
+            answerState = ""
+            summarising = false
         }
     }
 
@@ -1021,9 +1076,13 @@ private struct SessionDetailPane: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     if isAsking { ProgressView().controlSize(.small).scaleEffect(0.7) }
-                    Text(answerState == "failed" ? "Couldn't answer" : "Answer")
+                    Text(answerState == "failed"
+                        ? (summarising ? "Couldn't summarise" : "Couldn't answer")
+                        : (summarising ? "Summary" : "Answer"))
                         .font(.system(size: 11, weight: .bold)).kerning(0.5)
-                        .foregroundStyle(answerState == "failed" ? Theme.factRed : Theme.accent)
+                        .foregroundStyle(answerState == "failed"
+                            ? Theme.factRed
+                            : (summarising ? Theme.summaryTeal : Theme.accent))
                 }
                 MarkdownText(markdown: answerBody, style: .answer)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1071,6 +1130,7 @@ private struct SessionDetailPane: View {
         guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
 
         askNote = ""
+        summarising = false
         answerBody = "…"
         answerState = "pending"
         let document = SessionArchive.contents(of: file)

@@ -855,6 +855,42 @@ boundary — a phrase split across two utterances / two transcript lines by the 
 rule — isn't matched for single-occurrence correction (it's counted per line).
 Whole-session replace is unaffected.
 
+## Summarise a conversation (2026-06-22, issue #30)
+
+Post-meeting summaries were originally out of scope, and an early transient
+summarise control was removed (2026-06-14 note above). Issue #30 reintroduces
+them deliberately as an **on-demand Summarise control** — a button on both the
+live recording toolbar (`ListeningToolbar`) and the saved-session detail header
+(`SessionsView.SessionDetailPane`). REQUIREMENTS updated accordingly.
+
+A session has **one** summary, stored in the note as a `# Summary` section placed
+before `# Transcript` and written as a single `> **SUMMARY**` card
+block — the same blockquote-card shape used elsewhere, so it renders in card
+chrome and re-parses via `TranscriptDoc`. Clicking Summarise again **updates** it
+in place rather than appending a second.
+
+The summary always covers the **whole** transcript (not the classifier's delta),
+so it runs on a transient one-shot session — like `card_reply`/`ask_document` —
+sharing one prompt (`prompts.summaryTask`). Two wirings, one note location:
+
+- **Live** (`summarise_live`): the app sends the full transcript and, on
+  re-summarise, the existing summary card's id. The sidecar emits a
+  `summary`-kind card (first time) or a `card_update` on that id (re-summarise),
+  so there's only ever one summary card. `SessionMarkdown.inline` derives the
+  `# Summary` section from the done summary card and **excludes** summary cards
+  from the inline transcript — so the store-driven full rewrite keeps one summary.
+- **Saved** (`summarise_document`): reuses the `document_answer` channel (shared
+  `runDocumentTask`), then `SessionArchive.upsertSummary` writes/replaces the
+  `# Summary` section on disk and reloads the browser. Disabled while the note is
+  still live-owned (the writer would clobber it — same guard as ask-and-append).
+
+The two paths produce a **byte-identical** `# Summary` section for the same text
+(`SessionMarkdown.inline` insert == `SessionArchive.upsertingSummary` insert),
+guarded by a test, so "update existing" holds even across surfaces: a session
+summarised live and later re-summarised from the browser replaces the same
+section rather than duplicating it. Summary cards take no follow-ups, and a
+`cancel` interrupts an in-flight live summary (its lane is in the cancel search).
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

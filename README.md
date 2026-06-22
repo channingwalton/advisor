@@ -5,7 +5,8 @@
 A personal macOS assistant that listens to conversations in realtime — meetings,
 calls, videos, in-person — transcribes them locally, and proactively surfaces
 answers, background context, and fact-checks as the conversation flows. Ask it
-questions about (or beyond) the conversation at any time. The Obsidian vault,
+questions about (or beyond) the conversation at any time, or summarise the whole
+conversation on demand (live or from a saved session). The Obsidian vault,
 the web, and connected tools are its sources; nothing is recorded, only
 transcripts are kept.
 

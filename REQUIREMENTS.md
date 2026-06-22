@@ -85,7 +85,10 @@ Two-tier latency strategy: a fast classifier decides *whether* to act (<1 s); th
 
 ## Out of scope (v1)
 
-- Meeting bots joining calls; speaking into the call; team/multi-user features; mobile; Windows/Linux; post-meeting summaries (cheap to add later, but not the core).
+- Meeting bots joining calls; speaking into the call; team/multi-user features; mobile; Windows/Linux.
+
+(Post-meeting summaries were originally out of scope but added in issue #30 — an
+on-demand Summarise control on the live and saved-session views. See DESIGN.md.)
 
 ## Decided (2026-06-11)
 

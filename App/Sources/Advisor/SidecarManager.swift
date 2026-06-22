@@ -246,6 +246,19 @@ final class SidecarManager {
         send(["type": "query", "id": UUID().uuidString, "text": text])
     }
 
+    /// Summarise the live session (issue #30). `transcript` is the whole
+    /// conversation so far; `cardId` is the existing summary card on a re-summarise
+    /// (so the sidecar updates it in place) or nil the first time. The summary
+    /// streams back as a `summary`-kind card / card_update. Returns whether the
+    /// message was sent, so the caller can clear its in-flight guard if the
+    /// sidecar is down (no card is coming).
+    @discardableResult
+    func sendSummariseLive(cardId: String?, transcript: String) -> Bool {
+        var msg: [String: Any] = ["type": "summarise_live", "transcript": transcript]
+        if let cardId { msg["cardId"] = cardId }
+        return send(msg)
+    }
+
     /// Pending document-question answer streams, keyed by request id. Registered
     /// by `askDocument`, invoked as `document_answer` frames arrive, dropped on a
     /// terminal state. Main-actor confined: `askDocument` and inbound handling
@@ -267,6 +280,25 @@ final class SidecarManager {
         let sent = send([
             "type": "ask_document", "id": id, "question": question, "document": document,
         ])
+        if !sent {
+            documentHandlers[id] = nil
+            return nil
+        }
+        return id
+    }
+
+    /// Summarise a saved transcript (the history browser, issue #30). Like
+    /// `askDocument` but with no question — the sidecar runs the summary prompt
+    /// over `transcript` and streams the result back via `document_answer`.
+    /// Returns the request id, or nil if the sidecar is down.
+    @MainActor
+    @discardableResult
+    func summariseDocument(
+        transcript: String, onUpdate: @escaping (String, String) -> Void
+    ) -> String? {
+        let id = UUID().uuidString
+        documentHandlers[id] = onUpdate
+        let sent = send(["type": "summarise_document", "id": id, "transcript": transcript])
         if !sent {
             documentHandlers[id] = nil
             return nil

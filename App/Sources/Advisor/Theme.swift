@@ -90,6 +90,10 @@ enum Theme {
     static let factRed = dyn(0xC0392B, 0xFF6B5C)
     static let factRedTint = dyn(0xFBE9E7, 0xFF6B5C, darkAlpha: 0.16)
 
+    // MARK: summary (teal) — distinct from answer/context/verdict pills
+    static let summaryTeal = dyn(0x0E7C86, 0x4FD0DA)
+    static let summaryTint = dyn(0xE3F4F5, 0x4FD0DA, darkAlpha: 0.16)
+
     // MARK: misc
     static let termHighlightBg = dyn(0xEAE6FB, 0xB9A4FF, darkAlpha: 0.22)
     static let termHighlightText = dyn(0x6044C0, 0xCCBEFF)

@@ -438,6 +438,45 @@ enum SessionArchive {
         return out
     }
 
+    /// `existing` with its `# Summary` section set to `summary` (issue #30):
+    /// replaces the section in place when one is present, else inserts it just
+    /// before `# Transcript` (matching the byte layout `SessionMarkdown.inline`
+    /// writes, so the live and saved surfaces share one location). Pure, for
+    /// testability. `summary` is the plain body; it's wrapped as a card block.
+    static func upsertingSummary(into existing: String, summary: String) -> String {
+        let sectionLines =
+            ["# Summary", ""] + SessionMarkdown.summaryBlock(summary).components(separatedBy: "\n") + [""]
+        var lines = existing.components(separatedBy: "\n")
+
+        if let start = lines.firstIndex(of: "# Summary") {
+            // The section runs to the next top-level heading (`# Transcript` /
+            // `# Follow-ups`) or end-of-file; quoted body lines start with ">",
+            // never "# ", so they can't terminate it early.
+            var end = start + 1
+            while end < lines.count && !lines[end].hasPrefix("# ") { end += 1 }
+            lines.replaceSubrange(start..<end, with: sectionLines)
+        } else if let transcript = lines.firstIndex(of: "# Transcript") {
+            lines.insert(contentsOf: sectionLines, at: transcript)
+        } else {
+            if let last = lines.last, !last.isEmpty { lines.append("") }
+            lines.append(contentsOf: sectionLines)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Add or update the `# Summary` section of `file` on disk (issue #30).
+    /// Returns false if the write fails.
+    @discardableResult
+    static func upsertSummary(_ summary: String, to file: SessionFile) -> Bool {
+        let updated = upsertingSummary(into: contents(of: file), summary: summary)
+        do {
+            try updated.write(to: file.url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Append a follow-up Q&A to `file` on disk. Returns false if the write fails.
     @discardableResult
     static func appendFollowUp(

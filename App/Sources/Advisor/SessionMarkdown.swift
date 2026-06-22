@@ -27,7 +27,9 @@ enum SessionMarkdown {
             Entry(time: $0.time, isUtterance: true, text: "- \(time.string(from: $0.time)) \($0.text)")
         }
         entries += cards
-            .filter { $0.state == "done" || $0.state == "failed" }
+            // The summary card isn't an inline transcript entry — it renders in
+            // its own `# Summary` section (below), so the note holds one summary.
+            .filter { ($0.state == "done" || $0.state == "failed") && $0.kind != "summary" }
             .map { Entry(time: $0.created, isUtterance: false, text: cardBlock($0)) }
         // Stable: at equal times an utterance precedes a card, so an anchored
         // card renders directly under its line.
@@ -55,9 +57,41 @@ enum SessionMarkdown {
         // produce identical lines.
         let tagLine = SessionArchive.tagsLine(tags)
         if !tagLine.isEmpty { md += "tags: \(tagLine)\n" }
-        md += "---\n\n# Transcript\n\n"
+        md += "---\n\n"
+        // A summary, when one has been produced, leads the note in its own
+        // section — the same `# Summary` block a saved-note upsert writes, so the
+        // two surfaces stay byte-compatible and "update existing" works across them.
+        let summary = summaryText(in: cards)
+        if !summary.isEmpty {
+            md += "# Summary\n\n" + summaryBlock(summary) + "\n\n"
+        }
+        md += "# Transcript\n\n"
         md += entries.map(\.text).joined(separator: "\n\n")
         return md + "\n"
+    }
+
+    /// The session's summary body, from its single `done` summary card (empty when
+    /// none). Mid-summarise (pending/streaming) and failed summaries are ignored,
+    /// matching how only finished cards reach the note.
+    static func summaryText(in cards: [Card]) -> String {
+        cards.first { $0.kind == "summary" && $0.state == "done" }?
+            .body.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    /// The summary as a `>`-quoted card block (`**SUMMARY**` + body),
+    /// matching the inline card style so a saved summary renders in card chrome.
+    /// The single block written into a note's `# Summary` section by both the live
+    /// writer (via `inline`) and a saved-note `upsertSummary`.
+    static func summaryBlock(_ text: String) -> String {
+        // Header is just the label — unlike other cards there's no separate title
+        // to add (it would read "SUMMARY · Summary").
+        var lines = ["**SUMMARY**"]
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty {
+            lines.append("")
+            lines += body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        }
+        return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
     }
 
     /// A follow-up Q&A (asked from the history browser) as a blockquote "chat"
@@ -86,6 +120,7 @@ enum SessionMarkdown {
     static func label(for card: Card) -> String {
         switch card.kind {
         case "context": return "CONTEXT"
+        case "summary": return "SUMMARY"
         case "factcheck":
             switch card.verdict {
             case .verified: return "VERIFIED"

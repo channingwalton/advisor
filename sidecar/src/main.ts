@@ -3,7 +3,12 @@ import { homedir } from "node:os";
 import { Agent } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, loadConfig, modelArg } from "./config.js";
-import { buildResearchSystem, documentQuestionTask, sessionContextPrefix } from "./prompts.js";
+import {
+  buildResearchSystem,
+  documentQuestionTask,
+  sessionContextPrefix,
+  summaryTask,
+} from "./prompts.js";
 import { cardOutcome, boundedPush } from "./cards.js";
 import { Inbound, log, send, Source } from "./protocol.js";
 import {
@@ -208,11 +213,15 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
 const MAX_CONCURRENT_DOC_QUESTIONS = 2;
 let activeDocQuestions = 0;
 
-async function runDocumentQuestion(msg: Extract<Inbound, { type: "ask_document" }>): Promise<void> {
+/// Run a one-shot task over a self-contained document (a saved transcript),
+/// streaming the result back as document_answer on `id`. Shared by ask_document
+/// (a question) and summarise_document (the Summarise button), which differ only
+/// in the prompt.
+async function runDocumentTask(id: string, prompt: string): Promise<void> {
   if (activeDocQuestions >= MAX_CONCURRENT_DOC_QUESTIONS) {
     send({
       type: "document_answer",
-      id: msg.id,
+      id,
       body: "failed: too many questions in flight — wait for one to finish",
       state: "failed",
     });
@@ -220,25 +229,82 @@ async function runDocumentQuestion(msg: Extract<Inbound, { type: "ask_document" 
   }
   activeDocQuestions++;
   const lane = makeLane("document");
-  send({ type: "document_answer", id: msg.id, body: "…", state: "pending" });
+  send({ type: "document_answer", id, body: "…", state: "pending" });
   try {
-    const { text, error } = await lane.session.run(
-      documentQuestionTask(msg.question, msg.document),
-      (body) => send({ type: "document_answer", id: msg.id, body, state: "streaming" })
+    const { text, error } = await lane.session.run(prompt, (body) =>
+      send({ type: "document_answer", id, body, state: "streaming" })
     );
     const outcome = cardOutcome(text, error);
-    send({ type: "document_answer", id: msg.id, body: outcome.body, state: outcome.state });
+    send({ type: "document_answer", id, body: outcome.body, state: outcome.state });
   } catch (err) {
-    log(`document question error: ${err}`);
+    log(`document task error: ${err}`);
     send({
       type: "document_answer",
-      id: msg.id,
+      id,
       body: `error: ${err instanceof Error ? err.message : String(err)}`,
       state: "failed",
     });
   } finally {
     lane.session.reset(); // dispose the transient session
     activeDocQuestions--;
+  }
+}
+
+function runDocumentQuestion(msg: Extract<Inbound, { type: "ask_document" }>): Promise<void> {
+  return runDocumentTask(msg.id, documentQuestionTask(msg.question, msg.document));
+}
+
+function runSummariseDocument(
+  msg: Extract<Inbound, { type: "summarise_document" }>
+): Promise<void> {
+  return runDocumentTask(msg.id, summaryTask(msg.transcript));
+}
+
+/// In-flight summary lanes (the live Summarise button), keyed via currentCardId
+/// so a `cancel` can find and interrupt them. Transient, outside the research
+/// pool — like reply/document lanes.
+const summaryLanes: Lane[] = [];
+
+/// Summarise the live session into a single "summary" card. The first call opens
+/// a new card; a re-summarise passes the existing card id and updates it in place
+/// (card_update), so there is only ever one summary card per session.
+async function runSummariseLive(msg: Extract<Inbound, { type: "summarise_live" }>): Promise<void> {
+  const reusing = msg.cardId !== undefined;
+  const cardId = msg.cardId ?? `c${++cardCounter}`;
+  const lane = makeLane("summary");
+  lane.currentCardId = cardId;
+  summaryLanes.push(lane);
+  if (reusing) {
+    send({ type: "card_update", id: cardId, body: "…", state: "pending" });
+  } else {
+    send({ type: "card", id: cardId, kind: "summary", title: "Summary", body: "…", state: "pending" });
+  }
+  try {
+    const { text, error } = await lane.session.run(summaryTask(msg.transcript), (body) => {
+      if (!cancelledCards.has(cardId)) {
+        send({ type: "card_update", id: cardId, body, state: "streaming" });
+      }
+    });
+    if (!cancelledCards.has(cardId)) {
+      const outcome = cardOutcome(text, error);
+      send({ type: "card_update", id: cardId, body: outcome.body, state: outcome.state });
+    }
+  } catch (err) {
+    log(`summarise error: ${err}`);
+    if (!cancelledCards.has(cardId)) {
+      send({
+        type: "card_update",
+        id: cardId,
+        body: `error: ${err instanceof Error ? err.message : String(err)}`,
+        state: "failed",
+      });
+    }
+  } finally {
+    lane.session.reset(); // dispose the transient session
+    lane.currentCardId = undefined;
+    const i = summaryLanes.indexOf(lane);
+    if (i >= 0) summaryLanes.splice(i, 1);
+    cancelledCards.delete(cardId);
   }
 }
 
@@ -435,7 +501,7 @@ function handle(msg: Inbound): void {
     case "cancel": {
       cancelledCards.add(msg.cardId);
       send({ type: "card_update", id: msg.cardId, body: "cancelled", state: "cancelled" });
-      const lane = [...researchLanes, queryLane, ...replyLanes].find(
+      const lane = [...researchLanes, queryLane, ...replyLanes, ...summaryLanes].find(
         (l) => l.currentCardId === msg.cardId
       );
       if (lane) {
@@ -452,6 +518,16 @@ function handle(msg: Inbound): void {
       // History-browser question about a saved transcript. Transient session,
       // parallel-safe — no busy gate, no pool slot, no live-session state.
       void runDocumentQuestion(msg);
+      break;
+    case "summarise_live":
+      // Summarise the live session into its single summary card. Transient
+      // session, parallel-safe — no busy gate, no pool slot.
+      void runSummariseLive(msg);
+      break;
+    case "summarise_document":
+      // Summarise a saved transcript (the history browser). Like ask_document:
+      // transient session, parallel-safe, no live-session state.
+      void runSummariseDocument(msg);
       break;
     case "session_end":
       // End the auto-pipeline: stop scheduling/accepting classifies and drop any

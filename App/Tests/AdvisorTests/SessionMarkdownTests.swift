@@ -89,6 +89,32 @@ private func makeCard(
     #expect(md.contains("[BBC](https://bbc.co.uk)"))
 }
 
+@Test func doneSummaryCardBecomesSummarySection() {
+    let t = Date(timeIntervalSince1970: 1_000)
+    let summary = makeCard(
+        created: t, kind: "summary", title: "Summary", body: "Gist line.\n- point one")
+
+    let md = SessionMarkdown.inline(utterances: [], cards: [summary], started: t, ended: nil)
+
+    #expect(md.contains("# Summary\n\n> **SUMMARY**"))
+    #expect(md.contains("> Gist line."))
+    // The summary leads the note, ahead of the transcript.
+    let s = md.range(of: "# Summary")
+    let tr = md.range(of: "# Transcript")
+    #expect(s != nil && tr != nil && s!.lowerBound < tr!.lowerBound)
+    // It is not also inlined as a transcript card (one summary per note).
+    #expect(md.components(separatedBy: "> **SUMMARY**").count - 1 == 1)
+}
+
+@Test func inProgressSummaryWritesNoSection() {
+    let t = Date(timeIntervalSince1970: 1_000)
+    let streaming = makeCard(created: t, kind: "summary", body: "partial", state: "streaming")
+
+    let md = SessionMarkdown.inline(utterances: [], cards: [streaming], started: t, ended: nil)
+
+    #expect(!md.contains("# Summary"))
+}
+
 @Test func frontmatterCarriesName() {
     let md = SessionMarkdown.inline(
         utterances: [], cards: [], started: Date(timeIntervalSince1970: 0), ended: nil,

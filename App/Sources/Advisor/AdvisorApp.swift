@@ -116,6 +116,10 @@ struct TranscriptView: View {
     @State private var selectedDevice: InputDevice?
     @AppStorage("captureSystem") private var captureSystem = true
     @State private var queryText = ""
+    /// True from the instant Summarise is tapped until the summary card reaches a
+    /// terminal state. Guards the gap before the card returns, so a fast
+    /// double-click can't spawn a second summary card (issue #30).
+    @State private var summarisingLive = false
 
     init(services: AppServices) {
         self.services = services
@@ -279,6 +283,11 @@ struct TranscriptView: View {
         // on pure UI toggles like expand/collapse (which also mutate store.cards).
         .onChange(of: cardsWriterKey) { _, _ in services.writer.noteChanged() }
         .onChange(of: agentLanes) { _, n in services.sidecar.sendLanes(n) }
+        // Release the summarise guard once the card reaches a terminal state, so
+        // the button re-enables for a re-summarise.
+        .onChange(of: summaryResearching) { _, researching in
+            if !researching { summarisingLive = false }
+        }
     }
 
     /// The live feed UI — toolbar, status line, transcript, ask bar.
@@ -304,7 +313,9 @@ struct TranscriptView: View {
                 onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
                 onStop: { stopRecording() },
                 canExport: services.writer.hasExportContent,
-                onExport: exportSession
+                onExport: exportSession,
+                canSummarise: !store.utterances.isEmpty && !summarisingLive && !summaryResearching,
+                onSummarise: submitSummarise
             )
             statusLine
             transcriptArea
@@ -716,6 +727,27 @@ struct TranscriptView: View {
         guard !text.isEmpty else { return }
         services.sidecar.sendQuery(text)
         queryText = ""
+    }
+
+    /// Summarise the whole live session into its single Summary card (issue #30).
+    /// Re-running passes the existing summary card's id so the sidecar updates it
+    /// in place rather than adding a second summary.
+    private func submitSummarise() {
+        guard !store.utterances.isEmpty, !summarisingLive, !summaryResearching else { return }
+        let transcript = store.utterances
+            .map { "\($0.source.rawValue): \($0.text)" }
+            .joined(separator: "\n")
+        let existing = store.cards.first { $0.kind == "summary" }?.id
+        summarisingLive = true
+        // If the sidecar is down nothing comes back, so release the guard now.
+        if !services.sidecar.sendSummariseLive(cardId: existing, transcript: transcript) {
+            summarisingLive = false
+        }
+    }
+
+    /// Whether the session's summary card is currently being produced.
+    private var summaryResearching: Bool {
+        store.cards.contains { $0.kind == "summary" && $0.isResearching }
     }
 
     /// Finalise the current session: stop audio, signal the sidecar, flush the

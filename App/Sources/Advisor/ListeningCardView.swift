@@ -18,6 +18,7 @@ struct ListeningCardView: View {
     private var accent: Color {
         switch card.kind {
         case "context": Theme.contextViolet
+        case "summary": Theme.summaryTeal
         case "factcheck": verdictColour ?? Theme.textSecondary
         default: Theme.accent
         }
@@ -46,7 +47,9 @@ struct ListeningCardView: View {
                     bodyMarkdown
                 }
                 footer
-                if card.state == "done" && !card.replying {
+                // Summary cards are a one-shot recap, not a conversation, so they
+                // don't take follow-ups.
+                if card.state == "done" && !card.replying && card.kind != "summary" {
                     CardReplyField(accent: isAnswer ? Theme.accent : nil) { onReply($0) }
                 }
             }
@@ -62,6 +65,7 @@ struct ListeningCardView: View {
 
     private var borderColour: Color {
         if isAnswer { return Theme.accent.opacity(0.30) }
+        if card.kind == "summary" { return Theme.summaryTeal.opacity(0.30) }
         if card.kind == "factcheck", let c = verdictColour { return c.opacity(0.30) }
         return Theme.hairline
     }
@@ -78,7 +82,9 @@ struct ListeningCardView: View {
                     Text("replying to").foregroundStyle(Theme.textTertiary)
                     Text("your question").foregroundStyle(Theme.textSecondary)
                 }
-            } else {
+            } else if card.kind != "summary" {
+                // The summary card's pill already says SUMMARY; its title ("Summary")
+                // would just repeat it.
                 Text(card.title)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.textStrong)
@@ -98,6 +104,8 @@ struct ListeningCardView: View {
         switch card.kind {
         case "context":
             TypePill(label: "CONTEXT", colour: Theme.contextViolet, tint: Theme.contextTint, dot: true)
+        case "summary":
+            TypePill(label: "SUMMARY", colour: Theme.summaryTeal, tint: Theme.summaryTint, dot: true)
         case "factcheck":
             verdictPill
         default:

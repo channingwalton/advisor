@@ -58,6 +58,22 @@ ${document}
 Question: ${question}`;
 }
 
+/// Task for summarising a whole conversation (the Summarise button, live or from
+/// a saved note). Unlike the research lanes this gets the entire transcript, not
+/// a delta, and produces a single recap card. Tools are allowed only to expand a
+/// reference — the transcript is the ground truth, so it must not invent.
+export function summaryTask(transcript: string): string {
+  return `Summarise this conversation for someone who needs to recall it later.
+Lead with a one-line gist, then concise bullet points covering the key topics,
+any decisions made, and any action items or open questions. Be faithful to the
+transcript and do not invent — use tools only to expand an abbreviation or
+reference if needed. No preamble.
+
+<transcript>
+${transcript}
+</transcript>`;
+}
+
 /// Prefix prepended to each research/query/reply task carrying the user's live
 /// session prompt. Read fresh at dispatch so mid-session edits take effect on
 /// the next task without rebuilding lanes. Blank/whitespace → no block.

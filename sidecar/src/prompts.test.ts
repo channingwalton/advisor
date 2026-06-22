@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildResearchSystem, sessionContextPrefix, PERSONA } from "./prompts.js";
+import { buildResearchSystem, sessionContextPrefix, summaryTask, PERSONA } from "./prompts.js";
 
 test("buildResearchSystem leads with the fixed persona and keeps the protected core", () => {
   const p = buildResearchSystem();
@@ -25,4 +25,12 @@ test("sessionContextPrefix wraps the live session prompt and ends with a blank l
 test("sessionContextPrefix is empty for blank or whitespace input", () => {
   assert.equal(sessionContextPrefix(""), "");
   assert.equal(sessionContextPrefix("   \n "), "");
+});
+
+test("summaryTask embeds the transcript verbatim and asks for a faithful summary", () => {
+  const t = summaryTask("me: hello\nthem: hi there");
+  assert.match(t, /<transcript>\nme: hello\nthem: hi there\n<\/transcript>/);
+  assert.match(t, /[Ss]ummari[sz]e/);
+  // No-invention guard, so a summary can't hallucinate beyond the transcript.
+  assert.match(t, /do not invent|faithful/i);
 });
