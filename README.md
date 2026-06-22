@@ -150,8 +150,10 @@ answer is appended in place, so a card becomes a short thread. To fix a
 mis-transcribed word, highlight it and right-click ▸ **Correct "…"** (just that
 instance) or **Replace all "…"** (every occurrence in the session); type the
 correction and it's saved to the transcript in place. The menu also lets
-you copy the text. Each card can be collapsed/expanded or dismissed (fact-checks
-start collapsed); dismissing a card that's still researching cancels its lane.
+you copy the text. Each card can be copied (its **Copy** button puts the title,
+body and any sources on the clipboard), collapsed/expanded or dismissed
+(fact-checks start collapsed); dismissing a card that's still researching cancels
+its lane.
 The **mic** button in the record cluster mutes the local microphone
 while the session keeps running — system audio is still captured and
 transcribed; tap again to unmute. `Float` keeps the window on top. Sessions are

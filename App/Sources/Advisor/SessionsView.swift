@@ -952,14 +952,28 @@ private struct SessionDetailPane: View {
     }
 
     private func cardBlock(_ markdown: String) -> some View {
-        MarkdownText(markdown: markdown, style: .saved)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
-                    .stroke(Theme.hairline, lineWidth: 0.5))
-            .padding(.vertical, 4)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Spacer(minLength: 0)
+                CardIconButton(system: "doc.on.doc", help: "Copy", action: { copyCard(markdown) })
+            }
+            MarkdownText(markdown: markdown, style: .saved)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
+                .stroke(Theme.hairline, lineWidth: 0.5))
+        .padding(.vertical, 4)
+    }
+
+    /// Copy a saved card to the clipboard. The block's inner markdown (header,
+    /// body and footer, blockquote markers already stripped by `TranscriptDoc`)
+    /// is a faithful text snapshot of what's shown, so it's copied verbatim.
+    private func copyCard(_ markdown: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
     }
 
     /// The 0-based index of the paragraph at block `offset` among paragraph blocks

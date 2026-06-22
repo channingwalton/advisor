@@ -241,7 +241,7 @@ type-scale metrics). Decomposed into components: `ListeningToolbar` (record
 cluster — waveform + timer + pause/stop + mic mute — audio-source menu, Context
 chip, Auto-cards switch, Float, Export, Sessions; idle collapses to a single
 Listen pill), `AskBar` (sparkle input + ⌘↵), and `ListeningCardView` (type/verdict
-pill, Researching state, collapse/expand + dismiss, themed Markdown body,
+pill, Researching state, copy/collapse/expand + dismiss, themed Markdown body,
 trigger-quote + sources footer, follow-up input). The transcript is a centred
 812 pt column with a day divider and flowing paragraphs that group consecutive
 utterances, breaking only on a >1 s gap or an injected card, with a blinking

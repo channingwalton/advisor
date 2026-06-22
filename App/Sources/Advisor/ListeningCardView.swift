@@ -86,6 +86,7 @@ struct ListeningCardView: View {
             }
             status
             Spacer(minLength: 4)
+            CardIconButton(system: "doc.on.doc", help: "Copy", action: copyToClipboard)
             CardIconButton(system: card.isExpanded ? "chevron.up" : "chevron.down",
                 help: card.isExpanded ? "Collapse" : "Expand", action: onToggleExpand)
             CardIconButton(system: "xmark", help: "Dismiss", action: onDismiss)
@@ -163,6 +164,27 @@ struct ListeningCardView: View {
             }
             .padding(.top, 2)
         }
+    }
+
+    // MARK: copy
+
+    /// Plain-text snapshot of the card for the clipboard: title, body, then any
+    /// source links. Available whether the card is collapsed or expanded.
+    private var clipboardText: String {
+        var parts: [String] = []
+        let title = card.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { parts.append(title) }
+        let body = card.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty && body != "…" { parts.append(body) }
+        if !card.sources.isEmpty {
+            parts.append(card.sources.map { "\($0.label) — \($0.url)" }.joined(separator: "\n"))
+        }
+        return parts.joined(separator: "\n\n")
+    }
+
+    private func copyToClipboard() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(clipboardText, forType: .string)
     }
 }
 
