@@ -138,7 +138,9 @@ In the recording window, click **Listen**. Words appear live in grey as they're
 spoken, replaced by
 finalised sentences; cards appear inline when the assistant decides something
 is worth answering, checking, or explaining — or when you ask via the query
-box. The **Context** button (before or during a session) holds an optional
+box. The feed reads as a stack of cards: each run of conversation between two
+cards sits in its own recessed transcript card, so transcript and answer cards
+are visually distinct. The **Context** button (before or during a session) holds an optional
 **name** — a short label that titles the session in the browser — and a context
 prompt that steers the assistant. The **Tags** chip (before or during a session)
 applies tags from your library (pick from the list; create them in Preferences);

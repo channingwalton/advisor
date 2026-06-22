@@ -891,6 +891,23 @@ summarised live and later re-summarised from the browser replaces the same
 section rather than duplicating it. Summary cards take no follow-ups, and a
 `cancel` interrupts an in-flight live summary (its lane is in the cancel search).
 
+## Transcript runs in their own card (2026-06-22)
+
+The feed already collapsed consecutive utterances into paragraphs; now each run
+of paragraphs *between two cards* is grouped into a single transcript card, so
+the feed reads as a stack of cards rather than cards floating in bare prose. The
+grouping is a thin display pass over the existing paragraph list (live:
+`displayedItems` in `AdvisorApp.swift`; saved: `displayBlocks` over
+`TranscriptDoc` blocks in `SessionsView.swift`) — a card or heading flushes the
+current run. Each paragraph keeps its own selectable text view inside the card so
+right-click actions and `#32` corrections still map to the right utterances
+(grouping doesn't touch paragraph identity or offsets).
+
+Transcript cards use the recessed `surfaceCardInset` fill (vs `surfaceCard` for
+answer/context cards) so transcript reads as a quieter, sunken surface and answer
+cards stand out — the visual hierarchy is fill-tint, not chrome. Applied to both
+the live feed and saved sessions so the two stay identical.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
