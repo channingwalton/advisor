@@ -764,6 +764,9 @@ private struct SessionDetailPane: View {
     /// header reads "Summary" (issue #30). The Ask path clears it.
     @State private var summarising = false
 
+    /// Experiment: hide transcript paragraphs/headings so only cards show.
+    @State private var hideTranscript = false
+
     // Rename state.
     @State private var renaming = false
     @State private var renameText = ""
@@ -808,6 +811,7 @@ private struct SessionDetailPane: View {
                     .foregroundStyle(Theme.textStrong)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
+                hideTranscriptButton
                 summariseButton
                 TagsChip(tags: detail.tags, library: library, onChange: applyTags)
                 Menu {
@@ -867,6 +871,23 @@ private struct SessionDetailPane: View {
             }
             .padding(.top, 2)
         }
+    }
+
+    /// Toggle the transcript off so the detail shows only cards (experiment).
+    private var hideTranscriptButton: some View {
+        Button { hideTranscript.toggle() } label: {
+            Image(systemName: hideTranscript ? "eye.slash" : "eye")
+                .font(.system(size: 13))
+                .foregroundStyle(hideTranscript ? Theme.accent : Theme.textSecondary)
+                .frame(width: 32, height: 30)
+                .background(
+                    hideTranscript ? Theme.accentTint : Theme.surfaceCard,
+                    in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help(hideTranscript ? "Show transcript" : "Hide transcript (cards only)")
     }
 
     /// Add or update this session's Summary card (issue #30). Disabled while the
@@ -981,10 +1002,10 @@ private struct SessionDetailPane: View {
 
     private var transcript: some View {
         VStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
-            sectionLabel("TRANSCRIPT", count: nil)
+            sectionLabel(hideTranscript ? "CARDS" : "TRANSCRIPT", count: nil)
             ForEach(Array(detail.blocks.enumerated()), id: \.offset) { offset, block in
                 switch block {
-                case .paragraph(let text):
+                case .paragraph(let text) where !hideTranscript:
                     let paragraphIndex = paragraphOrdinal(before: offset)
                     SelectableTranscriptText(
                         text: text, toolTip: "", actions: [], onAction: { _, _ in },
@@ -993,9 +1014,11 @@ private struct SessionDetailPane: View {
                         onCorrect: isLive
                             ? nil
                             : { request in apply(request, toParagraph: paragraphIndex) })
+                case .paragraph:
+                    EmptyView()
                 case .card(let markdown):
                     cardBlock(markdown)
-                case .heading(let title) where title != "Transcript":
+                case .heading(let title) where title != "Transcript" && !hideTranscript:
                     Text(title).font(.system(size: 11, weight: .semibold)).kerning(0.5)
                         .foregroundStyle(Theme.textMuted)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)

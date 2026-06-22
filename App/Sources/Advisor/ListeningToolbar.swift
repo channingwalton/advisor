@@ -25,6 +25,8 @@ struct ListeningToolbar: View {
     /// Save the current context text under the given name.
     let onSaveContext: (String) -> Void
     @Binding var autoCards: Bool
+    /// Experiment: hide the transcript so the feed shows only cards.
+    @Binding var hideTranscript: Bool
     @Binding var pinned: Bool
     let onStart: () -> Void
     let onResume: () -> Void
@@ -57,6 +59,7 @@ struct ListeningToolbar: View {
             focusChip
             TagsChip(tags: sessionTags, library: tagLibrary) { sessionTags = $0 }
             autoCardsToggle
+            hideTranscriptButton
             summariseButton
             floatButton
             exportButton
@@ -360,6 +363,24 @@ struct ListeningToolbar: View {
                 .tint(Theme.accent)
                 .controlSize(.small)
         }
+    }
+
+    /// Toggle the transcript off so the feed shows only cards (experiment).
+    private var hideTranscriptButton: some View {
+        Button { hideTranscript.toggle() } label: {
+            Image(systemName: hideTranscript ? "eye.slash" : "eye")
+                .font(.system(size: 13))
+                .foregroundStyle(hideTranscript ? Theme.accent : Theme.textSecondary)
+                .frame(width: 34, height: 34)
+                .background(
+                    hideTranscript ? Theme.accentTint : Theme.surfaceControl,
+                    in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
+                        .stroke(Theme.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .help(hideTranscript ? "Show transcript" : "Hide transcript (cards only)")
     }
 
     private var floatButton: some View {

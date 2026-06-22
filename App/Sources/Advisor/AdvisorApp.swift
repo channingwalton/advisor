@@ -146,6 +146,9 @@ struct TranscriptView: View {
     /// `advisorConfigChanged`; the popover's Save persists back to config.json.
     @State private var savedContexts: [SavedContext] = []
     @State private var autoCards = true
+    /// Experiment: hide transcript paragraphs (and the interim line) so the feed
+    /// shows only cards. Per-window UI state, not persisted.
+    @State private var hideTranscript = false
     @State private var pinned = false
     /// When the current session started — drives the toolbar timer. Non-nil for
     /// the whole session (Listen until the window closes), even while stopped.
@@ -307,6 +310,7 @@ struct TranscriptView: View {
                 tagLibrary: tagLibrary,
                 onSaveContext: saveContext(named:),
                 autoCards: $autoCards,
+                hideTranscript: $hideTranscript,
                 pinned: $pinned,
                 onStart: { Task { await startSession() } },
                 onResume: { resumeRecording() },
@@ -464,6 +468,13 @@ struct TranscriptView: View {
         return items
     }
 
+    /// `renderItems` filtered for display: with the transcript hidden (experiment)
+    /// only cards remain, so the feed reads as an answer stream.
+    private var displayedItems: [RenderItem] {
+        guard hideTranscript else { return renderItems }
+        return renderItems.filter { if case .card = $0 { true } else { false } }
+    }
+
     /// Changes whenever a final line or card is added — the auto-scroll trigger
     /// (a growing paragraph keeps its id, so id-based scrolling alone misses it).
     private var scrollKey: String { "\(store.utterances.count)|\(store.cards.count)" }
@@ -475,14 +486,16 @@ struct TranscriptView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
                     dayDivider
-                    if renderItems.isEmpty && interimText.isEmpty {
-                        Text("Press Listen — the conversation and answer cards appear here.")
+                    if displayedItems.isEmpty && (hideTranscript || interimText.isEmpty) {
+                        Text(hideTranscript
+                            ? "Cards only — answer cards appear here as they arrive."
+                            : "Press Listen — the conversation and answer cards appear here.")
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.textTertiary)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 40)
                     }
-                    ForEach(renderItems) { item in
+                    ForEach(displayedItems) { item in
                         switch item {
                         case .paragraph(let p):
                             SelectableTranscriptText(
@@ -522,7 +535,7 @@ struct TranscriptView: View {
                             .id(item.id)
                         }
                     }
-                    interimLine
+                    if !hideTranscript { interimLine }
                 }
                 .frame(maxWidth: Theme.Metric.contentMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
@@ -531,7 +544,7 @@ struct TranscriptView: View {
                 .padding(.bottom, Theme.Metric.contentBottomPad)
             }
             .onChange(of: scrollKey) { _, _ in
-                if let last = renderItems.last {
+                if let last = displayedItems.last {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
