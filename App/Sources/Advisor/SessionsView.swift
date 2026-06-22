@@ -1000,25 +1000,53 @@ private struct SessionDetailPane: View {
 
     // MARK: transcript
 
+    /// A display row: each run of consecutive transcript paragraphs between
+    /// cards (or headings) collapses into one transcript card, mirroring the
+    /// live feed. Paragraphs keep their original block offset so a correction
+    /// still maps to the right paragraph.
+    private enum DisplayBlock: Identifiable {
+        case transcript([(offset: Int, text: String)])
+        case card(offset: Int, markdown: String)
+        case heading(offset: Int, title: String)
+
+        var id: Int {
+            switch self {
+            case .transcript(let ps): ps.first?.offset ?? -1
+            case .card(let offset, _): offset
+            case .heading(let offset, _): offset
+            }
+        }
+    }
+
+    private var displayBlocks: [DisplayBlock] {
+        var out: [DisplayBlock] = []
+        var buf: [(offset: Int, text: String)] = []
+        func flush() {
+            if !buf.isEmpty { out.append(.transcript(buf)); buf.removeAll() }
+        }
+        for (offset, block) in detail.blocks.enumerated() {
+            switch block {
+            case .paragraph(let text): buf.append((offset, text))
+            case .card(let markdown): flush(); out.append(.card(offset: offset, markdown: markdown))
+            case .heading(let title): flush(); out.append(.heading(offset: offset, title: title))
+            }
+        }
+        flush()
+        return out
+    }
+
     private var transcript: some View {
         VStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
             sectionLabel(hideTranscript ? "CARDS" : "TRANSCRIPT", count: nil)
-            ForEach(Array(detail.blocks.enumerated()), id: \.offset) { offset, block in
-                switch block {
-                case .paragraph(let text) where !hideTranscript:
-                    let paragraphIndex = paragraphOrdinal(before: offset)
-                    SelectableTranscriptText(
-                        text: text, toolTip: "", actions: [], onAction: { _, _ in },
-                        // The live note is still owned by its writer; correcting it
-                        // here would be clobbered, so the menu is hidden until saved.
-                        onCorrect: isLive
-                            ? nil
-                            : { request in apply(request, toParagraph: paragraphIndex) })
-                case .paragraph:
+            ForEach(displayBlocks) { item in
+                switch item {
+                case .transcript(let paragraphs) where !hideTranscript:
+                    transcriptCard(paragraphs)
+                case .transcript:
                     EmptyView()
-                case .card(let markdown):
+                case .card(_, let markdown):
                     cardBlock(markdown)
-                case .heading(let title) where title != "Transcript" && !hideTranscript:
+                case .heading(_, let title) where title != "Transcript" && !hideTranscript:
                     Text(title).font(.system(size: 11, weight: .semibold)).kerning(0.5)
                         .foregroundStyle(Theme.textMuted)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
@@ -1027,6 +1055,29 @@ private struct SessionDetailPane: View {
                 }
             }
         }
+    }
+
+    /// A run of transcript between cards, wrapped in card chrome to match the
+    /// live feed. Each paragraph keeps its own selectable text view so a
+    /// correction maps back to the right paragraph index.
+    private func transcriptCard(_ paragraphs: [(offset: Int, text: String)]) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
+            ForEach(paragraphs, id: \.offset) { para in
+                SelectableTranscriptText(
+                    text: para.text, toolTip: "", actions: [], onAction: { _, _ in },
+                    // The live note is still owned by its writer; correcting it
+                    // here would be clobbered, so the menu is hidden until saved.
+                    onCorrect: isLive
+                        ? nil
+                        : { request in apply(request, toParagraph: paragraphOrdinal(before: para.offset)) })
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.surfaceCardInset, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
+                .stroke(Theme.hairline, lineWidth: 0.5))
     }
 
     private func cardBlock(_ markdown: String) -> some View {

@@ -436,6 +436,21 @@ struct TranscriptView: View {
         }
     }
 
+    /// A feed row for display: each run of consecutive paragraphs between cards
+    /// collapses into one transcript card, so transcript and answers read as
+    /// distinct stacked cards.
+    private enum DisplayItem: Identifiable {
+        case transcript([Paragraph])
+        case card(Card)
+
+        var id: String {
+            switch self {
+            case .transcript(let ps): "t-\(ps.first?.id ?? "empty")"
+            case .card(let c): "c-\(c.id)"
+            }
+        }
+    }
+
     /// The feed collapsed for display: consecutive utterances join into a single
     /// paragraph so the transcript reads as prose. A new paragraph starts when
     /// the gap to the previous line exceeds 2s, or when a card interrupts.
@@ -468,11 +483,27 @@ struct TranscriptView: View {
         return items
     }
 
-    /// `renderItems` filtered for display: with the transcript hidden (experiment)
-    /// only cards remain, so the feed reads as an answer stream.
-    private var displayedItems: [RenderItem] {
-        guard hideTranscript else { return renderItems }
-        return renderItems.filter { if case .card = $0 { true } else { false } }
+    /// `renderItems` grouped for display: each run of consecutive paragraphs
+    /// between cards becomes one transcript card. With the transcript hidden
+    /// (experiment) paragraphs are dropped, leaving only answer cards.
+    private var displayedItems: [DisplayItem] {
+        var items: [DisplayItem] = []
+        var buf: [Paragraph] = []
+        func flush() {
+            if !buf.isEmpty { items.append(.transcript(buf)); buf.removeAll() }
+        }
+        for item in renderItems {
+            switch item {
+            case .paragraph(let p):
+                if hideTranscript { continue }
+                buf.append(p)
+            case .card(let c):
+                flush()
+                items.append(.card(c))
+            }
+        }
+        flush()
+        return items
     }
 
     /// Changes whenever a final line or card is added — the auto-scroll trigger
@@ -497,28 +528,9 @@ struct TranscriptView: View {
                     }
                     ForEach(displayedItems) { item in
                         switch item {
-                        case .paragraph(let p):
-                            SelectableTranscriptText(
-                                text: p.text,
-                                toolTip: p.toolTip,
-                                actions: transcriptActions,
-                                onAction: { kind, selection in
-                                    services.sidecar.sendAction(
-                                        kind, text: selection, triggerId: p.anchorId)
-                                },
-                                onCorrect: { request in
-                                    switch request.scope {
-                                    case .thisOccurrence:
-                                        store.correctOccurrence(
-                                            request.occurrenceInParagraph, of: request.original,
-                                            with: request.replacement, inParagraph: p.utteranceIds)
-                                    case .allInSession:
-                                        store.correctAll(
-                                            of: request.original, with: request.replacement)
-                                    }
-                                }
-                            )
-                            .id(item.id)
+                        case .transcript(let paragraphs):
+                            transcriptCard(paragraphs)
+                                .id(item.id)
                         case .card(let card):
                             ListeningCardView(
                                 card: card,
@@ -549,6 +561,42 @@ struct TranscriptView: View {
                 }
             }
         }
+    }
+
+    /// A run of transcript between cards, wrapped in card chrome. Each paragraph
+    /// keeps its own selectable text view so right-click actions and corrections
+    /// still map back to the utterance(s) that compose it.
+    @ViewBuilder private func transcriptCard(_ paragraphs: [Paragraph]) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
+            ForEach(paragraphs) { p in
+                SelectableTranscriptText(
+                    text: p.text,
+                    toolTip: p.toolTip,
+                    actions: transcriptActions,
+                    onAction: { kind, selection in
+                        services.sidecar.sendAction(
+                            kind, text: selection, triggerId: p.anchorId)
+                    },
+                    onCorrect: { request in
+                        switch request.scope {
+                        case .thisOccurrence:
+                            store.correctOccurrence(
+                                request.occurrenceInParagraph, of: request.original,
+                                with: request.replacement, inParagraph: p.utteranceIds)
+                        case .allInSession:
+                            store.correctAll(
+                                of: request.original, with: request.replacement)
+                        }
+                    }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.surfaceCardInset, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
+                .stroke(Theme.hairline, lineWidth: 0.5))
     }
 
     @ViewBuilder private var dayDivider: some View {
