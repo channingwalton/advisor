@@ -1,5 +1,6 @@
 #!/bin/sh
-# Assemble a self-contained, ad-hoc-signed Advisor.app from a release build.
+# Assemble a self-contained Advisor.app from a release build.
+# Uses a stable local signing identity when available; otherwise ad-hoc signs.
 # Bundles: the Swift executable, the Node runtime, and the built sidecar
 # (dist + node_modules). Transcription is Apple's on-device SpeechAnalyzer,
 # so there are no model files or extra dylibs to ship.
@@ -35,12 +36,8 @@ mkdir -p "$APP/Contents/Resources/sidecar"
 cp -R "$ROOT/sidecar/dist" "$ROOT/sidecar/node_modules" "$ROOT/sidecar/package.json" \
       "$APP/Contents/Resources/sidecar/"
 
-echo "==> ad-hoc codesign"
-# Sign nested code first (deep is deprecated but fine for ad-hoc local use).
-codesign --force --sign - "$APP/Contents/Resources/node"
-codesign --force --sign - "$APP/Contents/MacOS/Advisor"
-codesign --force --sign - "$APP"
+sh sign-local.sh "$APP"
 
 echo "==> done: $APP"
-echo "   Unsigned/ad-hoc: first launch needs right-click > Open, or:"
+echo "   First launch may need right-click > Open, or:"
 echo "   xattr -dr com.apple.quarantine \"$APP\""

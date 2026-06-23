@@ -1,11 +1,11 @@
 import AVFoundation
+import CoreGraphics
 import CoreMedia
 import ScreenCaptureKit
 
 /// Captures system audio (everything the Mac plays, excluding this process)
 /// via ScreenCaptureKit and delivers 16 kHz mono Float32 samples.
-/// Requires Screen Recording permission (attributed to the launching terminal
-/// while Advisor is a bare executable).
+/// Requires Screen & System Audio Recording permission.
 final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "advisor.sysaudio")
@@ -14,8 +14,32 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     var onSamples: (([Float]) -> Void)?
     var onStopped: ((Error?) -> Void)?
 
+    static let permissionRequiredNote =
+        "system audio needs Screen & System Audio Recording permission; grant it in System Settings, then relaunch"
+
+    @MainActor
+    static func requestAccessIfNeeded() -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+        return CGRequestScreenCaptureAccess()
+    }
+
+    static func startFailureNote(for error: Error) -> String {
+        let message = error.localizedDescription
+        return isPermissionFailure(message)
+            ? permissionRequiredNote
+            : "system audio failed: \(message)"
+    }
+
+    private static func isPermissionFailure(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("tcc")
+            || lower.contains("declined")
+            || lower.contains("not authorized")
+            || lower.contains("not authorised")
+            || lower.contains("permission")
+    }
+
     func start() async throws {
-        // Triggers the Screen Recording permission flow on first use.
         let content = try await SCShareableContent.excludingDesktopWindows(
             false, onScreenWindowsOnly: false)
         guard let display = content.displays.first else {

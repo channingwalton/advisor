@@ -169,7 +169,7 @@ A card carries an app-only `replying` flag (never on the wire): while a follow-u
 
 The dev build is a bare SwiftPM executable that locates the sidecar by `#filePath`-derived `repoRoot`. That doesn't survive leaving the checkout. `App/package.sh` now assembles a self-contained `Advisor.app`; `AppResources` resolves resources from `Bundle.main` when packaged and falls back to `repoRoot` in a dev checkout, so one binary runs either way.
 
-Decisions (single-user, few-machine distribution — not the App Store): **bundle the Node runtime** (the ~127 MB arm64 `node` binary, copied into `Contents/Resources`) so the target needs no Node install; the Agent SDK's own child processes reuse it via `process.execPath`. **Ad-hoc signed, not notarised** (`codesign -s -`) — first launch needs right-click ▸ Open. STT is Apple SpeechAnalyzer, so there are no model files or native dylibs to ship — the bundle is just the executable, Node, and the built sidecar.
+Decisions (single-user, few-machine distribution — not the App Store): **bundle the Node runtime** (the ~127 MB arm64 `node` binary, copied into `Contents/Resources`) so the target needs no Node install; the Agent SDK's own child processes reuse it via `process.execPath`. **Locally signed, not notarised** — `package.sh` uses a Developer ID or self-signed `Advisor Dev` identity when present and falls back to ad-hoc signing. First launch may still need right-click ▸ Open. STT is Apple SpeechAnalyzer, so there are no model files or native dylibs to ship — the bundle is just the executable, Node, and the built sidecar.
 
 (Originally the bundle also flattened the whisper + ggml/Metal dylibs into `Contents/Frameworks` with rpath surgery; removed with whisper — see the dated section below.) The bundled Node boots the bundled sidecar with no system Node on `PATH`. The sidecar still needs the user's Claude Code login on the target.
 
@@ -814,9 +814,24 @@ screen-recording approvals kept lapsing because the local build is ad-hoc signed
 — its code hash rotates every build, so macOS sees each rebuild (and each of the
 duplicate dev-binary / installed-`.app`, which share the bundle id) as a different
 app and drops the grant, while still *showing* it enabled in System Settings.
-Fix: `install.sh` re-signs with a stable identity (a self-signed **`Advisor Dev`**
-cert, or a Developer ID if present), keeping the Designated Requirement constant
-so grants persist. See README. Distribution-grade signing is `notarize.sh`.
+Fix: `package.sh`/`install.sh` sign with a stable identity (a self-signed
+**`Advisor Dev`** cert, or a Developer ID if present), keeping the Designated
+Requirement constant so grants persist. See README. Distribution-grade signing
+is `notarize.sh`.
+
+## System-audio permission preflight (2026-06-23)
+
+Starting system audio by calling `SCShareableContent.excludingDesktopWindows`
+directly made a first-run permission miss look like a capture failure:
+"The user declined TCCs for application, window, display capture". That was
+especially confusing while changing mic devices because mic capture was healthy,
+but the status line reported a ScreenCaptureKit failure beside it.
+
+`SystemAudioCapture` now preflights/requests Screen & System Audio Recording via
+CoreGraphics before touching ScreenCaptureKit. If access is missing, recording
+continues mic-only and the status tells the user to grant the permission in
+System Settings and relaunch. ScreenCaptureKit TCC errors are still normalised
+to that same instruction in case preflight and `SCStream` disagree.
 
 ## Correct a transcription word/phrase (2026-06-22, issue #32)
 

@@ -120,7 +120,7 @@ final class AudioCapture {
     }
 }
 
-enum AdvisorError: Error, CustomStringConvertible {
+enum AdvisorError: Error, CustomStringConvertible, LocalizedError {
     case audioSetup(String)
 
     var description: String {
@@ -128,4 +128,6 @@ enum AdvisorError: Error, CustomStringConvertible {
         case .audioSetup(let m): "audio setup failed: \(m)"
         }
     }
+
+    var errorDescription: String? { description }
 }

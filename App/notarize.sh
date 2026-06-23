@@ -36,7 +36,7 @@ if [ -z "$SIGN_IDENTITY" ]; then
 fi
 echo "==> identity: $SIGN_IDENTITY"
 
-# Assemble the (ad-hoc) bundle from a release build; we re-sign it below.
+# Assemble the bundle from a release build; we re-sign it below.
 echo "==> package (release build + assemble)"
 sh package.sh >/dev/null
 
@@ -50,6 +50,13 @@ find "$APP/Contents/Resources/sidecar/node_modules" \
   | xargs -0 -I{} codesign --force --options runtime --timestamp \
       --sign "$SIGN_IDENTITY" {}
 
+echo "==> sign bundled Mach-O executables"
+find "$APP/Contents" -type f -perm -111 -print | while IFS= read -r candidate; do
+  if file "$candidate" | grep -q 'Mach-O'; then
+    sign "$candidate"
+  fi
+done
+
 echo "==> sign bundled node, main executable, then the bundle"
 sign --entitlements "$ENT" "$APP/Contents/Resources/node"
 sign --entitlements "$ENT" "$APP/Contents/MacOS/Advisor"
@@ -61,9 +68,18 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 echo "==> notarize (this can take a few minutes)"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
-# --wait blocks until Apple finishes; on rejection it exits non-zero (set -e
-# stops here). Inspect a failed run with: xcrun notarytool log <id> --keychain-profile "$NOTARY_PROFILE"
-xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+# --wait blocks until Apple finishes, then we inspect the final status before
+# stapling. Some Xcode versions print "Invalid" but still return success.
+SUBMISSION_PLIST=$(mktemp "${TMPDIR:-/tmp}/advisor-notary.XXXXXX.plist")
+xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait \
+  --output-format plist >"$SUBMISSION_PLIST"
+STATUS=$(plutil -extract status raw -o - "$SUBMISSION_PLIST")
+SUBMISSION_ID=$(plutil -extract id raw -o - "$SUBMISSION_PLIST")
+if [ "$STATUS" != "Accepted" ]; then
+  echo "error: notarization $SUBMISSION_ID finished with status: $STATUS" >&2
+  xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "$NOTARY_PROFILE" >&2 || true
+  exit 1
+fi
 
 echo "==> staple ticket (so it verifies offline)"
 xcrun stapler staple "$APP"

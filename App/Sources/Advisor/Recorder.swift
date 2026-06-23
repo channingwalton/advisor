@@ -120,7 +120,11 @@ final class Recorder {
         systemCapture.onStopped = { [weak self] error in
             guard let self else { return }
             Task { @MainActor in
-                self.store.status = "system audio stopped: \(error.map(String.init(describing:)) ?? "ok")"
+                if let error {
+                    self.store.status = SystemAudioCapture.startFailureNote(for: error)
+                } else {
+                    self.store.status = "system audio stopped: ok"
+                }
             }
         }
     }
@@ -252,12 +256,17 @@ final class Recorder {
             return
         }
         var notes: [String] = []
+        systemActive.store(false, ordering: .relaxed)
         if captureSystem {
-            do {
-                try await systemCapture.start()
-                systemActive.store(true, ordering: .relaxed)
-            } catch {
-                notes.append("system audio failed: \(error.localizedDescription)")
+            if await SystemAudioCapture.requestAccessIfNeeded() {
+                do {
+                    try await systemCapture.start()
+                    systemActive.store(true, ordering: .relaxed)
+                } catch {
+                    notes.append(SystemAudioCapture.startFailureNote(for: error))
+                }
+            } else {
+                notes.append(SystemAudioCapture.permissionRequiredNote)
             }
         }
         do {

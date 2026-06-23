@@ -71,12 +71,14 @@ cd ../App && swift build
 
 Requires: macOS 26+ (Apple Silicon), Xcode toolchain, Node 22+, a logged-in
 Claude Code CLI. First run prompts for Microphone and Screen & System Audio
-Recording permissions (attributed to the launching terminal).
+Recording permissions. A packaged app prompts as Advisor; a bare
+`.build/debug/Advisor` dev run may be attributed to the launching terminal.
 
 ## Build a release
 
-`App/package.sh` assembles a self-contained, ad-hoc-signed `Advisor.app` —
-release build plus the Node runtime and the built sidecar. Node is **not**
+`App/package.sh` assembles a self-contained `Advisor.app` — release build plus
+the Node runtime and the built sidecar. It signs with a stable local identity
+when one exists, otherwise it falls back to ad-hoc signing. Node is **not**
 required on the target Mac.
 
 **On the build machine** (Apple Silicon), you need:
@@ -92,8 +94,8 @@ cd App && sh dmg.sh            # → App/dist/Advisor.dmg
 ```
 
 The script runs a release `swift build`, builds the sidecar (`npm install` +
-`tsc`), assembles the `.app`, and ad-hoc signs it. Re-run it any time; it
-rebuilds `dist/Advisor.app` from scratch.
+`tsc`), assembles the `.app`, and signs it. Re-run it any time; it rebuilds
+`dist/Advisor.app` from scratch.
 
 `dmg.sh` wraps the packaged app in a compressed DMG with an Applications link,
 ready to copy to another Mac.
@@ -114,14 +116,14 @@ app a new code hash every build, so macOS treats each rebuild as a new app and
 To avoid that, create a one-off self-signed code-signing certificate named
 **`Advisor Dev`** (Keychain Access ▸ Certificate Assistant ▸ *Create a
 Certificate…* → name `Advisor Dev`, Identity Type *Self-Signed Root*, Certificate
-Type *Code Signing*). `install.sh` then re-signs with it automatically, the
-Designated Requirement stays constant, and you grant the permissions just once.
-(A Developer ID cert, if present, is preferred over the self-signed one.)
+Type *Code Signing*). `package.sh` and `install.sh` sign with it automatically,
+the Designated Requirement stays constant, and you grant the permissions just
+once. (A Developer ID cert, if present, is preferred over the self-signed one.)
 
 **Install on another Mac** (macOS 26+, Apple Silicon):
 
 1. Copy `Advisor.app` across (e.g. to `/Applications`).
-2. Clear the quarantine flag, since the app is ad-hoc-signed, not notarised:
+2. Clear the quarantine flag, since the app is locally signed, not notarised:
 
    ```sh
    xattr -dr com.apple.quarantine /Applications/Advisor.app   # or right-click ▸ Open
@@ -131,7 +133,7 @@ Designated Requirement stays constant, and you grant the permissions just once.
 4. Launch. First run prompts for Microphone and Screen & System Audio
    Recording permissions.
 
-**Distribute (signed + notarised):** for sharing beyond your own Macs, ad-hoc
+**Distribute (signed + notarised):** for sharing beyond your own Macs, local
 signing isn't enough — Gatekeeper wants a Developer ID signature + notarisation.
 
 ```sh

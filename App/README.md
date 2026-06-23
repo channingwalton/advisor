@@ -16,12 +16,13 @@ swift build
 .build/debug/Advisor              # GUI: click Listen (or press space), speak
 ```
 
-First run prompts for microphone access (attributed to the launching terminal).
+First run prompts for microphone access; a bare dev run may be attributed to the
+launching terminal.
 
 ## Packaging
 
 ```sh
-sh package.sh        # → dist/Advisor.app (self-contained, ad-hoc signed)
+sh package.sh        # → dist/Advisor.app (self-contained, locally signed)
 sh dmg.sh            # → dist/Advisor.dmg (contains Advisor.app + Applications link)
 ```
 
