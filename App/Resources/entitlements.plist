@@ -5,8 +5,9 @@
   <!--
     Hardened-runtime entitlements for Developer ID distribution (see notarize.sh).
     The app is NOT sandboxed (it spawns a Node sidecar and reads $HOME), so this
-    is the non-MAS set. TCC access (microphone, speech, screen recording) is
-    driven by the Info.plist usage strings, not entitlements.
+    is the non-MAS set. Microphone access also needs the audio-input entitlement
+    under the hardened runtime; Info.plist only supplies the user-facing TCC
+    prompt text.
 
     The three below exist because the app bundles a Node runtime + the sidecar's
     node_modules (some with native addons):
@@ -21,6 +22,8 @@
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
   <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>
 </plist>

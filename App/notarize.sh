@@ -70,7 +70,8 @@ rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 # --wait blocks until Apple finishes, then we inspect the final status before
 # stapling. Some Xcode versions print "Invalid" but still return success.
-SUBMISSION_PLIST=$(mktemp "${TMPDIR:-/tmp}/advisor-notary.XXXXXX.plist")
+SUBMISSION_PLIST=$(mktemp "${TMPDIR:-/tmp}/advisor-notary.XXXXXX")
+trap 'rm -f "$SUBMISSION_PLIST"' EXIT
 xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait \
   --output-format plist >"$SUBMISSION_PLIST"
 STATUS=$(plutil -extract status raw -o - "$SUBMISSION_PLIST")
