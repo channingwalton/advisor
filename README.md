@@ -88,11 +88,15 @@ required on the target Mac.
 
 ```sh
 cd App && sh package.sh        # → App/dist/Advisor.app
+cd App && sh dmg.sh            # → App/dist/Advisor.dmg
 ```
 
 The script runs a release `swift build`, builds the sidecar (`npm install` +
 `tsc`), assembles the `.app`, and ad-hoc signs it. Re-run it any time; it
 rebuilds `dist/Advisor.app` from scratch.
+
+`dmg.sh` wraps the packaged app in a compressed DMG with an Applications link,
+ready to copy to another Mac.
 
 To clean-build **and** install over your own copy in one step:
 

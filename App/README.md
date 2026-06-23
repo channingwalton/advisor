@@ -22,6 +22,7 @@ First run prompts for microphone access (attributed to the launching terminal).
 
 ```sh
 sh package.sh        # → dist/Advisor.app (self-contained, ad-hoc signed)
+sh dmg.sh            # → dist/Advisor.dmg (contains Advisor.app + Applications link)
 ```
 
 The app icon source is `Resources/AppIcon.iconset/` (master: `AppIcon-1024.png`);
