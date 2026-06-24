@@ -21,6 +21,11 @@ final class SessionWriter {
     /// post-stop rewrites for finishing cards keep the retained context.
     private var sessionActive = false
     private var pendingWrite: DispatchWorkItem?
+    /// Set when a live name edit (`updateName`) is staged but not yet on disk, so
+    /// the next `write()` knows to refresh the Sessions browser. Cleared by that
+    /// write — an ordinary content write doesn't set it, so the browser isn't
+    /// reloaded on every debounced transcript flush.
+    private var browserRefreshPending = false
 
     /// The note currently being written (set at session start). The history
     /// browser excludes this while listening so a follow-up append isn't
@@ -66,6 +71,9 @@ final class SessionWriter {
     /// the saved name. `inline` trims/collapses it, so the raw text is fine here.
     func updateName(_ text: String) {
         guard sessionActive else { return }
+        // Flag a browser refresh so the next write tells the Sessions sidebar to
+        // reload — without it the live note keeps its start-time title there.
+        if text != name { browserRefreshPending = true }
         name = text
     }
 
@@ -165,5 +173,12 @@ final class SessionWriter {
             started: started, ended: ended,
             context: context, name: name, tags: tags)
         try? md.write(to: fileURL, atomically: true, encoding: .utf8)
+        // A live rename only reaches the Sessions browser once the note it titles
+        // is rewritten — post now that the new name is on disk, so its sidebar
+        // drops the start-time title. Cleared so a later content write stays quiet.
+        if browserRefreshPending {
+            browserRefreshPending = false
+            NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+        }
     }
 }

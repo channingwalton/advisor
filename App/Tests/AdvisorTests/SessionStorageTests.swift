@@ -162,3 +162,64 @@ private func makeArchive(_ names: [String]) throws -> URL {
     #expect(SessionArchive.list(in: dirB).count == 1)
     #expect(SessionArchive.list(in: dirA).count == 1) // the first session stays put
 }
+
+// MARK: - live name edit refreshes the Sessions browser
+
+/// A throwaway session folder removed on teardown, for the live-rename tests.
+private func makeWriterDir() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-rename-notify-\(UUID().uuidString)")
+}
+
+/// Renaming the live session from the recording toolbar (`updateName` + a
+/// debounced write) must tell the Sessions browser to reload, or its sidebar
+/// keeps the start-time title. The write that carries the new name posts
+/// `.advisorSessionsChanged`.
+@MainActor
+@Test func liveNameEditRefreshesSessionsBrowser() async throws {
+    let dir = makeWriterDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let writer = SessionWriter(store: TranscriptStore(), resolveDirectory: { dir })
+
+    writer.start() // seeds the live note (posts once, before we observe)
+    writer.flush()
+
+    await confirmation("Sessions browser reloads after a live rename") { reloaded in
+        let token = NotificationCenter.default.addObserver(
+            forName: .advisorSessionsChanged, object: nil, queue: nil) { _ in reloaded() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        writer.updateName("Q3 board review")
+        writer.flush() // stands in for the debounced write the toolbar schedules
+    }
+
+    let note = try String(contentsOf: SessionArchive.list(in: dir)[0].url, encoding: .utf8)
+    #expect(note.contains("name: Q3 board review"))
+
+    writer.end()
+    writer.releaseNote()
+}
+
+/// A plain content write with no pending name change must not reload the browser —
+/// the live note's transcript flows through `noteChanged()` every couple of
+/// seconds, and reparsing every saved note that often would thrash the sidebar.
+@MainActor
+@Test func liveContentWriteWithoutNameChangeDoesNotRefreshBrowser() async throws {
+    let dir = makeWriterDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let writer = SessionWriter(store: TranscriptStore(), resolveDirectory: { dir })
+
+    writer.start()
+    writer.flush()
+
+    await confirmation(expectedCount: 0) { reloaded in
+        let token = NotificationCenter.default.addObserver(
+            forName: .advisorSessionsChanged, object: nil, queue: nil) { _ in reloaded() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        writer.flush() // a content write with no name edit behind it
+    }
+
+    writer.end()
+    writer.releaseNote()
+}
