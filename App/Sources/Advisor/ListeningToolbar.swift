@@ -250,7 +250,7 @@ struct ListeningToolbar: View {
     private func nameChip(compact: Bool) -> some View {
         Button { showName.toggle() } label: {
             HStack(spacing: 6) {
-                Image(systemName: "tag").font(.system(size: 12))
+                Image(systemName: "textformat").font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
                 if compact {
                     // A small accent dot signals a name has been set (the label is
