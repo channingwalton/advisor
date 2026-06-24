@@ -273,7 +273,7 @@ final class Recorder {
             // AEC (voice processing) disabled: on this setup it either fails
             // to initialise (-10875, multichannel output) or mutes the mic.
             // Echo from speakers is handled downstream by text dedup instead.
-            try capture.start(deviceID: device?.id, echoCancellation: false)
+            try capture.start(device: device, echoCancellation: false)
             let detail = [
                 "listening — \(device?.label ?? "default input")",
                 systemActive.load(ordering: .relaxed) ? "+ system audio" : nil,

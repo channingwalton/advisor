@@ -3,6 +3,7 @@ import Foundation
 
 struct InputDevice: Identifiable, Hashable {
     let id: AudioDeviceID
+    let uid: String?
     let name: String
     let isVirtual: Bool
 
@@ -33,6 +34,7 @@ enum AudioDevices {
             guard inputChannelCount(id) > 0 else { return nil }
             return InputDevice(
                 id: id,
+                uid: uid(id),
                 name: name(id) ?? "Device \(id)",
                 isVirtual: transportType(id) == kAudioDeviceTransportTypeVirtual)
         }
@@ -72,6 +74,20 @@ enum AudioDevices {
         }
         guard err == noErr, let cfName else { return nil }
         return cfName.takeRetainedValue() as String
+    }
+
+    private static func uid(_ id: AudioDeviceID) -> String? {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var cfUID: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let err = withUnsafeMutablePointer(to: &cfUID) {
+            AudioObjectGetPropertyData(id, &addr, 0, nil, &size, $0)
+        }
+        guard err == noErr, let cfUID else { return nil }
+        return cfUID.takeRetainedValue() as String
     }
 
     private static func transportType(_ id: AudioDeviceID) -> UInt32 {

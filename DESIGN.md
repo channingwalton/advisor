@@ -833,6 +833,17 @@ continues mic-only and the status tells the user to grant the permission in
 System Settings and relaunch. ScreenCaptureKit TCC errors are still normalised
 to that same instruction in case preflight and `SCStream` disagree.
 
+## Non-default mic selection (2026-06-24)
+
+The previous mitigation only avoided `kAudioOutputUnitProperty_CurrentDevice`
+when the chosen mic was already the system default. The built-in **MacBook Pro
+Microphone** can also wedge when selected as a non-default device while the
+Studio Display mic is default: STT starts, system audio can transcribe, but mic
+samples never reach Apple STT. Advisor now uses `AVAudioEngine` only for the
+default input path and uses `AVCaptureSession` for any explicitly selected
+non-default mic, matched by CoreAudio device UID with a name fallback. That keeps
+the app-level mic picker without changing the user's global macOS default input.
+
 ## Correct a transcription word/phrase (2026-06-22, issue #32)
 
 On-device STT mis-hears words; you can now fix them in place. Highlight text in a
