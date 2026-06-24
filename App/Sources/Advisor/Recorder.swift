@@ -16,6 +16,36 @@ struct Utterance: Identifiable, Equatable {
     let latencyMs: Int
 }
 
+/// A note the user injected into the transcript by hand (issue #34): their own
+/// context the audio missed or got wrong. Rendered as a distinct (green) card,
+/// anchored at `time` so it sorts into the feed where the user added it, and fed
+/// to the agents as part of the transcript stream.
+struct EditorialNote: Identifiable, Equatable {
+    let id: UUID
+    /// Anchor time — the selected line's time, so the note sorts into place
+    /// directly under the text the user was looking at.
+    let time: Date
+    var text: String
+}
+
+/// Maps a character offset within a rendered transcript paragraph back to the
+/// utterance it falls in, so an editorial note anchors at the *selected line*
+/// (issue #34) rather than the paragraph's end. The paragraph text the view
+/// shows is the run's utterances joined by single spaces, so offsets advance by
+/// each line's UTF-16 length plus one for the separator.
+enum NoteAnchor {
+    static func time(forOffset offset: Int, in utterances: [(text: String, time: Date)]) -> Date? {
+        var cursor = 0
+        for u in utterances {
+            let len = (u.text as NSString).length
+            // `<=` so the trailing separator/caret position counts as this line.
+            if offset <= cursor + len { return u.time }
+            cursor += len + 1
+        }
+        return utterances.last?.time
+    }
+}
+
 @MainActor
 final class TranscriptStore: ObservableObject {
     @Published var utterances: [Utterance] = []
@@ -25,6 +55,8 @@ final class TranscriptStore: ObservableObject {
     @Published var status = "idle"
     /// Cards from the sidecar, newest first.
     @Published var cards: [Card] = []
+    /// Editorial notes the user injected into the transcript (issue #34).
+    @Published var notes: [EditorialNote] = []
     /// Live in-progress speech (volatile STT results), per source.
     @Published var volatile: [Source: String] = [:]
     /// Bumped on every session start. STT results carry the generation of the
@@ -43,6 +75,26 @@ final class TranscriptStore: ObservableObject {
     /// Remove a card from the stream.
     func dismissCard(_ id: String) {
         cards.removeAll { $0.id == id }
+    }
+
+    /// Inject an editorial note at `time` (the anchor line's time, so it sorts
+    /// into the feed where the user added it). Trims whitespace; blank text is
+    /// ignored. Returns the stored note so the caller can forward it to the
+    /// sidecar under the same id, or nil when there was nothing to add.
+    @discardableResult
+    func addNote(_ text: String, at time: Date) -> EditorialNote? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let note = EditorialNote(id: UUID(), time: time, text: trimmed)
+        notes.append(note)
+        return note
+    }
+
+    /// Remove an editorial note (issue #34). The note already consumed by the
+    /// agents stays in their context — like a transcript correction, removal is
+    /// display/persistence only, never re-sent to the sidecar.
+    func dismissNote(_ id: UUID) {
+        notes.removeAll { $0.id == id }
     }
 
     /// Correct a transcription error in place (issue #32): replace the

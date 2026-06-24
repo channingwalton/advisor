@@ -938,6 +938,44 @@ answer/context cards) so transcript reads as a quieter, sunken surface and answe
 cards stand out — the visual hierarchy is fill-tint, not chrome. Applied to both
 the live feed and saved sessions so the two stay identical.
 
+## Editorial notes injected into the transcript (2026-06-24, issue #34)
+
+On-device audio can mishear or miss implied context. The user can now inject
+their own context: highlight (or just right-click) a transcript paragraph in the
+live feed ▸ **Add note here…**, type the note, and it lands as a distinct
+green-bordered **NOTE** card anchored at that line. Deletable via the card's
+dismiss button; add + delete only (no edit) — like a `#32` correction, removal is
+display/persistence only and never un-sends what the agents already read.
+
+The note is **fed to the agents as part of the transcript stream**, not a
+side-channel: the app sends a new `note` NDJSON frame (`SidecarManager.sendNote`),
+and the sidecar pushes it into the same `transcript[]` every research/query lane
+and the classifier read via their cursor deltas. It's labelled, not disguised as
+speech — `prompts.transcriptLine` renders a note as `[note from the user] …` (vs
+`me:`/`them:`), and the classifier system prompt is told that line is
+authoritative user context. Per the user's choice, a note also `scheduleClassify`s
+and **may itself trigger research** (it's not gated out).
+
+Placement hugs the selected text: the right-click offset (selection end, or the
+character nearest the click when nothing is highlighted) is mapped back through
+the paragraph's `utteranceIds` to the line it falls in (`NoteAnchor.time`), and
+that line's time becomes `EditorialNote.time`. The feed/markdown sort then uses a
+tie-break rank — utterance (0), note (1), card (2) — so at one line the note sits
+directly under the text and above any card triggered by it. The sidecar still
+appends the note at receipt (it carries the anchor `ts` but order there is
+arrival order) — semantically "the user just added this", regardless of where it
+sits in the scrollback. Deletion is append-only on the sidecar side (consistent
+with utterances/corrections).
+
+Persistence mirrors the inline-card format: `SessionMarkdown.noteBlock` writes a
+`> **NOTE**` blockquote, and `TranscriptDoc` parses a `**NOTE**`-headed quote back
+to a `.note` block (distinct from `.card`) so the Sessions browser re-renders it
+in the same green chrome (`SessionsView.noteBlock`). The green styling is
+duplicated live (`EditorialNoteView`) vs saved, mirroring the existing
+`transcriptCard`/`cardBlock` live-vs-browser split. Notes aren't counted as cards
+or questions in `SessionDetail`, and (known minor gap) aren't yet in the browser
+search haystack.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

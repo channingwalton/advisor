@@ -217,6 +217,7 @@ struct TranscriptView: View {
             store.sessionGeneration += 1
             store.utterances = []
             store.cards = []
+            store.notes = []
             store.volatile = [:]
         }
         .onChange(of: selectedDevice) { _, d in if let d { micDeviceName = d.name } }
@@ -282,6 +283,8 @@ struct TranscriptView: View {
             if tags != sessionTags { sessionTags = tags }
         }
         .onChange(of: store.utterances) { _, _ in services.writer.noteChanged() }
+        // An added or deleted editorial note changes the persisted note (issue #34).
+        .onChange(of: store.notes) { _, _ in services.writer.noteChanged() }
         // Only re-write the session note when output-bearing fields change — not
         // on pure UI toggles like expand/collapse (which also mutate store.cards).
         .onChange(of: cardsWriterKey) { _, _ in services.writer.noteChanged() }
@@ -381,11 +384,13 @@ struct TranscriptView: View {
     private enum FeedItem: Identifiable {
         case utterance(Utterance)
         case card(Card)
+        case note(EditorialNote)
 
         var id: String {
             switch self {
             case .utterance(let u): "u-\(u.id.uuidString)"
             case .card(let c): "c-\(c.id)"
+            case .note(let n): "n-\(n.id.uuidString)"
             }
         }
 
@@ -393,6 +398,7 @@ struct TranscriptView: View {
             switch self {
             case .utterance(let u): u.time
             case .card(let c): c.created
+            case .note(let n): n.time
             }
         }
 
@@ -400,15 +406,28 @@ struct TranscriptView: View {
             if case .utterance = self { return true }
             return false
         }
+
+        /// Tie-break rank at equal times: an utterance (0) first, then the user's
+        /// own note (1) hugging its line, then any card (2) below it (issue #34).
+        var rank: Int {
+            switch self {
+            case .utterance: 0
+            case .note: 1
+            case .card: 2
+            }
+        }
     }
 
-    /// Transcript and cards merged chronologically, so answers appear in context.
-    /// At equal times a card sorts after the utterance, so a card anchored to its
-    /// triggering sentence renders directly beneath it.
+    /// Transcript, cards and editorial notes merged chronologically, so answers
+    /// and the user's own notes appear in context. At equal times an utterance
+    /// sorts first, then a note anchored to that line, then a card — so the note
+    /// hugs its text and the card sits below.
     private var feed: [FeedItem] {
-        (store.utterances.map(FeedItem.utterance) + store.cards.map(FeedItem.card))
+        (store.utterances.map(FeedItem.utterance)
+            + store.cards.map(FeedItem.card)
+            + store.notes.map(FeedItem.note))
             .sorted { a, b in
-                a.time != b.time ? a.time < b.time : a.isUtterance && !b.isUtterance
+                a.time != b.time ? a.time < b.time : a.rank < b.rank
             }
     }
 
@@ -427,11 +446,13 @@ struct TranscriptView: View {
     private enum RenderItem: Identifiable {
         case paragraph(Paragraph)
         case card(Card)
+        case note(EditorialNote)
 
         var id: String {
             switch self {
             case .paragraph(let p): "p-\(p.id)"
             case .card(let c): "c-\(c.id)"
+            case .note(let n): "n-\(n.id.uuidString)"
             }
         }
     }
@@ -442,11 +463,13 @@ struct TranscriptView: View {
     private enum DisplayItem: Identifiable {
         case transcript([Paragraph])
         case card(Card)
+        case note(EditorialNote)
 
         var id: String {
             switch self {
             case .transcript(let ps): "t-\(ps.first?.id ?? "empty")"
             case .card(let c): "c-\(c.id)"
+            case .note(let n): "n-\(n.id.uuidString)"
             }
         }
     }
@@ -477,6 +500,9 @@ struct TranscriptView: View {
             case .card(let c):
                 flush()
                 items.append(.card(c))
+            case .note(let n):
+                flush()
+                items.append(.note(n))
             }
         }
         flush()
@@ -500,6 +526,11 @@ struct TranscriptView: View {
             case .card(let c):
                 flush()
                 items.append(.card(c))
+            case .note(let n):
+                // Notes are the user's own signal, not transcript chatter, so they
+                // stay visible even in cards-only mode.
+                flush()
+                items.append(.note(n))
             }
         }
         flush()
@@ -508,7 +539,9 @@ struct TranscriptView: View {
 
     /// Changes whenever a final line or card is added — the auto-scroll trigger
     /// (a growing paragraph keeps its id, so id-based scrolling alone misses it).
-    private var scrollKey: String { "\(store.utterances.count)|\(store.cards.count)" }
+    private var scrollKey: String {
+        "\(store.utterances.count)|\(store.cards.count)|\(store.notes.count)"
+    }
 
     /// Centered transcript column (max-width 812): day divider, flowing
     /// paragraphs, inline cards, then the live interim line.
@@ -545,6 +578,12 @@ struct TranscriptView: View {
                                 onReply: { submitReply(card, $0) }
                             )
                             .id(item.id)
+                        case .note(let note):
+                            EditorialNoteView(
+                                note: note,
+                                onDismiss: { store.dismissNote(note.id) }
+                            )
+                            .id(item.id)
                         }
                     }
                     if !hideTranscript { interimLine }
@@ -576,6 +615,9 @@ struct TranscriptView: View {
                     onAction: { kind, selection in
                         services.sidecar.sendAction(
                             kind, text: selection, triggerId: p.anchorId)
+                    },
+                    onAddNote: { noteText, offset in
+                        addNote(noteText, atOffset: offset, in: p.utteranceIds)
                     },
                     onCorrect: { request in
                         switch request.scope {
@@ -790,6 +832,22 @@ struct TranscriptView: View {
         queryText = ""
     }
 
+    /// Inject an editorial note the user typed via the transcript right-click menu
+    /// (issue #34). `offset` is the selection end / click point within the clicked
+    /// paragraph, mapped back to the line it falls in so the note anchors at the
+    /// selected text — above any card or transcript below it. Forwards it to the
+    /// sidecar as transcript context the agents read, and triggers a rewrite so it
+    /// persists.
+    private func addNote(_ text: String, atOffset offset: Int, in utteranceIds: [UUID]) {
+        let lines = utteranceIds.compactMap { id in
+            store.utterances.first { $0.id == id }.map { (text: $0.text, time: $0.time) }
+        }
+        let anchorTime = NoteAnchor.time(forOffset: offset, in: lines) ?? Date()
+        guard let note = store.addNote(text, at: anchorTime) else { return }
+        services.sidecar.sendNote(note)
+        services.writer.noteChanged()
+    }
+
     /// Summarise the whole live session into its single Summary card (issue #30).
     /// Re-running passes the existing summary card's id so the sidecar updates it
     /// in place rather than adding a second summary.
@@ -879,6 +937,7 @@ struct TranscriptView: View {
         store.sessionGeneration += 1
         store.utterances = []
         store.cards = []
+        store.notes = []
         sessionStart = Date()
         stoppedAt = nil
         let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -936,6 +995,11 @@ struct SelectableTranscriptText: NSViewRepresentable {
     let actions: [TranscriptAction]
     /// (card kind, selected text) — fired when an AI action is chosen.
     let onAction: (String, String) -> Void
+    /// Fired with (entered text, selection-end/click offset within this
+    /// paragraph) when the user adds an editorial note here (issue #34). Nil hides
+    /// the "Add note" menu item — e.g. saved notes in the browser, where notes are
+    /// only injected into the live feed.
+    var onAddNote: ((String, Int) -> Void)? = nil
     /// Fired when a correction is confirmed (issue #32). Nil hides the correction
     /// menu items — e.g. the still-being-written live note in the browser.
     var onCorrect: ((TranscriptCorrectionRequest) -> Void)? = nil
@@ -996,6 +1060,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
         tv.toolTip = toolTip
         tv.menuActions = actions
         tv.onAction = onAction
+        tv.onAddNote = onAddNote
         tv.onCorrect = onCorrect
         // New text at the same width still changes the line count.
         tv.invalidateIntrinsicContentSize()
@@ -1008,8 +1073,13 @@ struct SelectableTranscriptText: NSViewRepresentable {
 final class ActionTextView: NSTextView {
     var menuActions: [TranscriptAction] = []
     var onAction: ((String, String) -> Void)?
+    var onAddNote: ((String, Int) -> Void)?
     var onCorrect: ((TranscriptCorrectionRequest) -> Void)?
     private var lastLaidOutWidth: CGFloat = -1
+    /// Where an "Add note here…" should anchor: the end of the current selection,
+    /// or — with no selection — the character nearest the right-click point.
+    /// Captured when the menu opens (issue #34).
+    private var noteAnchorOffset = 0
 
     /// Height that fits the text at the current width; width stays flexible
     /// (noIntrinsicMetric) so the view fills the transcript column. SwiftUI reads
@@ -1044,6 +1114,12 @@ final class ActionTextView: NSTextView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
+        // Anchor a note at the selection's end, or — nothing selected — the
+        // character nearest the click, so it lands right at the text in view.
+        let range = selectedRange()
+        noteAnchorOffset = range.length > 0
+            ? range.location + range.length
+            : characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
         let selection = effectiveSelection
         let label = selection.count > 40 ? String(selection.prefix(40)) + "…" : selection
         for action in menuActions {
@@ -1055,6 +1131,16 @@ final class ActionTextView: NSTextView {
             menu.addItem(item)
         }
         if !menuActions.isEmpty { menu.addItem(.separator()) }
+
+        // Add an editorial note here (issue #34): always available where wired
+        // (the live feed), with no selection needed — it anchors to this line.
+        if onAddNote != nil {
+            let note = NSMenuItem(
+                title: "Add note here…", action: #selector(addNoteHere(_:)), keyEquivalent: "")
+            note.target = self
+            menu.addItem(note)
+            menu.addItem(.separator())
+        }
 
         // Correction (issue #32): only on a real highlight, and only where a
         // handler is wired (live feed + saved non-live notes).
@@ -1083,6 +1169,31 @@ final class ActionTextView: NSTextView {
         let selection = effectiveSelection.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selection.isEmpty else { return }
         onAction?(kind, selection)
+    }
+
+    @objc private func addNoteHere(_ sender: NSMenuItem) {
+        guard let text = promptForNote(), !text.isEmpty else { return }
+        onAddNote?(text, noteAnchorOffset)
+    }
+
+    /// Multiline text prompt for an editorial note (issue #34). Nil on cancel.
+    private func promptForNote() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Add note"
+        alert.informativeText = "Your own context for this point — the agents will read it."
+        let field = NSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 72))
+        field.font = NSFont.systemFont(ofSize: 13)
+        field.isRichText = false
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 72))
+        scroll.documentView = field
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        return field.string.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     @objc private func correctThisOccurrence(_ sender: NSMenuItem) {

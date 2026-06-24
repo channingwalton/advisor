@@ -1007,12 +1007,14 @@ private struct SessionDetailPane: View {
     private enum DisplayBlock: Identifiable {
         case transcript([(offset: Int, text: String)])
         case card(offset: Int, markdown: String)
+        case note(offset: Int, text: String)
         case heading(offset: Int, title: String)
 
         var id: Int {
             switch self {
             case .transcript(let ps): ps.first?.offset ?? -1
             case .card(let offset, _): offset
+            case .note(let offset, _): offset
             case .heading(let offset, _): offset
             }
         }
@@ -1028,6 +1030,7 @@ private struct SessionDetailPane: View {
             switch block {
             case .paragraph(let text): buf.append((offset, text))
             case .card(let markdown): flush(); out.append(.card(offset: offset, markdown: markdown))
+            case .note(let text): flush(); out.append(.note(offset: offset, text: text))
             case .heading(let title): flush(); out.append(.heading(offset: offset, title: title))
             }
         }
@@ -1046,6 +1049,8 @@ private struct SessionDetailPane: View {
                     EmptyView()
                 case .card(_, let markdown):
                     cardBlock(markdown)
+                case .note(_, let text):
+                    noteBlock(text)
                 case .heading(_, let title) where title != "Transcript" && !hideTranscript:
                     Text(title).font(.system(size: 11, weight: .semibold)).kerning(0.5)
                         .foregroundStyle(Theme.textMuted)
@@ -1094,6 +1099,22 @@ private struct SessionDetailPane: View {
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
                 .stroke(Theme.hairline, lineWidth: 0.5))
+        .padding(.vertical, 4)
+    }
+
+    /// An editorial note the user injected (issue #34), in distinct green chrome
+    /// so it reads as the user's own context rather than transcript or an answer.
+    private func noteBlock(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TypePill(label: "NOTE", colour: Theme.factGreen, tint: Theme.factGreenTint, dot: true)
+            MarkdownText(markdown: text, style: .saved)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(Theme.factGreenTint.opacity(0.4), in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
+                .stroke(Theme.factGreen.opacity(0.5), lineWidth: 1))
         .padding(.vertical, 4)
     }
 

@@ -180,8 +180,11 @@ finished, a follow-up box appears on it — ask a question about the card and th
 answer is appended in place, so a card becomes a short thread. To fix a
 mis-transcribed word, highlight it and right-click ▸ **Correct "…"** (just that
 instance) or **Replace all "…"** (every occurrence in the session); type the
-correction and it's saved to the transcript in place. The menu also lets
-you copy the text. Each card can be copied (its **Copy** button puts the title,
+correction and it's saved to the transcript in place. When the audio missed
+context, right-click ▸ **Add note here…** to inject your own — it lands as a
+green **NOTE** card at that point and the assistant reads it as part of the
+conversation (so it can inform, or trigger, research); delete it with its dismiss
+button. The menu also lets you copy the text. Each card can be copied (its **Copy** button puts the title,
 body and any sources on the clipboard), collapsed/expanded or dismissed
 (fact-checks start collapsed); dismissing a card that's still researching cancels
 its lane.

@@ -34,6 +34,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F13. Live sidebar/overlay: floating, always-on-top, compact; updates as conversation flows; never steals focus.
 - F14. On-demand query: a text box to ask about the current conversation or anything else, with conversation transcript as context.
 - F14a. In-situ actions: right-click selected transcript text to run an action (Answer / Context / Fact check) on it — the same kinds the auto-classifier detects, gated by the same per-kind toggles; the resulting card is anchored under the originating line.
+- F14b. Editorial notes (issue #34): right-click a transcript line to inject the user's own context as a distinct green NOTE card anchored at that line; the agents read it as part of the transcript (so it can inform or trigger research). Deletable; persisted with the session.
 - F15. Show live transcript (collapsible).
 - F16. Session history: transcripts and surfaced items reviewable afterwards, stored as app-managed local markdown files. No writing to the Obsidian Vault (read-only source).
 - F17. Session tags (issue #15): a user-managed library of coloured tags (Preferences), applied to a session from the live toolbar or the browser, shown as coloured pills on session rows and searchable. Stored by name in the note's frontmatter.

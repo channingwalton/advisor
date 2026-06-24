@@ -10,6 +10,10 @@ export type Inbound =
   // applied to the next dispatched research/query/reply task.
   | { type: "session_context"; text: string }
   | { type: "utterance"; id: string; source: Source; text: string; ts: number }
+  // Editorial note the user injected into the transcript by hand (issue #34).
+  // Carried into the same transcript stream the agents read, labelled as
+  // authoritative user context (not speech); may itself trigger research.
+  | { type: "note"; id: string; text: string; ts: number }
   // Manual user action. action+triggerId are set by the right-click menu:
   // action picks the prompt/card kind, triggerId anchors the card under the
   // clicked utterance. Both absent for the free-text Ask box (legacy query).

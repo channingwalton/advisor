@@ -15,7 +15,8 @@ check them before re-litigating a decision.
 - `App/` — Swift/SwiftUI macOS app (SwiftPM, macOS 26, Swift language mode v5).
   Audio capture (mic + ScreenCaptureKit system audio), on-device STT via
   Apple SpeechAnalyzer, echo dedup, chronological feed UI (selectable
-  transcript lines with a right-click action menu), session markdown writer,
+  transcript lines with a right-click action menu — AI actions, corrections,
+  and editorial NOTE cards), session markdown writer,
   a Sessions browser (master/detail: date-grouped list + detail with cards,
   questions and transcript; ask-and-append), preferences.
 - `sidecar/` — Node 22 + TypeScript + Claude Agent SDK. Trigger classifier

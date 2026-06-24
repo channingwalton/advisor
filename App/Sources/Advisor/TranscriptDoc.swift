@@ -11,6 +11,9 @@ enum TranscriptBlock: Equatable {
     /// An inline card / follow-up, as the inner markdown of its blockquote
     /// (header, body, footer) — rendered in card chrome.
     case card(String)
+    /// An editorial note the user injected (issue #34): the body text of a
+    /// `**NOTE**`-headed blockquote — rendered in distinct (green) chrome.
+    case note(String)
     /// A section heading kept from the note (e.g. "Follow-ups").
     case heading(String)
 }
@@ -40,7 +43,12 @@ enum TranscriptDoc {
         }
         func flushQuote() {
             if !quote.isEmpty {
-                blocks.append(.card(quote.joined(separator: "\n")))
+                let inner = quote.joined(separator: "\n")
+                if let noteBody = noteBody(from: inner) {
+                    blocks.append(.note(noteBody))
+                } else {
+                    blocks.append(.card(inner))
+                }
                 quote = []
             }
         }
@@ -83,6 +91,18 @@ enum TranscriptDoc {
         flushPara()
         flushQuote()
         return blocks
+    }
+
+    /// The body of an editorial-note blockquote, or nil when the inner markdown
+    /// isn't one (issue #34). A note is a `**NOTE**` header followed by a blank
+    /// line and the note text; the body is everything after that header.
+    private static func noteBody(from inner: String) -> String? {
+        var lines = inner.components(separatedBy: "\n")
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "**NOTE**" else { return nil }
+        lines.removeFirst()
+        // Drop the single blank separator line the writer emits after the header.
+        if lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeFirst() }
+        return lines.joined(separator: "\n")
     }
 
     /// Splits a leading `HH:MM:SS ` stamp off a transcript line, returning the

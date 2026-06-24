@@ -196,6 +196,36 @@ struct ListeningCardView: View {
     }
 }
 
+/// An editorial note the user injected into the live feed (issue #34): their own
+/// context the audio missed or got wrong, in distinct green chrome with a NOTE
+/// title so it's obvious it isn't transcript. Deletable via the dismiss button.
+struct EditorialNoteView: View {
+    let note: EditorialNote
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                TypePill(label: "NOTE", colour: Theme.factGreen, tint: Theme.factGreenTint, dot: true)
+                Spacer(minLength: 4)
+                CardIconButton(system: "xmark", help: "Delete note", action: onDismiss)
+            }
+            Text(note.text)
+                .font(.system(size: 14.5))
+                .foregroundStyle(Theme.textBody)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(
+            Theme.factGreenTint.opacity(0.4), in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
+                .stroke(Theme.factGreen.opacity(0.5), lineWidth: 1))
+    }
+}
+
 extension View {
     /// Shows the standard pointing-hand cursor while the pointer is over the
     /// view. SwiftUI `Link`/markdown links don't change the cursor on macOS, so

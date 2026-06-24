@@ -242,6 +242,18 @@ final class SidecarManager {
         ])
     }
 
+    /// Forward an editorial note (issue #34) into the sidecar's transcript stream,
+    /// where the classifier and every research/query lane read it as labelled user
+    /// context. Append-only like utterances — a later delete is display-only.
+    func sendNote(_ note: EditorialNote) {
+        send([
+            "type": "note",
+            "id": note.id.uuidString,
+            "text": note.text,
+            "ts": note.time.timeIntervalSince1970,
+        ])
+    }
+
     func sendQuery(_ text: String) {
         send(["type": "query", "id": UUID().uuidString, "text": text])
     }

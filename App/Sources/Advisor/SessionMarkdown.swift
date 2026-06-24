@@ -10,7 +10,8 @@ enum SessionMarkdown {
     /// triggering line — the same ordering the live feed uses). Only `done`/
     /// `failed` cards are included; in-flight cards are skipped.
     static func inline(
-        utterances: [Utterance], cards: [Card], started: Date?, ended: Date?,
+        utterances: [Utterance], cards: [Card], notes: [EditorialNote] = [],
+        started: Date?, ended: Date?,
         context: String = "", name: String = "", tags: [String] = []
     ) -> String {
         let iso = ISO8601DateFormatter()
@@ -19,22 +20,29 @@ enum SessionMarkdown {
 
         struct Entry {
             let time: Date
-            let isUtterance: Bool
+            // Tie-break rank at equal times: utterance (0) first, then the user's
+            // own note (1) hugging its line, then any card (2) below it (issue #34).
+            let rank: Int
             let text: String
         }
 
         var entries: [Entry] = utterances.map {
-            Entry(time: $0.time, isUtterance: true, text: "- \(time.string(from: $0.time)) \($0.text)")
+            Entry(time: $0.time, rank: 0, text: "- \(time.string(from: $0.time)) \($0.text)")
         }
         entries += cards
             // The summary card isn't an inline transcript entry — it renders in
             // its own `# Summary` section (below), so the note holds one summary.
             .filter { ($0.state == "done" || $0.state == "failed") && $0.kind != "summary" }
-            .map { Entry(time: $0.created, isUtterance: false, text: cardBlock($0)) }
-        // Stable: at equal times an utterance precedes a card, so an anchored
-        // card renders directly under its line.
+            .map { Entry(time: $0.created, rank: 2, text: cardBlock($0)) }
+        // Editorial notes the user injected (issue #34) sit inline at their anchor
+        // time, in their own `**NOTE**` blockquote.
+        entries += notes.map {
+            Entry(time: $0.time, rank: 1, text: noteBlock($0.text))
+        }
+        // Stable: at equal times an utterance precedes its note, which precedes a
+        // card, so each renders directly under the line it belongs to.
         entries.sort { a, b in
-            a.time != b.time ? a.time < b.time : (a.isUtterance && !b.isUtterance)
+            a.time != b.time ? a.time < b.time : a.rank < b.rank
         }
 
         var md = "---\n"
@@ -112,6 +120,19 @@ enum SessionMarkdown {
         }
         lines.append("")
         lines.append("_Asked \(stamp.string(from: asked))_")
+        return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
+    }
+
+    /// An editorial note as a `**NOTE**`-headed blockquote (issue #34) — the same
+    /// "chat" block style as cards, so a saved note renders in card chrome, but
+    /// with a `NOTE` header `TranscriptDoc` parses back to a `.note` block.
+    static func noteBlock(_ text: String) -> String {
+        var lines = ["**NOTE**"]
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty {
+            lines.append("")
+            lines += body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        }
         return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
     }
 

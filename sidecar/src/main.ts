@@ -8,9 +8,11 @@ import {
   documentQuestionTask,
   sessionContextPrefix,
   summaryTask,
+  transcriptLine,
+  TranscriptSource,
 } from "./prompts.js";
 import { cardOutcome, boundedPush } from "./cards.js";
-import { Inbound, log, send, Source } from "./protocol.js";
+import { Inbound, log, send } from "./protocol.js";
 import {
   cardKind,
   classify,
@@ -74,7 +76,9 @@ let queryLane: Lane = makeLane("query");
 
 interface TranscriptEntry {
   id: string;
-  source: Source;
+  // "me"/"them" are spoken lines; "note" is an editorial note the user injected
+  // (issue #34), rendered with a distinct label in the delta windows.
+  source: TranscriptSource;
   text: string;
   ts: number;
 }
@@ -97,7 +101,7 @@ function transcriptDelta(lane: string): string {
   const fresh = transcript.slice(seen);
   cursors.set(lane, transcript.length);
   if (fresh.length === 0) return "";
-  const text = fresh.map((e) => `${e.source}: ${e.text}`).join("\n");
+  const text = fresh.map((e) => transcriptLine(e.source, e.text)).join("\n");
   return `Conversation since my last message:\n<transcript>\n${text}\n</transcript>\n\n`;
 }
 
@@ -322,7 +326,7 @@ function classifierDelta(): { text: string; anchorId?: string } {
   const fresh = transcript.slice(seen);
   cursors.set("classifier", transcript.length);
   if (fresh.length === 0) return { text: "" };
-  const blocks: { source: Source; text: string }[] = [];
+  const blocks: { source: TranscriptSource; text: string }[] = [];
   for (const e of fresh) {
     const last = blocks[blocks.length - 1];
     if (last && last.source === e.source) {
@@ -335,7 +339,7 @@ function classifierDelta(): { text: string; anchorId?: string } {
   // sentence that completed it. Removes research-latency drift; residual error
   // is at most the debounce window.
   return {
-    text: blocks.map((b) => `${b.source}: ${b.text}`).join("\n"),
+    text: blocks.map((b) => transcriptLine(b.source, b.text)).join("\n"),
     anchorId: fresh[fresh.length - 1].id,
   };
 }
@@ -455,6 +459,14 @@ function handle(msg: Inbound): void {
     case "utterance":
       transcript.push({ id: msg.id, source: msg.source, text: msg.text, ts: msg.ts });
       log(`utterance(${msg.source}): ${msg.text.slice(0, 60)}`);
+      scheduleClassify();
+      break;
+    case "note":
+      // An editorial note rides the same transcript stream the agents read, so
+      // the classifier and every research/query lane pick it up via their delta.
+      // Classify too: the user opted for notes to be able to trigger research.
+      transcript.push({ id: msg.id, source: "note", text: msg.text, ts: msg.ts });
+      log(`note: ${msg.text.slice(0, 60)}`);
       scheduleClassify();
       break;
     case "query":

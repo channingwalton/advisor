@@ -40,6 +40,36 @@ import Testing
     ])
 }
 
+@Test func noteBlockquoteBecomesNoteBlock() {
+    // An editorial note is a `**NOTE**`-headed blockquote — parsed as `.note`,
+    // not a `.card`, so it renders in its own (green) chrome (issue #34).
+    let body = "- 17:00:00 a line\n\n> **NOTE**\n>\n> my own context\n\n- 17:00:01 next"
+    #expect(TranscriptDoc.blocks(from: body) == [
+        .paragraph("a line"),
+        .note("my own context"),
+        .paragraph("next"),
+    ])
+}
+
+@Test func multilineNoteKeepsItsBody() {
+    let body = "> **NOTE**\n>\n> line one\n> line two"
+    #expect(TranscriptDoc.blocks(from: body) == [.note("line one\nline two")])
+}
+
+@Test func roundTripFromInlinePreservesNotes() {
+    let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+    let utterances = [Utterance(time: t0, source: .them, text: "hello", latencyMs: 0)]
+    let notes = [
+        EditorialNote(id: UUID(), time: t0.addingTimeInterval(0.5), text: "they mean project Apollo")
+    ]
+    let md = SessionMarkdown.inline(
+        utterances: utterances, cards: [], notes: notes, started: t0, ended: nil)
+    let blocks = TranscriptDoc.blocks(from: SessionArchive.strippingFrontmatter(md))
+    #expect(blocks == [
+        .heading("Transcript"), .paragraph("hello"), .note("they mean project Apollo"),
+    ])
+}
+
 @Test func transcriptHeadingIsKept() {
     // The view drops "Transcript" at render time; the parser surfaces all headings.
     let body = "# Transcript\n\n- 17:00:00 hi\n\n# Follow-ups\n\n> **Q · q**"

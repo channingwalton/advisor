@@ -117,6 +117,7 @@ final class SessionWriter {
     /// finished card. Drives the toolbar's Export button enabled state.
     var hasExportContent: Bool {
         !store.utterances.isEmpty
+            || !store.notes.isEmpty
             || store.cards.contains { $0.state == "done" || $0.state == "failed" }
     }
 
@@ -160,7 +161,8 @@ final class SessionWriter {
     private func write() {
         guard let fileURL, let started else { return }
         let md = SessionMarkdown.inline(
-            utterances: store.utterances, cards: store.cards, started: started, ended: ended,
+            utterances: store.utterances, cards: store.cards, notes: store.notes,
+            started: started, ended: ended,
             context: context, name: name, tags: tags)
         try? md.write(to: fileURL, atomically: true, encoding: .utf8)
     }

@@ -33,6 +33,39 @@ private func makeCard(
     #expect(!md.contains("# Cards"))
 }
 
+@Test func inlinesEditorialNoteAsNoteBlockquote() {
+    let t = Date(timeIntervalSince1970: 1_000)
+    let u = Utterance(time: t, source: .them, text: "what did they call it", latencyMs: 0)
+    let note = EditorialNote(
+        id: UUID(), time: t.addingTimeInterval(0.5), text: "they mean project Apollo")
+
+    let md = SessionMarkdown.inline(
+        utterances: [u], cards: [], notes: [note], started: t, ended: nil)
+
+    #expect(md.contains("> **NOTE**"))
+    #expect(md.contains("> they mean project Apollo"))
+    // The note sorts after the utterance it annotates (later anchor time).
+    let utterIdx = md.range(of: "what did they call it")!.lowerBound
+    let noteIdx = md.range(of: "they mean project Apollo")!.lowerBound
+    #expect(utterIdx < noteIdx)
+}
+
+@Test func editorialNoteSortsAboveACardAtTheSameAnchorTime() {
+    // A note anchored to the very line that also triggered a card must sit above
+    // that card (issue #34) — the note hugs the selected text; the card sits below.
+    let t = Date(timeIntervalSince1970: 1_000)
+    let u = Utterance(time: t, source: .them, text: "the claim", latencyMs: 0)
+    let card = makeCard(created: t, title: "Checked", body: "verdict")
+    let note = EditorialNote(id: UUID(), time: t, text: "my context")
+
+    let md = SessionMarkdown.inline(
+        utterances: [u], cards: [card], notes: [note], started: t, ended: nil)
+
+    let noteIdx = md.range(of: "**NOTE**")!.lowerBound
+    let cardIdx = md.range(of: "**ANSWER · Checked**")!.lowerBound
+    #expect(noteIdx < cardIdx)
+}
+
 @Test func excludesInFlightCards() {
     let t = Date(timeIntervalSince1970: 1_000)
     let pending = makeCard(created: t, title: "Pending", state: "pending")

@@ -74,6 +74,18 @@ ${transcript}
 </transcript>`;
 }
 
+/// Source of one transcript entry: the two live speakers, or an editorial note
+/// the user injected by hand (issue #34).
+export type TranscriptSource = "me" | "them" | "note";
+
+/// Render one transcript entry for a delta window. Speech is `source: text`; an
+/// editorial note is labelled so the agent treats it as authoritative context the
+/// user typed directly — to be trusted over the surrounding speech-to-text — not
+/// as something a participant said aloud.
+export function transcriptLine(source: TranscriptSource, text: string): string {
+  return source === "note" ? `[note from the user] ${text}` : `${source}: ${text}`;
+}
+
 /// Prefix prepended to each research/query/reply task carrying the user's live
 /// session prompt. Read fresh at dispatch so mid-session edits take effect on
 /// the next task without rebuilding lanes. Blank/whitespace → no block.

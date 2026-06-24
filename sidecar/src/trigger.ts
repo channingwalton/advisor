@@ -104,6 +104,9 @@ Important properties of the input:
   from the same speaker into complete sentences before judging.
 - Echo may cause NEAR-DUPLICATE lines from different speakers — treat them as one.
 - Punctuation and capitalisation are unreliable. A question may have no question mark.
+- A line beginning "[note from the user]" is an editorial note the user typed by hand, not
+  speech. Trust it as authoritative context, use it to disambiguate the surrounding lines,
+  and trigger research on it when it warrants looking something up.
 
 Your mission: behave like a sharp assistant sitting in the meeting who looks things up
 BEFORE being asked. ${SENSITIVITY[cfg.triggerSensitivity] ?? SENSITIVITY.balanced}
