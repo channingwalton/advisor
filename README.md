@@ -94,15 +94,11 @@ required on the target Mac.
 
 ```sh
 cd App && sh package.sh        # → App/dist/Advisor.app
-cd App && sh dmg.sh            # → App/dist/Advisor.dmg
 ```
 
 The script runs a release `swift build`, builds the sidecar (`npm install` +
 `tsc`), assembles the `.app`, and signs it. Re-run it any time; it rebuilds
 `dist/Advisor.app` from scratch.
-
-`dmg.sh` wraps the packaged app in a compressed DMG with an Applications link,
-ready to copy to another Mac.
 
 To clean-build **and** install over your own copy in one step:
 
@@ -124,7 +120,7 @@ Type *Code Signing*). `package.sh` and `install.sh` sign with it automatically,
 the Designated Requirement stays constant, and you grant the permissions just
 once. (A Developer ID cert, if present, is preferred over the self-signed one.)
 
-**Install on another Mac** (macOS 26+, Apple Silicon):
+**Install a local build on another Mac** (macOS 26+, Apple Silicon):
 
 1. Copy `Advisor.app` across (e.g. to `/Applications`).
 2. Clear the quarantine flag, since the app is locally signed, not notarised:
@@ -141,15 +137,15 @@ once. (A Developer ID cert, if present, is preferred over the self-signed one.)
 signing isn't enough — Gatekeeper wants a Developer ID signature + notarisation.
 
 ```sh
-cd App && sh notarize.sh       # → App/dist/Advisor.app (stapled) + Advisor.zip
+cd App && sh dmg.sh            # → App/dist/Advisor.dmg
 ```
 
-`notarize.sh` runs `package.sh`, then re-signs the bundle (and its nested Node
-runtime + native addons) with your **Developer ID Application** certificate under
-the hardened runtime (`Resources/entitlements.plist`), submits it to Apple's
-notary service, staples the ticket and runs a Gatekeeper check. One-off setup
-first: an Apple Developer Program membership, a Developer ID Application cert in
-your keychain, and stored notary credentials —
+`dmg.sh` runs `notarize.sh` to build, Developer-ID-sign, notarise and staple the
+app, wraps that app in a compressed DMG with an Applications link, then signs,
+notarises, staples and Gatekeeper-checks the DMG. `notarize.sh` remains available
+when you need the zipped app instead. One-off setup first: an Apple Developer
+Program membership, a Developer ID Application cert in your keychain, and stored
+notary credentials —
 
 ```sh
 xcrun notarytool store-credentials "advisor-notary" \

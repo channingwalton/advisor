@@ -23,8 +23,11 @@ launching terminal.
 
 ```sh
 sh package.sh        # → dist/Advisor.app (self-contained, locally signed)
-sh dmg.sh            # → dist/Advisor.dmg (contains Advisor.app + Applications link)
+sh dmg.sh            # → dist/Advisor.dmg (Developer ID signed, notarised, stapled)
 ```
+
+`dmg.sh` requires a Developer ID Application certificate and stored notarytool
+credentials. It packages the notarised app inside a notarised DMG for sharing.
 
 The app icon source is `Resources/AppIcon.iconset/` (master: `AppIcon-1024.png`);
 `package.sh` compiles it to `AppIcon.icns` via `iconutil` and `Info.plist`

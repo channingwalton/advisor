@@ -169,9 +169,13 @@ A card carries an app-only `replying` flag (never on the wire): while a follow-u
 
 The dev build is a bare SwiftPM executable that locates the sidecar by `#filePath`-derived `repoRoot`. That doesn't survive leaving the checkout. `App/package.sh` now assembles a self-contained `Advisor.app`; `AppResources` resolves resources from `Bundle.main` when packaged and falls back to `repoRoot` in a dev checkout, so one binary runs either way.
 
-Decisions (single-user, few-machine distribution — not the App Store): **bundle the Node runtime** (the ~127 MB arm64 `node` binary, copied into `Contents/Resources`) so the target needs no Node install; the Agent SDK's own child processes reuse it via `process.execPath`. **Locally signed, not notarised** — `package.sh` uses a Developer ID or self-signed `Advisor Dev` identity when present and falls back to ad-hoc signing. First launch may still need right-click ▸ Open. STT is Apple SpeechAnalyzer, so there are no model files or native dylibs to ship — the bundle is just the executable, Node, and the built sidecar.
+Decisions (single-user, few-machine distribution — not the App Store): **bundle the Node runtime** (the ~127 MB arm64 `node` binary, copied into `Contents/Resources`) so the target needs no Node install; the Agent SDK's own child processes reuse it via `process.execPath`. `package.sh` is the local build path: it uses a Developer ID or self-signed `Advisor Dev` identity when present and falls back to ad-hoc signing. First launch of that local build may still need right-click ▸ Open. STT is Apple SpeechAnalyzer, so there are no model files or native dylibs to ship — the bundle is just the executable, Node, and the built sidecar.
 
 (Originally the bundle also flattened the whisper + ggml/Metal dylibs into `Contents/Frameworks` with rpath surgery; removed with whisper — see the dated section below.) The bundled Node boots the bundled sidecar with no system Node on `PATH`. The sidecar still needs the user's Claude Code login on the target.
+
+## DMG distribution (2026-06-24)
+
+The shared artefact is `App/dist/Advisor.dmg`, not a raw local `.app`. `App/dmg.sh` first runs `notarize.sh` so the app is Developer-ID-signed, hardened-runtime, notarised and stapled. It then builds the compressed DMG with an Applications link, signs the DMG, submits the DMG to Apple's notary service, staples the DMG ticket, validates the staple and runs `spctl -t open --context context:primary-signature` against the image. This avoids the Gatekeeper failure shown to recipients of the old local-only DMG: "Apple could not verify \"Advisor\" is free of malware that may harm your Mac or compromise your privacy."
 
 ## Codex as an alternative provider (2026-06-13)
 
@@ -816,8 +820,8 @@ duplicate dev-binary / installed-`.app`, which share the bundle id) as a differe
 app and drops the grant, while still *showing* it enabled in System Settings.
 Fix: `package.sh`/`install.sh` sign with a stable identity (a self-signed
 **`Advisor Dev`** cert, or a Developer ID if present), keeping the Designated
-Requirement constant so grants persist. See README. Distribution-grade signing
-is `notarize.sh`.
+Requirement constant so grants persist. See README. Distribution-grade sharing
+is `dmg.sh`; `notarize.sh` remains the app-level signing/notary helper.
 
 ## System-audio permission preflight (2026-06-23)
 
