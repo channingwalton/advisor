@@ -177,7 +177,9 @@ struct SessionsView: View {
                         folderHeader(folder).plainSidebarRow()
                         if !collapsedFolders.contains(folder) {
                             ForEach(sessions(in: folder)) { session in
-                                sessionRow(session).plainSidebarRow()
+                                sessionRow(session)
+                                    .padding(.leading, 16)
+                                    .plainSidebarRow()
                             }
                         }
                     }
