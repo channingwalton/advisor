@@ -23,5 +23,11 @@ final class TranscriptWindowContext: ObservableObject {
     /// finish — would clobber an appended follow-up.
     @Published var liveFileURL: URL?
 
+    /// The folder a not-yet-started recording should be filed into (issue #35),
+    /// set by a folder's record button in the Sessions sidebar before the recording
+    /// window opens. The window reads it at session start and clears it; nil means
+    /// the next recording is un-foldered (the global record button clears it too).
+    @Published var pendingFolder: String?
+
     private init() {}
 }

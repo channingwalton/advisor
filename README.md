@@ -213,7 +213,11 @@ a session by dragging its row onto a folder, or via its **right-click** menu →
 **New Folder…**). Right-click a folder header to rename or delete it — deleting a
 folder moves its sessions back out and keeps them. Folders are real
 sub-directories under the storage folder, so they show in Finder too. The session
-currently being recorded can't be filed until it has finished.
+currently being recorded can't be filed until it has finished — but you can
+**start** a recording already in a folder: the red **record button** on a folder
+header opens the recording window filed into that folder, so its note is saved
+there straight away (the recording window shows the target folder). The folder is
+fixed once you press Listen; re-file afterwards with **Move to Folder**.
 Selecting one shows it on the right: title and meta, the questions you asked, and
 the transcript rendered like the live window (with the cards Advisor surfaced
 inline, as in the live view). The detail header's **Tags** chip applies or

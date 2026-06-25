@@ -12,6 +12,9 @@ struct ListeningToolbar: View {
     /// When stopped, the moment capture stopped — freezes the timer display until
     /// the session is resumed. Nil while recording or idle.
     let stoppedAt: Date?
+    /// The folder this recording is filed into (issue #35), shown read-only so it's
+    /// clear where the note lands. Nil = un-foldered (no indicator shown).
+    let targetFolder: String?
     @Binding var selectedDevice: InputDevice?
     let devices: [InputDevice]
     let captureSystem: Bool
@@ -78,6 +81,7 @@ struct ListeningToolbar: View {
     /// the icons and indicators) so the strip degrades gracefully when narrow.
     private func secondaryControls(compact: Bool) -> some View {
         HStack(spacing: 12) {
+            folderIndicator(compact: compact)
             nameChip(compact: compact)
             focusChip(compact: compact)
             TagsChip(tags: sessionTags, library: tagLibrary, compact: compact) { sessionTags = $0 }
@@ -232,6 +236,33 @@ struct ListeningToolbar: View {
         .fixedSize()
         .disabled(store.listening)
         .help("Audio source")
+    }
+
+    // MARK: folder indicator
+
+    /// A read-only chip showing the folder this recording is filed into (issue
+    /// #35), so it's clear where the note lands. Hidden when un-foldered. The
+    /// folder is fixed at session start, so this isn't a picker — re-filing is via
+    /// the Sessions browser's Move to Folder once the session is saved.
+    @ViewBuilder private func folderIndicator(compact: Bool) -> some View {
+        if let folder = targetFolder {
+            HStack(spacing: 6) {
+                Image(systemName: "folder.fill").font(.system(size: 12))
+                    .foregroundStyle(Theme.accent)
+                if !compact {
+                    Text(folder).font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textStrong)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 34)
+            .background(Theme.accentTint, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
+                    .stroke(Theme.hairline, lineWidth: 0.5))
+            .help("This recording is filed into the “\(folder)” folder")
+        }
     }
 
     // MARK: focus chip

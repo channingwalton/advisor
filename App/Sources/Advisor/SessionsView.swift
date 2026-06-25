@@ -164,15 +164,18 @@ struct SessionsView: View {
                         .plainSidebarRow()
                 }
                 if showFoldersBar { foldersBar.plainSidebarRow() }
+                // Folders render as plain rows, not a `Section` header: a sidebar
+                // Section header flattens nested controls, so the header's record
+                // button (issue #35) wouldn't show — a regular row keeps it live
+                // (the same reason `foldersBar`'s + button works).
                 ForEach(visibleFolders, id: \.self) { folder in
-                    Section {
+                    Group {
+                        folderHeader(folder).plainSidebarRow()
                         if !collapsedFolders.contains(folder) {
                             ForEach(sessions(in: folder)) { session in
                                 sessionRow(session).plainSidebarRow()
                             }
                         }
-                    } header: {
-                        folderHeader(folder).plainSidebarRow()
                     }
                 }
                 ForEach(grouped, id: \.label) { group in
@@ -221,39 +224,41 @@ struct SessionsView: View {
         .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 2)
     }
 
-    /// A collapsible folder section header: disclosure chevron, name, count.
-    /// Tapping toggles expansion; right-click renames/deletes the folder.
+    /// A collapsible folder section header: disclosure chevron, name, count, and a
+    /// record button that starts a recording filed into this folder (issue #35).
+    /// Tapping the row toggles expansion; right-click renames/deletes the folder.
+    /// A plain row with `.onTapGesture`, not a `Button`, so the nested record
+    /// `Button` keeps its own tap target rather than being swallowed by an outer one.
     private func folderHeader(_ folder: String) -> some View {
         let collapsed = collapsedFolders.contains(folder)
         let count = sessions(in: folder).count
         let targeted = dropTargetFolder == folder
-        return Button {
-            if collapsed { collapsedFolders.remove(folder) } else { collapsedFolders.insert(folder) }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textMuted)
-                    .frame(width: 10)
-                Image(systemName: targeted ? "folder.fill" : "folder")
-                    .font(.system(size: 11)).foregroundStyle(targeted ? Theme.accent : Theme.textSecondary)
-                Text(folder).font(.system(size: 11.5, weight: .bold)).kerning(0.2)
-                    .foregroundStyle(targeted ? Theme.accent : Theme.textSecondary).lineLimit(1)
-                Spacer(minLength: 6)
-                Text("\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textMuted)
-            }
-            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            // Tint the row and outline it while a session is dragged over, so the
-            // drop target is unmistakable.
-            .background(targeted ? Theme.accent.opacity(0.12) : Theme.surfaceTitlebar)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Theme.accent, lineWidth: 1.5)
-                    .padding(.horizontal, 6)
-                    .opacity(targeted ? 1 : 0))
+        return HStack(spacing: 6) {
+            Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                .font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textMuted)
+                .frame(width: 10)
+            Image(systemName: targeted ? "folder.fill" : "folder")
+                .font(.system(size: 11)).foregroundStyle(targeted ? Theme.accent : Theme.textSecondary)
+            Text(folder).font(.system(size: 11.5, weight: .bold)).kerning(0.2)
+                .foregroundStyle(targeted ? Theme.accent : Theme.textSecondary).lineLimit(1)
+            Spacer(minLength: 6)
+            Text("\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textMuted)
+            folderRecordButton(folder)
         }
-        .buttonStyle(.plain).focusEffectDisabled()
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        // Tint the row and outline it while a session is dragged over, so the
+        // drop target is unmistakable.
+        .background(targeted ? Theme.accent.opacity(0.12) : Theme.surfaceTitlebar)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Theme.accent, lineWidth: 1.5)
+                .padding(.horizontal, 6)
+                .opacity(targeted ? 1 : 0))
+        .onTapGesture {
+            if collapsed { collapsedFolders.remove(folder) } else { collapsedFolders.insert(folder) }
+        }
         .contextMenu { folderMenu(folder) }
         // Drop a dragged session row here to file it into this folder (issue #25),
         // highlighting the header while it's the active target. Uses the older
@@ -343,9 +348,13 @@ struct SessionsView: View {
     /// Primary action: open (or bring forward) the single recording window. The
     /// ⌘N shortcut is bound globally by `RecordingCommands` (menu bar), so it
     /// isn't re-bound here to avoid a duplicate-binding conflict — the tooltip
-    /// carries the hint instead.
+    /// carries the hint instead. Clears any pending folder target so this records
+    /// into the un-foldered root (issue #35).
     private var newRecordingButton: some View {
-        Button { openWindow(id: "recording") } label: {
+        Button {
+            TranscriptWindowContext.shared.pendingFolder = nil
+            openWindow(id: "recording")
+        } label: {
             Image(systemName: "record.circle.fill")
                 .font(.system(size: 17))
                 .foregroundStyle(Theme.recordRed)
@@ -354,6 +363,23 @@ struct SessionsView: View {
         .buttonStyle(.plain)
         .focusEffectDisabled()
         .help("Start a new recording (⌘N)")
+    }
+
+    /// A folder header's record button (issue #35): targets this folder for the
+    /// next recording and opens the recording window, so the new session's note is
+    /// written straight into `<root>/<folder>/` rather than the root.
+    private func folderRecordButton(_ folder: String) -> some View {
+        Button {
+            TranscriptWindowContext.shared.pendingFolder = folder
+            openWindow(id: "recording")
+        } label: {
+            Image(systemName: "record.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.recordRed)
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help("Start a new recording in “\(folder)”")
     }
 
     private var searchField: some View {

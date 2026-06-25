@@ -731,10 +731,12 @@ writer-routed path for folders, unlike rename/tags, because you simply can't fil
 the note that's still being written.) The #16 storage-relocation `move` now
 **preserves folder structure** — a note in `source/Work` lands in `dest/Work`.
 
-In the sidebar (`SessionsView`), folders render as collapsible `Section`s above
-the date-grouped un-foldered list: `grouped` only buckets `folder == nil`
-sessions, `sessions(in:)` supplies each folder's flat list, and `visibleFolders`
-shows every folder when unfiltered but only folders with a match while searching.
+In the sidebar (`SessionsView`), folders render as collapsible rows above the
+date-grouped un-foldered list: `grouped` only buckets `folder == nil` sessions,
+`sessions(in:)` supplies each folder's flat list, and `visibleFolders` shows every
+folder when unfiltered but only folders with a match while searching. (The header
+is a plain row, **not** a `Section` header — a sidebar Section header flattens
+nested controls, which would hide the per-folder record button added in `#35`.)
 Filing changes a note's URL — the selection key — so `fileSession` re-points
 `selection` to the moved file before the reload. Drag-and-drop carries the row's
 file `URL` and the folder header is a `.dropDestination`; unknown URLs (e.g. a
@@ -975,6 +977,35 @@ duplicated live (`EditorialNoteView`) vs saved, mirroring the existing
 `transcriptCard`/`cardBlock` live-vs-browser split. Notes aren't counted as cards
 or questions in `SessionDetail`, and (known minor gap) aren't yet in the browser
 search haystack.
+
+## Start a recording in a folder (2026-06-25, issue #35)
+
+Filing a saved session into a folder (`#25`) is a post-hoc drag/menu move. You can
+now start a recording **already filed**: each folder header in the Sessions sidebar
+carries a small red record button (`folderRecordButton`) that targets that folder
+for the next recording, so its note is written straight into `<root>/<folder>/`
+rather than the root and a later move.
+
+The target rides a `pendingFolder` on `TranscriptWindowContext` (the same shared
+holder the recording window already reads `liveFileURL`/`sidecar` from), because the
+recording window is a single-instance `Window` and `openWindow(id:)` can't pass a
+value to it. The folder button sets `pendingFolder` then opens the window; the
+global record button (and the writer's un-foldered default) clear it. At session
+start `startSession` reads `pendingFolder`, passes it to `SessionWriter.start(…,
+folder:)`, captures it into the window's `recordingFolder` for display, and clears
+the pending value so it can't leak to a later un-foldered recording. The window's
+`onDisappear` also clears both, so reopening with ⌘N starts un-foldered.
+
+`SessionWriter.start` nests under the resolved base directory:
+`base.appendingPathComponent(sanitiseFolderName(folder))` (an unusable name falls
+back to the root, reusing the `#25` gate). `list` already returns such a note with
+`folder` set, so no browser change is needed — it appears under its folder.
+
+The folder is **fixed at session start**, shown read-only as a folder chip in the
+recording toolbar (`ListeningToolbar.folderIndicator`), not a picker. Re-filing mid
+recording would mean moving the live note the `SessionWriter` owns — exactly the
+two-writer clobber the `#25` live-note filing exemption avoids — so it's deferred to
+the saved-note **Move to Folder** path after the session ends.
 
 ## Revisit as it grows
 

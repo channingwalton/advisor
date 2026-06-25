@@ -166,6 +166,13 @@ struct TranscriptView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("micDeviceName") private var micDeviceName = ""
+    /// Shared window context, observed for the pending folder target (issue #35) a
+    /// folder's record button sets before this window opens.
+    @ObservedObject private var winCtx = TranscriptWindowContext.shared
+    /// The folder this session is being recorded into (issue #35), captured from
+    /// `winCtx.pendingFolder` at session start so the toolbar can show where the
+    /// note lands even after the pending target is cleared. Nil = un-foldered.
+    @State private var recordingFolder: String?
 
     var body: some View {
         ZStack {
@@ -201,6 +208,10 @@ struct TranscriptView: View {
             // stopped-but-resumable session is still in progress (sessionStart set
             // though not listening), so end on the session, not the audio state.
             if sessionStart != nil { endSession() }
+            // Drop any folder target so reopening the window with the global record
+            // button (or ⌘N) starts un-foldered (issue #35).
+            winCtx.pendingFolder = nil
+            recordingFolder = nil
             services.recorder = nil
             // Detach the writer from the just-saved note and drop the live lock
             // BEFORE clearing the shared store, so neither the store-clear's change
@@ -296,6 +307,14 @@ struct TranscriptView: View {
         }
     }
 
+    /// The folder this recording is (or will be) filed into (issue #35): the
+    /// pending target before Listen, the captured folder once recording. Nil =
+    /// un-foldered. Shown read-only in the toolbar — the folder is fixed at start
+    /// (the writer owns the live note's path), filed later via Move to Folder.
+    private var targetFolder: String? {
+        sessionStart != nil ? recordingFolder : winCtx.pendingFolder
+    }
+
     /// The live feed UI — toolbar, status line, transcript, ask bar.
     private var content: some View {
         VStack(spacing: 0) {
@@ -303,6 +322,7 @@ struct TranscriptView: View {
                 store: store,
                 sessionStart: sessionStart,
                 stoppedAt: stoppedAt,
+                targetFolder: targetFolder,
                 selectedDevice: $selectedDevice,
                 devices: devices,
                 captureSystem: captureSystem,
@@ -886,6 +906,7 @@ struct TranscriptView: View {
         sessionContext = "" // blank slate for the next session
         sessionName = ""
         sessionTags = []
+        recordingFolder = nil
     }
 
     /// Cancel every in-flight agent for this session and mark each cancelled so
@@ -942,8 +963,13 @@ struct TranscriptView: View {
         stoppedAt = nil
         let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let nm = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Consume the pending folder target: this session files into it, and it's
+        // cleared so it can't leak to a later un-foldered recording (issue #35).
+        let folder = winCtx.pendingFolder
+        recordingFolder = folder
+        winCtx.pendingFolder = nil
         services.sidecar.sendSessionStart(UUID().uuidString, context: ctx)
-        services.writer.start(context: ctx, name: nm, tags: sessionTags)
+        services.writer.start(context: ctx, name: nm, tags: sessionTags, folder: folder)
         // A transcript window opened on this note must disable asking until
         // the live writer is done with it.
         TranscriptWindowContext.shared.liveFileURL = services.writer.currentFileURL

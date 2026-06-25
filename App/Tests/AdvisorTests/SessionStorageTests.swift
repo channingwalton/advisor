@@ -163,6 +163,55 @@ private func makeArchive(_ names: [String]) throws -> URL {
     #expect(SessionArchive.list(in: dirA).count == 1) // the first session stays put
 }
 
+// MARK: - recording into a folder (issue #35)
+
+/// Starting a recording with a folder target writes the note into that sub-folder
+/// of the archive, so `list` returns it with `folder` set — what a folder's record
+/// button in the Sessions sidebar drives.
+@MainActor
+@Test func writerStartFilesNoteIntoTargetFolder() throws {
+    let base = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-folder-test-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: base) }
+    let writer = SessionWriter(store: TranscriptStore(), resolveDirectory: { base })
+
+    writer.start(folder: "Work")
+    writer.flush()
+
+    // The note sits in <base>/Work, not the root, and lists with folder == "Work".
+    let inFolder = SessionArchive.list(in: base.appendingPathComponent("Work"))
+    #expect(inFolder.count == 1)
+    let all = SessionArchive.list(in: base)
+    #expect(all.count == 1)
+    #expect(all.first?.folder == "Work")
+    // Nothing was written to the un-foldered root.
+    #expect(!FileManager.default.fileExists(
+        atPath: base.appendingPathComponent(inFolder[0].url.lastPathComponent).path))
+
+    writer.end()
+    writer.releaseNote()
+}
+
+/// A nil or unusable folder target falls back to the un-foldered root, so the
+/// global record button (and an empty target) records as before.
+@MainActor
+@Test func writerStartWithoutFolderWritesToRoot() throws {
+    let base = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-folder-root-test-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: base) }
+    let writer = SessionWriter(store: TranscriptStore(), resolveDirectory: { base })
+
+    writer.start(folder: "  ") // unusable name → root
+    writer.flush()
+
+    let all = SessionArchive.list(in: base)
+    #expect(all.count == 1)
+    #expect(all.first?.folder == nil)
+
+    writer.end()
+    writer.releaseNote()
+}
+
 // MARK: - live name edit refreshes the Sessions browser
 
 /// A throwaway session folder removed on teardown, for the live-rename tests.
