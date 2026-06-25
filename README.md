@@ -228,7 +228,11 @@ currently being recorded can't be filed until it has finished — but you can
 **start** a recording already in a folder: the red **record button** on a folder
 header opens the recording window filed into that folder, so its note is saved
 there straight away (the recording window shows the target folder). The folder is
-fixed once you press Listen; re-file afterwards with **Move to Folder**.
+fixed once you press Listen; re-file afterwards with **Move to Folder**. Each folder
+can also carry a **default context**: the speech-bubble button beside a folder's
+record button sets context (who's there, what it's about) that every recording
+started in that folder inherits as its starting session context — editable per
+session. The bubble is filled when a folder has a context set.
 Selecting one shows it on the right: title and meta, the questions you asked, and
 the transcript rendered like the live window (with the cards Advisor surfaced
 inline, as in the live view). The detail header's **Tags** chip applies or

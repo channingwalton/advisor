@@ -57,6 +57,10 @@ struct SessionsView: View {
     /// The folder a row is currently being dragged over, highlighted as the drop
     /// target so it's clear where the session will land.
     @State private var dropTargetFolder: String?
+    /// Each folder's saved context (issue #36), keyed by folder name. Drives the
+    /// header's context button state and is the seed a recording started here
+    /// inherits. Refreshed from disk alongside `folders` in `reload`.
+    @State private var folderContexts: [String: String] = [:]
 
     var body: some View {
         // Native NavigationSplitView: on macOS 26 (Tahoe) the sidebar column
@@ -243,6 +247,9 @@ struct SessionsView: View {
                 .foregroundStyle(targeted ? Theme.accent : Theme.textSecondary).lineLimit(1)
             Spacer(minLength: 6)
             Text("\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textMuted)
+            FolderContextButton(folder: folder, context: folderContexts[folder] ?? "") { text in
+                saveFolderContext(text, for: folder)
+            }
             folderRecordButton(folder)
         }
         .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
@@ -577,6 +584,7 @@ struct SessionsView: View {
     private func reload() {
         tagLibrary = AdvisorConfig.load().tags
         folders = SessionArchive.folders()
+        folderContexts = folders.reduce(into: [:]) { $0[$1] = SessionArchive.folderContext($1) }
         sessions = SessionArchive.list().map { file in
             let contents = SessionArchive.contents(of: file)
             let detail = SessionDetail.parse(
@@ -624,6 +632,15 @@ struct SessionsView: View {
         SessionArchive.renameFolder(from: old, to: new)
         collapsedFolders.remove(old)
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+    }
+
+    /// Save (or clear) a folder's context (issue #36). Updates the in-memory map so
+    /// the header button's state reflects it at once; no reload needed since the
+    /// context isn't shown in the session list. The next recording started in this
+    /// folder inherits the text.
+    private func saveFolderContext(_ text: String, for folder: String) {
+        SessionArchive.setFolderContext(text, for: folder)
+        folderContexts[folder] = text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Delete a folder; its sessions are un-filed back to the root, not deleted.
@@ -708,6 +725,60 @@ struct SessionsView: View {
     /// Fallback title (no context in the note): date + time.
     private static func rowTitle(_ date: Date) -> String {
         date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+    }
+}
+
+// MARK: - Folder context button (issue #36)
+
+/// A folder header's context button, left of the record button: opens a popover to
+/// edit the folder's context — the seed every recording started in this folder
+/// inherits. Tinted when a context is set so a glance shows which folders carry one.
+/// Owns its popover/draft state so each folder row gets an independent editor.
+private struct FolderContextButton: View {
+    let folder: String
+    /// The folder's current saved context, for the tinted state and seeding the draft.
+    let context: String
+    let onSave: (String) -> Void
+    @State private var show = false
+    @State private var draft = ""
+
+    private var hasContext: Bool { !context.isEmpty }
+
+    var body: some View {
+        Button {
+            draft = context
+            show = true
+        } label: {
+            Image(systemName: hasContext ? "text.bubble.fill" : "text.bubble")
+                .font(.system(size: 12))
+                .foregroundStyle(hasContext ? Theme.accent : Theme.textMuted)
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help(hasContext ? "Edit context for “\(folder)”" : "Set context for “\(folder)”")
+        .popover(isPresented: $show, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Folder context").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textStrong)
+                Text("Seeds the context of every recording started in “\(folder)”. "
+                    + "Editable per session.")
+                    .font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextEditor(text: $draft)
+                    .font(.system(size: 12.5))
+                    .frame(width: 320, height: 100)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.hairline, lineWidth: 0.5))
+                HStack {
+                    Spacer()
+                    Button("Save") {
+                        onSave(draft)
+                        show = false
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(14)
+        }
     }
 }
 

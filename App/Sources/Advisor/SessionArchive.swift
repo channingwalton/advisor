@@ -320,6 +320,18 @@ enum SessionArchive {
                 skipped += 1
             }
         }
+        // Carry each folder's context file (issue #36): `list` doesn't surface the
+        // hidden file, so move it explicitly, or a storage-dir change would strand
+        // folder contexts. Never clobbers a context already at the destination.
+        for folder in folders(in: source) {
+            guard let src = folderContextURL(folder, root: source),
+                let dst = folderContextURL(folder, root: dest),
+                FileManager.default.fileExists(atPath: src.path),
+                !FileManager.default.fileExists(atPath: dst.path) else { continue }
+            try? FileManager.default.createDirectory(
+                at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? FileManager.default.moveItem(at: src, to: dst)
+        }
         return (moved, skipped)
     }
 
@@ -332,6 +344,49 @@ enum SessionArchive {
         let url = directory.appendingPathComponent(folder, isDirectory: true)
         return (try? FileManager.default.createDirectory(
             at: url, withIntermediateDirectories: true)) != nil
+    }
+
+    /// The hidden file holding a folder's context (issue #36):
+    /// `<root>/<folder>/.context.md`. `nil` for an unusable folder name. Dot-prefixed
+    /// and not a session-date name, so `list`/`folders` ignore it (a file, not a
+    /// directory), and it travels with the directory on `renameFolder`.
+    static func folderContextURL(_ folder: String, root: URL = SessionArchive.directory) -> URL? {
+        guard let safe = sanitiseFolderName(folder) else { return nil }
+        return root.appendingPathComponent(safe, isDirectory: true)
+            .appendingPathComponent(".context.md")
+    }
+
+    /// A folder's saved context (issue #36), or "" when none is set or the name is
+    /// unusable. Surrounding whitespace is trimmed so it round-trips the editor text.
+    static func folderContext(_ folder: String, root: URL = SessionArchive.directory) -> String {
+        guard let url = folderContextURL(folder, root: root),
+            let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Set (or clear) a folder's context (issue #36). A blank `text` removes the
+    /// file (no empty `.context.md` litter). Creates the folder directory if needed,
+    /// so context can be set before the folder holds any session. Returns false for
+    /// an unusable name or a failed write/remove.
+    @discardableResult
+    static func setFolderContext(
+        _ text: String, for folder: String, root: URL = SessionArchive.directory
+    ) -> Bool {
+        guard let url = folderContextURL(folder, root: root) else { return false }
+        let fm = FileManager.default
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            guard fm.fileExists(atPath: url.path) else { return true }
+            return (try? fm.removeItem(at: url)) != nil
+        }
+        do {
+            try fm.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try trimmed.write(to: url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// File `file` into `folder` (issue #25) by moving the note on disk: into
@@ -405,9 +460,16 @@ enum SessionArchive {
             if fm.fileExists(atPath: dest.path) { continue }
             try? fm.moveItem(at: file.url, to: dest)
         }
-        let remaining = (try? fm.contentsOfDirectory(
-            at: folderURL, includingPropertiesForKeys: nil)) ?? []
+        // Our own folder-context file (issue #36) shouldn't block removal, but it
+        // must not be destroyed if the delete is aborted: ignore it when checking
+        // emptiness, and only remove it once everything else is gone (a same-named
+        // note that couldn't un-file keeps the folder — and its context — intact).
+        let ctx = folderContextURL(name, root: directory)
+        let remaining = ((try? fm.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.standardizedFileURL != ctx?.standardizedFileURL }
         guard remaining.isEmpty else { return false }
+        if let ctx, fm.fileExists(atPath: ctx.path) { try? fm.removeItem(at: ctx) }
         return (try? fm.removeItem(at: folderURL)) != nil
     }
 

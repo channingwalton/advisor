@@ -257,6 +257,10 @@ struct TranscriptView: View {
             // lands in the note even when a late card rewrite would otherwise win.
             if sessionStart != nil { services.writer.setOwnedNoteTags(new) }
         }
+        // A folder's record button retargets an already-open recording window; pick
+        // up that folder's context for the next session (issue #36). nil (the global
+        // record button / window close) leaves the current text untouched.
+        .onChange(of: winCtx.pendingFolder) { _, _ in seedContextFromPendingFolder() }
         .onChange(of: autoCards) { _, on in services.sidecar.sendAuto(on) }
         .onChange(of: pinned) { _, on in
             // Prefer the key window (the recording window, since its toolbar holds
@@ -752,6 +756,11 @@ struct TranscriptView: View {
         // The sidecar/writer are owned by AppServices (started at launch); this
         // window only builds the audio recorder.
         rebuildRecorder()
+        // A window opened via a folder's record button inherits that folder's
+        // context (issue #35/#36); the pending target is already set before the
+        // window appears, so seed here. An already-open window reseeds via the
+        // `pendingFolder` onChange instead.
+        seedContextFromPendingFolder()
     }
 
     private func rebuildRecorder() {
@@ -944,6 +953,16 @@ struct TranscriptView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: poll)
         }
         poll()
+    }
+
+    /// Start a fresh session from idle: a new STT generation, a new note and a new
+    /// Seed the session context from a folder's saved context (issue #36) when the
+    /// recording window is opened via a folder's record button. The folder context
+    /// is a starting point the user can edit per session, not a locked prefix.
+    /// Skipped once a session is live — its context belongs to the running session.
+    private func seedContextFromPendingFolder() {
+        guard sessionStart == nil, let folder = winCtx.pendingFolder else { return }
+        sessionContext = SessionArchive.folderContext(folder)
     }
 
     /// Start a fresh session from idle: a new STT generation, a new note and a new

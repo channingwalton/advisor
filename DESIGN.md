@@ -1007,6 +1007,37 @@ recording would mean moving the live note the `SessionWriter` owns — exactly t
 two-writer clobber the `#25` live-note filing exemption avoids — so it's deferred to
 the saved-note **Move to Folder** path after the session ends.
 
+## Folder-level context (2026-06-25, issue #36)
+
+A folder can carry a **default context** that a recording started in it inherits as
+the seed of its session prompt — so a "Weekly platform sync" folder pre-fills who's
+there and what to focus on without retyping per session.
+
+Stored where folders already live: a hidden `.context.md` inside the folder
+directory (`SessionArchive.folderContext`/`setFolderContext`/`folderContextURL`), not
+config. This keeps the `#25` "folders are pure filesystem, no registry" property —
+the context **travels with `renameFolder`** automatically (the directory moves) and
+needs no rename bookkeeping. The dot-prefixed, non-session-date name means `list`
+and `folders` already ignore it. Two file ops were taught about it: `deleteFolder`
+removes it so an otherwise-empty folder can go, but **only once everything else is
+gone** — it's excluded from the emptiness gate, not deleted up front, so an aborted
+delete (a same-named note that couldn't un-file) keeps the folder *and* its context;
+`move` (the `#16` storage relocation) carries each folder's context file across, or a
+storage-dir change would strand it. A blank save removes the file (no empty litter).
+
+The Sessions sidebar folder header gains a context button (`FolderContextButton`)
+left of the record button: a speech bubble, tinted/filled when a context is set,
+opening a popover with a `TextEditor`. It owns its own draft/popover state so each
+folder row edits independently; `SessionsView.folderContexts` caches each folder's
+text (loaded in `reload`) for the button state and is updated in place on save.
+
+Inheritance reuses the `#35` `pendingFolder` bridge: when the recording window opens
+via a folder's record button, `seedContextFromPendingFolder` sets `sessionContext`
+from that folder's saved context — at `setup` for a fresh window, and via a
+`pendingFolder` onChange for an already-open one. It's a **seed, not a lock**: the
+user edits it freely per session, and it's gated on `sessionStart == nil` so it never
+disturbs (or pushes stale context to the sidecar for) a live session.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

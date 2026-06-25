@@ -329,3 +329,96 @@ private func makeFolderedArchive(
     #expect(moved.first { $0.url.lastPathComponent == "2026-06-18-170000.md" }?.folder == "Work")
     #expect(SessionArchive.folders(in: dest) == ["Work"])
 }
+
+// MARK: - Folder context (issue #36)
+
+@Test func folderContextRoundTripsAndIsInvisibleToListing() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.folderContext("Work", root: dir).isEmpty) // unset → ""
+    #expect(SessionArchive.setFolderContext("  Quarterly review with Sam  ", for: "Work", root: dir))
+    #expect(SessionArchive.folderContext("Work", root: dir) == "Quarterly review with Sam")
+    // The hidden context file must not surface as a session or shift the folder list.
+    #expect(SessionArchive.list(in: dir).count == 1)
+    #expect(SessionArchive.folders(in: dir) == ["Work"])
+}
+
+@Test func setFolderContextCreatesFolderDirectory() throws {
+    let dir = try makeFolderedArchive()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // Saving context for a folder with no directory yet creates it.
+    #expect(SessionArchive.setFolderContext("Standup", for: "Daily", root: dir))
+    #expect(SessionArchive.folders(in: dir) == ["Daily"])
+    #expect(SessionArchive.folderContext("Daily", root: dir) == "Standup")
+}
+
+@Test func setFolderContextWithBlankRemovesFile() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": []])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.setFolderContext("temp", for: "Work", root: dir))
+    #expect(SessionArchive.setFolderContext("   ", for: "Work", root: dir)) // clears
+    #expect(SessionArchive.folderContext("Work", root: dir).isEmpty)
+    let ctxURL = try #require(SessionArchive.folderContextURL("Work", root: dir))
+    #expect(!FileManager.default.fileExists(atPath: ctxURL.path))
+}
+
+@Test func setFolderContextRejectsUnsafeName() throws {
+    let dir = try makeFolderedArchive()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(!SessionArchive.setFolderContext("x", for: "a/b", root: dir))
+    #expect(SessionArchive.folderContextURL("a/b", root: dir) == nil)
+    #expect(SessionArchive.folderContext("a/b", root: dir).isEmpty)
+}
+
+@Test func renameFolderCarriesContext() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": []])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.setFolderContext("Roadmap chats", for: "Work", root: dir))
+    #expect(SessionArchive.renameFolder(from: "Work", to: "Projects", in: dir))
+    #expect(SessionArchive.folderContext("Projects", root: dir) == "Roadmap chats")
+    #expect(SessionArchive.folderContext("Work", root: dir).isEmpty)
+}
+
+@Test func deleteFolderRemovesContextFileAndDirectory() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.setFolderContext("Notes", for: "Work", root: dir))
+    // The lingering hidden context file must not block the empty-folder removal.
+    #expect(SessionArchive.deleteFolder("Work", in: dir))
+    #expect(SessionArchive.folders(in: dir).isEmpty)
+    #expect(SessionArchive.list(in: dir).first?.folder == nil) // session un-filed, kept
+}
+
+@Test func deleteFolderPreservesContextWhenDeletionAborts() throws {
+    // A same-named note in root blocks un-filing, so the folder is kept; its
+    // context must survive too rather than being destroyed by a no-op delete.
+    let dir = try makeFolderedArchive(
+        root: ["2026-06-18-170000.md"],
+        folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+    #expect(SessionArchive.setFolderContext("Keep me", for: "Work", root: dir))
+
+    #expect(!SessionArchive.deleteFolder("Work", in: dir)) // aborted, folder kept
+    #expect(SessionArchive.folders(in: dir) == ["Work"])
+    #expect(SessionArchive.folderContext("Work", root: dir) == "Keep me") // not destroyed
+}
+
+@Test func moveCarriesFolderContext() throws {
+    let source = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    let dest = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-folder-ctx-dest-\(UUID().uuidString)")
+    defer {
+        try? FileManager.default.removeItem(at: source)
+        try? FileManager.default.removeItem(at: dest)
+    }
+    #expect(SessionArchive.setFolderContext("Carried over", for: "Work", root: source))
+
+    _ = SessionArchive.move(from: source, to: dest)
+    #expect(SessionArchive.folderContext("Work", root: dest) == "Carried over")
+}
