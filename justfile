@@ -21,3 +21,6 @@ dmg:
 
 install:
     cd App && sh install.sh
+
+run:
+    App/.build/debug/Advisor
