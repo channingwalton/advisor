@@ -1,6 +1,7 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 alias create-dmg := dmg
+alias cc := commit-check
 
 default:
     @just --list
