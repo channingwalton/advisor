@@ -78,6 +78,17 @@ Claude Code CLI. First run prompts for Microphone and Screen & System Audio
 Recording permissions. A packaged app prompts as Advisor; a bare
 `.build/debug/Advisor` dev run may be attributed to the launching terminal.
 
+## Developer shortcuts
+
+If `just` is installed, common tasks are available from the repo root:
+
+```sh
+just commit-check   # clean build and test
+just dmg            # create App/dist/Advisor.dmg
+just create-dmg     # alias for just dmg
+just install        # install to ~/Applications/Advisor.app
+```
+
 ## Build a release
 
 `App/package.sh` assembles a self-contained `Advisor.app` — release build plus
