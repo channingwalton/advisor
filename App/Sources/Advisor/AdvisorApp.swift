@@ -567,6 +567,15 @@ struct TranscriptView: View {
         "\(store.utterances.count)|\(store.cards.count)|\(store.notes.count)"
     }
 
+    /// True when an editable text field holds focus in the key window. A focused
+    /// `NSTextField` (Ask box) edits through a field-editor `NSTextView`; the
+    /// selectable transcript is a non-editable `NSTextView`, so `isEditable`
+    /// distinguishes them — same test the space monitor uses (issue #37).
+    private var isEditingTextField: Bool {
+        guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+        return tv.isEditable
+    }
+
     /// Centered transcript column (max-width 812): day divider, flowing
     /// paragraphs, inline cards, then the live interim line.
     private var transcriptArea: some View {
@@ -619,6 +628,12 @@ struct TranscriptView: View {
                 .padding(.bottom, Theme.Metric.contentBottomPad)
             }
             .onChange(of: scrollKey) { _, _ in
+                // Don't auto-scroll while the user is typing in an editable text
+                // field (the Ask box, a card reply, a NOTE editor). Scrolling the
+                // transcript yanks focus away mid-keystroke, and a stray space then
+                // toggles recording (issue #37). The non-editable selectable
+                // transcript NSTextView is fine to scroll past.
+                guard !isEditingTextField else { return }
                 if let last = displayedItems.last {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
