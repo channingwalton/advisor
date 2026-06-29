@@ -24,7 +24,7 @@ final class AppleSpeechEngine {
     /// onFinal. Tagged with the session token from `start`.
     var onVolatile: ((String, Int) -> Void)?
 
-    init(name: String, locale: String = "en_GB") {
+    init(name: String, locale: String = "") {
         self.name = name
         self.localeIdentifier = locale
     }
@@ -33,9 +33,11 @@ final class AppleSpeechEngine {
         guard SpeechTranscriber.isAvailable else {
             throw AdvisorError.audioSetup("SpeechTranscriber unavailable on this OS")
         }
+        // "" follows the device default; otherwise honour the configured id.
+        let requested = localeIdentifier.isEmpty
+            ? Locale.current : Locale(identifier: localeIdentifier)
         guard
-            let locale = await SpeechTranscriber.supportedLocale(
-                equivalentTo: Locale(identifier: localeIdentifier))
+            let locale = await SpeechTranscriber.supportedLocale(equivalentTo: requested)
         else {
             throw AdvisorError.audioSetup("no supported transcription locale")
         }

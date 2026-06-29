@@ -1,4 +1,5 @@
 import AppKit
+import Speech
 import SwiftUI
 
 extension Notification.Name {
@@ -35,8 +36,9 @@ struct AdvisorConfig: Codable, Equatable {
     /// = the provider's own default. Mirrors sidecar/src/config.ts.
     var provider = "claude"
     var model = ""
-    /// App-side only: STT locale identifier (e.g. en_GB).
-    var sttLocale = "en_GB"
+    /// App-side only: STT locale identifier (e.g. en_GB). "" = follow the
+    /// device default locale (`Locale.current`), resolved in AppleSpeechEngine.
+    var sttLocale = ""
     /// App-side only: "subscription" (the provider's CLI login, the default) or
     /// "apiKey" (talk to Anthropic/OpenAI directly with a key from the Keychain).
     /// The sidecar acts purely on the injected env var, so this is not mirrored in
@@ -78,7 +80,7 @@ struct AdvisorConfig: Codable, Equatable {
         triggerSensitivity = try c.decodeIfPresent(String.self, forKey: .triggerSensitivity) ?? "balanced"
         triggers = try c.decodeIfPresent(Triggers.self, forKey: .triggers) ?? Triggers()
         allowMcpActions = try c.decodeIfPresent(Bool.self, forKey: .allowMcpActions) ?? false
-        sttLocale = try c.decodeIfPresent(String.self, forKey: .sttLocale) ?? "en_GB"
+        sttLocale = try c.decodeIfPresent(String.self, forKey: .sttLocale) ?? ""
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
         authMode = try c.decodeIfPresent(String.self, forKey: .authMode) ?? "subscription"
@@ -613,18 +615,36 @@ private struct TranscriptionSettingsView: View {
     @Binding var captureSystem: Bool
     @Binding var sttLocale: String
 
+    /// On-device locales the speech model supports, loaded asynchronously.
+    @State private var locales: [Locale] = []
+
     var body: some View {
         Form {
             Section("Transcription") {
                 Toggle("Capture system audio", isOn: $captureSystem)
-                TextField("Locale", text: $sttLocale)
-                    .frame(maxWidth: 160)
-                Text("Apple speech locale, e.g. en_GB. Locale applies on next Listen.")
+                Picker("Locale", selection: $sttLocale) {
+                    // "" sentinel = follow the device default (Locale.current).
+                    Text("System default — \(Self.label(for: Locale.current))").tag("")
+                    ForEach(locales, id: \.identifier) { locale in
+                        Text(Self.label(for: locale)).tag(locale.identifier)
+                    }
+                }
+                .frame(maxWidth: 320)
+                Text("Speech recognition language. Applies on next Listen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        .task {
+            locales = await SpeechTranscriber.supportedLocales
+                .sorted { Self.label(for: $0) < Self.label(for: $1) }
+        }
+    }
+
+    /// Human-readable language name, falling back to the raw identifier.
+    private static func label(for locale: Locale) -> String {
+        Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
     }
 }
 
