@@ -176,6 +176,9 @@ struct AuthModeView: View {
     let provider: String
     @Binding var authMode: String
     @State private var apiKey = ""
+    /// Editable buffer used only while entering/replacing a key. `apiKey` holds
+    /// only the persisted key and is never cleared just to enter edit mode.
+    @State private var draft = ""
     /// True while entering/replacing a key. A stored key is shown redacted; the
     /// editable field appears only when there's no key yet or the user taps Change.
     @State private var editing = false
@@ -196,19 +199,39 @@ struct AuthModeView: View {
             : String(repeating: "•", count: apiKey.count)
     }
 
+    /// The key the user is currently working with: the edit buffer while editing,
+    /// otherwise the persisted key. Drives Test and the disabled state in both modes.
+    private var candidateKey: String { editing ? draft : apiKey }
+
     private func reload() {
         apiKey = Keychain.read(keychainKey) ?? ""
+        draft = ""
         editing = apiKey.isEmpty
         testState = .idle
     }
 
+    /// Persist-on-submit: a non-empty entry becomes the stored key (the `apiKey`
+    /// onChange writes the Keychain); an empty entry cancels without deleting.
+    private func commit() {
+        let entered = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entered.isEmpty else {
+            // Empty submit = cancel: keep the existing key, exit edit mode only if
+            // there was already a key (issue #53 — never delete on an empty field).
+            editing = apiKey.isEmpty
+            return
+        }
+        apiKey = entered   // the .onChange persists this non-empty value
+        editing = false
+        Task { await test() }
+    }
+
     private func test() async {
-        let key = apiKey
+        let key = candidateKey
         testState = .testing
         let outcome = await AuthValidator.validate(provider: provider, key: key)
         // The field may have changed while the request was in flight; ignore a
         // stale result so the inline state always reflects the current key.
-        guard key == apiKey else { return }
+        guard key == candidateKey else { return }
         switch outcome {
         case .valid:
             testState = .valid
@@ -225,7 +248,7 @@ struct AuthModeView: View {
         switch testState {
         case .idle:
             Button("Test") { Task { await test() } }
-                .disabled(apiKey.isEmpty)
+                .disabled(candidateKey.isEmpty)
         case .testing:
             ProgressView().controlSize(.small)
         case .valid:
@@ -234,7 +257,7 @@ struct AuthModeView: View {
                 .labelStyle(.titleAndIcon)
         case .failed:
             Button("Retry") { Task { await test() } }
-                .disabled(apiKey.isEmpty)
+                .disabled(candidateKey.isEmpty)
         }
     }
 
@@ -249,13 +272,10 @@ struct AuthModeView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("\(providerLabel) API key")
                         HStack {
-                            TextField("Paste your \(providerLabel) API key", text: $apiKey)
+                            TextField("Paste your \(providerLabel) API key", text: $draft)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(minWidth: 280)
-                                .onSubmit {
-                                    editing = apiKey.isEmpty
-                                    if !apiKey.isEmpty { Task { await test() } }
-                                }
+                                .onSubmit { commit() }
                             testControl
                         }
                     }
@@ -264,7 +284,7 @@ struct AuthModeView: View {
                         HStack {
                             Text(redacted).foregroundStyle(.secondary)
                             testControl
-                            Button("Change") { apiKey = ""; editing = true; testState = .idle }
+                            Button("Change") { draft = ""; editing = true; testState = .idle }
                         }
                     }
                 }
