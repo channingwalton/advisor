@@ -304,6 +304,10 @@ final class Recorder {
             try await appleMic.start(sessionToken: gen)
             try await appleSys.start(sessionToken: gen)
         } catch {
+            // If appleMic.start() succeeded but appleSys.start() threw, the mic
+            // engine is left running — stop both before bailing (issue #48).
+            await appleMic.stop()
+            await appleSys.stop()
             await MainActor.run { store.status = "Apple STT failed: \(error)" }
             return
         }
@@ -337,7 +341,12 @@ final class Recorder {
                 store.status = status
             }
         } catch {
+            // Both Apple engines are running here — stop the SCStream source
+            // first, then the STT sinks (source-before-sink, matching stop() /
+            // issue #47), so neither engine is left running (issue #48).
             await stopSystem()
+            await appleMic.stop()
+            await appleSys.stop()
             await MainActor.run { store.status = "error: \(error)" }
         }
     }

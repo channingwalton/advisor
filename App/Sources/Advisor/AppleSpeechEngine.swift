@@ -30,6 +30,10 @@ final class AppleSpeechEngine {
     }
 
     func start(sessionToken: Int) async throws {
+        // start() isn't re-entrant: dispose any prior engine before creating new
+        // state, so a second start() without an intervening stop() (issue #48)
+        // doesn't leak the previous continuation/resultsTask. No-op when fresh.
+        await teardown()
         guard SpeechTranscriber.isAvailable else {
             throw AdvisorError.audioSetup("SpeechTranscriber unavailable on this OS")
         }
@@ -131,7 +135,13 @@ final class AppleSpeechEngine {
         }
     }
 
-    func stop() async {
+    /// Idempotent teardown of the running engine: finish input, finalise+finish
+    /// the analyzer, cancel the results task, and drop analyzer/transcriber/
+    /// converter. All optional-chained, so on a fresh engine it's a cheap no-op.
+    /// Shared by stop() and the top of start() — a re-entrant start (issue #48)
+    /// must dispose the prior engine first, else the orphaned resultsTask keeps
+    /// decoding the old transcriber and fires stale onFinal/onVolatile callbacks.
+    private func teardown() async {
         input?.finish()
         input = nil
         try? await analyzer?.finalizeAndFinishThroughEndOfInput()
@@ -140,6 +150,10 @@ final class AppleSpeechEngine {
         analyzer = nil
         transcriber = nil
         converter = nil
+    }
+
+    func stop() async {
+        await teardown()
     }
 
     private func log(_ message: String) {
