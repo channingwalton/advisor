@@ -27,6 +27,40 @@ import {
 const HOME = homedir();
 let config: AdvisorConfig = loadConfig();
 
+// A fire-and-forget promise that rejects — or a stray synchronous throw in a
+// callback — would otherwise terminate the process on Node 22 (issue #45),
+// dropping the stdio pipe mid-session with no diagnostic for the app. We keep
+// the sidecar alive and log instead, so a lone stray rejection can't kill a
+// live session. The handlers must never throw (that would re-trigger the same
+// path), so the log() call is itself guarded.
+process.on("unhandledRejection", (reason) => {
+  try {
+    log(`unhandledRejection (kept alive): ${reason instanceof Error ? (reason.stack ?? reason.message) : reason}`);
+  } catch {
+    /* stderr unavailable — nothing safe left to do */
+  }
+});
+// uncaughtException is swallowed too, deliberately. Exiting here reproduces the
+// exact symptom #45 targets (silent pipe close, no diagnostic), whereas the
+// dominant failure mode is a stray callback throw — recoverable, not global
+// corruption: lanes are independent and session_start resets all state. Staying
+// up keeps the rest of the session working; we log the full stack so a genuinely
+// corrupt state is still diagnosable from the app's logs.
+process.on("uncaughtException", (err) => {
+  try {
+    log(`uncaughtException (kept alive): ${err instanceof Error ? (err.stack ?? err.message) : err}`);
+  } catch {
+    /* stderr unavailable — nothing safe left to do */
+  }
+});
+
+/// Guard a fire-and-forget promise: log its rejection tagged with the operation
+/// so a stray rejection surfaces as a diagnostic rather than tripping Node 22's
+/// unhandledRejection process kill (issue #45). Returns a handler for `.catch`.
+function guard(op: string): (err: unknown) => void {
+  return (err) => log(`fire-and-forget ${op} rejected: ${err}`);
+}
+
 /// The user's live session prompt: free-text context seeded at session_start
 /// and editable mid-session (session_context messages). Injected per task via
 /// sessionContextPrefix() — read fresh at dispatch — so edits take effect on
@@ -388,7 +422,7 @@ function coveredSubjects(): string[] {
 function scheduleClassify(): void {
   if (!auto || !sessionActive) return;
   if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => void runClassify(), DEBOUNCE_MS);
+  debounceTimer = setTimeout(() => void runClassify().catch(guard("classify")), DEBOUNCE_MS);
 }
 
 async function runClassify(): Promise<void> {
@@ -454,11 +488,13 @@ function drainResearch(): void {
     const t = researchQueue.shift()!;
     lane.busy = true;
     const t0 = Date.now();
-    void runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId).finally(() => {
-      log(`research "${t.subject}" ${Date.now() - t0}ms`);
-      lane.busy = false;
-      drainResearch();
-    });
+    void runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId)
+      .finally(() => {
+        log(`research "${t.subject}" ${Date.now() - t0}ms`);
+        lane.busy = false;
+        drainResearch();
+      })
+      .catch(guard(`research "${t.subject}"`));
   }
 }
 
@@ -487,8 +523,10 @@ function handle(msg: Inbound): void {
       // Warm the cold-spawn off the critical path: the first real question then
       // skips the SDK subprocess boot (~5-10s) on the classifier and lead
       // research lane. Best-effort, fire-and-forget; warm-up answers discarded.
-      void warmClassifier();
-      void researchLanes[0]?.session.run("warm-up; reply READY", undefined, 15_000);
+      void warmClassifier().catch(guard("classifier warm-up"));
+      void researchLanes[0]?.session
+        .run("warm-up; reply READY", undefined, 15_000)
+        .catch(guard("research warm-up"));
       log(`session ${msg.sessionId} started (sensitivity=${config.triggerSensitivity})`);
       break;
     case "utterance":
@@ -520,13 +558,17 @@ function handle(msg: Inbound): void {
           msg.text,
           researchTask(kind, msg.text, msg.text),
           msg.triggerId
-        ).finally(() => {
-          busy = false;
-        });
+        )
+          .finally(() => {
+            busy = false;
+          })
+          .catch(guard("query action"));
       } else {
-        void runCard(queryLane, "query", msg.text, `Question: ${msg.text}`).finally(() => {
-          busy = false;
-        });
+        void runCard(queryLane, "query", msg.text, `Question: ${msg.text}`)
+          .finally(() => {
+            busy = false;
+          })
+          .catch(guard("query"));
       }
       break;
     case "session_context":
@@ -553,28 +595,28 @@ function handle(msg: Inbound): void {
       );
       if (lane) {
         log(`cancelling ${msg.cardId} on ${lane.name}`);
-        void lane.session.interrupt();
+        void lane.session.interrupt().catch(guard("interrupt"));
       }
       break;
     }
     case "card_reply":
       // Transient session, parallel-safe — no busy gate, no pool slot.
-      void runCardReply(msg);
+      void runCardReply(msg).catch(guard("card_reply"));
       break;
     case "ask_document":
       // History-browser question about a saved transcript. Transient session,
       // parallel-safe — no busy gate, no pool slot, no live-session state.
-      void runDocumentQuestion(msg);
+      void runDocumentQuestion(msg).catch(guard("ask_document"));
       break;
     case "summarise_live":
       // Summarise the live session into its single summary card. Transient
       // session, parallel-safe — no busy gate, no pool slot.
-      void runSummariseLive(msg);
+      void runSummariseLive(msg).catch(guard("summarise_live"));
       break;
     case "summarise_document":
       // Summarise a saved transcript (the history browser). Like ask_document:
       // transient session, parallel-safe, no live-session state.
-      void runSummariseDocument(msg);
+      void runSummariseDocument(msg).catch(guard("summarise_document"));
       break;
     case "session_end":
       // End the auto-pipeline: stop scheduling/accepting classifies and drop any
