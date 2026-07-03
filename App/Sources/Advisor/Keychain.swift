@@ -38,24 +38,30 @@ enum Keychain {
     }
 
     /// Store (or replace) the secret. An empty/whitespace value deletes it, so the
-    /// UI can clear a key by blanking the field.
-    static func save(_ key: Key, _ value: String) {
+    /// UI can clear a key by blanking the field. Returns whether the value was
+    /// actually persisted (or deleted) — a false result means the Keychain
+    /// rejected the write and nothing was stored.
+    @discardableResult static func save(_ key: Key, _ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            delete(key)
-            return
+            return delete(key)
         }
         let data = Data(trimmed.utf8)
         let attrs: [String: Any] = [kSecValueData as String: data]
         let status = SecItemUpdate(baseQuery(key) as CFDictionary, attrs as CFDictionary)
+        if status == errSecSuccess { return true }
         if status == errSecItemNotFound {
             var add = baseQuery(key)
             add[kSecValueData as String] = data
-            SecItemAdd(add as CFDictionary, nil)
+            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
         }
+        return false
     }
 
-    static func delete(_ key: Key) {
-        SecItemDelete(baseQuery(key) as CFDictionary)
+    /// Remove the secret. Returns whether it's now absent — an already-missing
+    /// item counts as success.
+    @discardableResult static func delete(_ key: Key) -> Bool {
+        let status = SecItemDelete(baseQuery(key) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }

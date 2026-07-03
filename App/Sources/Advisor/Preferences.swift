@@ -226,12 +226,21 @@ struct AuthModeView: View {
     }
 
     private func test() async {
-        let key = candidateKey
+        // Validate what a real session will use: the key read back from the
+        // Keychain (issue #54). While editing, the draft isn't persisted yet,
+        // so fall back to it.
+        let key = editing ? draft : (Keychain.read(keychainKey) ?? "")
+        guard !key.isEmpty else {
+            testState = .failed("The key isn't saved in the Keychain.")
+            alertMessage = "The \(providerLabel) API key couldn't be read back from your Keychain — try entering it again."
+            return
+        }
         testState = .testing
         let outcome = await AuthValidator.validate(provider: provider, key: key)
-        // The field may have changed while the request was in flight; ignore a
-        // stale result so the inline state always reflects the current key.
-        guard key == candidateKey else { return }
+        // The field/keychain may have changed while the request was in flight;
+        // ignore a stale result.
+        let current = editing ? draft : (Keychain.read(keychainKey) ?? "")
+        guard key == current else { return }
         switch outcome {
         case .valid:
             testState = .valid
@@ -301,8 +310,12 @@ struct AuthModeView: View {
         .onAppear { reload() }
         .onChange(of: provider) { _, _ in reload() }
         .onChange(of: apiKey) { _, new in
-            Keychain.save(keychainKey, new)
-            testState = .idle
+            if Keychain.save(keychainKey, new) {
+                testState = .idle
+            } else {
+                testState = .failed("Couldn't save the key to the Keychain.")
+                alertMessage = "The \(providerLabel) API key couldn't be saved to your Keychain."
+            }
         }
         .alert(
             "API key problem",
