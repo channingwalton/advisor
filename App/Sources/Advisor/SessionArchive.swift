@@ -118,9 +118,38 @@ enum SessionArchive {
         return trimmed
     }
 
-    /// The note's raw markdown, or "" if it can't be read.
+    /// The note's raw markdown, or `nil` if the file can't be read — missing,
+    /// unreadable, or vanished under us. Distinct from a genuinely empty note,
+    /// which reads as "". Read-modify-write setters use this to abort rather than
+    /// clobber a note that isn't there (issue #41); display uses `contents(of:)`.
+    static func readContents(of file: SessionFile) -> String? {
+        try? String(contentsOf: file.url, encoding: .utf8)
+    }
+
+    /// The note's raw markdown, or "" if it can't be read. For display and
+    /// derivation, where an empty fallback is harmless; mutating setters use
+    /// `readContents` so they can tell a missing note from an empty one.
     static func contents(of file: SessionFile) -> String {
-        (try? String(contentsOf: file.url, encoding: .utf8)) ?? ""
+        readContents(of: file) ?? ""
+    }
+
+    /// Read `file`, transform its markdown, and atomically write it back — the
+    /// shared spine of the read-modify-write setters. Aborts (returns false) when
+    /// the note can't be read (issue #41: never recreate a vanished or unreadable
+    /// note as a stub, losing the transcript) or the write fails. `transform` sees
+    /// the note's real contents, never "".
+    private static func rewrite(_ file: SessionFile, _ transform: (String) -> String) -> Bool {
+        guard let existing = readContents(of: file) else { return false }
+        let updated = transform(existing)
+        // An atomic write recreates a file deleted since the read, so re-check
+        // just before replacing — don't resurrect a note removed mid-edit.
+        guard FileManager.default.fileExists(atPath: file.url.path) else { return false }
+        do {
+            try updated.write(to: file.url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Parses the leading `---` … `---` frontmatter into `key: value` pairs
@@ -186,16 +215,10 @@ enum SessionArchive {
     }
 
     /// Set (or clear) the `name:` frontmatter of `file` on disk. Returns false if
-    /// the write fails.
+    /// the note can't be read (issue #41) or the write fails.
     @discardableResult
     static func setName(_ name: String, in file: SessionFile) -> Bool {
-        let updated = settingName(name, in: contents(of: file))
-        do {
-            try updated.write(to: file.url, atomically: true, encoding: .utf8)
-            return true
-        } catch {
-            return false
-        }
+        rewrite(file) { settingName(name, in: $0) }
     }
 
     /// Parse a `tags:` frontmatter value (comma-separated) into names: trimmed,
@@ -239,16 +262,10 @@ enum SessionArchive {
     }
 
     /// Set (or clear) the `tags:` frontmatter of `file` on disk. Returns false if
-    /// the write fails.
+    /// the note can't be read (issue #41) or the write fails.
     @discardableResult
     static func setTags(_ tags: [String], in file: SessionFile) -> Bool {
-        let updated = settingTags(tags, in: contents(of: file))
-        do {
-            try updated.write(to: file.url, atomically: true, encoding: .utf8)
-            return true
-        } catch {
-            return false
-        }
+        rewrite(file) { settingTags(tags, in: $0) }
     }
 
     /// `markdown` with any `old` tag in its frontmatter renamed to `new`
@@ -527,30 +544,20 @@ enum SessionArchive {
     }
 
     /// Add or update the `# Summary` section of `file` on disk (issue #30).
-    /// Returns false if the write fails.
+    /// Returns false if the note can't be read (issue #41) or the write fails.
     @discardableResult
     static func upsertSummary(_ summary: String, to file: SessionFile) -> Bool {
-        let updated = upsertingSummary(into: contents(of: file), summary: summary)
-        do {
-            try updated.write(to: file.url, atomically: true, encoding: .utf8)
-            return true
-        } catch {
-            return false
-        }
+        rewrite(file) { upsertingSummary(into: $0, summary: summary) }
     }
 
-    /// Append a follow-up Q&A to `file` on disk. Returns false if the write fails.
+    /// Append a follow-up Q&A to `file` on disk. Returns false if the note can't
+    /// be read (issue #41) or the write fails.
     @discardableResult
     static func appendFollowUp(
         question: String, answer: String, to file: SessionFile, asked: Date = Date()
     ) -> Bool {
-        let updated = appendingFollowUp(
-            to: contents(of: file), question: question, answer: answer, asked: asked)
-        do {
-            try updated.write(to: file.url, atomically: true, encoding: .utf8)
-            return true
-        } catch {
-            return false
+        rewrite(file) {
+            appendingFollowUp(to: $0, question: question, answer: answer, asked: asked)
         }
     }
 

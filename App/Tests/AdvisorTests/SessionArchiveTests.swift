@@ -137,6 +137,56 @@ import Foundation
     #expect(SessionArchive.contents(of: file).contains("hello"))
 }
 
+// MARK: - read/modify/write never resurrects a vanished note (issue #41)
+
+@Test func readContentsReturnsNilForMissingFileButEmptyStringForRealEmpty() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let url = dir.appendingPathComponent("2026-06-18-170000.md")
+    try "".write(to: url, atomically: true, encoding: .utf8)
+    let file = try #require(SessionArchive.list(in: dir).first)
+
+    // A genuinely empty note reads as "" — distinct from a read failure.
+    #expect(SessionArchive.readContents(of: file) == "")
+    #expect(SessionArchive.contents(of: file) == "")
+
+    try FileManager.default.removeItem(at: url)
+    // A missing file reads as nil, not "".
+    #expect(SessionArchive.readContents(of: file) == nil)
+    #expect(SessionArchive.contents(of: file) == "")
+}
+
+/// The four read-modify-write setters must abort — not recreate a stub — when
+/// the note has vanished under them (issue #41: silent transcript loss).
+@Test func settersDoNotResurrectADeletedNote() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let url = dir.appendingPathComponent("2026-06-18-170000.md")
+
+    func withDeletedNote(_ body: (SessionFile) -> Bool) throws {
+        try "---\ncontext: Effects\n---\n\n# Transcript\n\n- 17:00:00 hi\n"
+            .write(to: url, atomically: true, encoding: .utf8)
+        let file = try #require(SessionArchive.list(in: dir).first)
+        try FileManager.default.removeItem(at: url) // vanishes before the write
+        #expect(body(file) == false)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    try withDeletedNote { SessionArchive.setName("Renamed", in: $0) }
+    try withDeletedNote { SessionArchive.setTags(["a", "b"], in: $0) }
+    try withDeletedNote { SessionArchive.setTags([], in: $0) } // no zero-byte file
+    try withDeletedNote { SessionArchive.upsertSummary("gist", to: $0) }
+    try withDeletedNote {
+        SessionArchive.appendFollowUp(question: "q", answer: "a", to: $0)
+    }
+}
+
 // MARK: - folders (issue #25)
 
 /// A throwaway archive holding `root`-level notes and `folders` (name → notes),
