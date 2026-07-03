@@ -1038,6 +1038,40 @@ from that folder's saved context — at `setup` for a fresh window, and via a
 user edits it freely per session, and it's gated on `sessionStart == nil` so it never
 disturbs (or pushes stale context to the sidecar for) a live session.
 
+## Failed classify no longer drops its window (2026-07-03, issue #43)
+
+The classifier is fed only the transcript delta because its session is
+persistent — the earlier fix (2026-06-19, above) leans on "every line judged
+exactly once". But `classifierDelta` advanced the `classifier` cursor when the
+window was *built*, and `classify` returned the same `{triggers: []}` for a
+genuine "found nothing" **and** for a classify timeout (30 s) or unparseable
+output. So a single mid-meeting timeout advanced the cursor past 4–5 utterances
+(perhaps the only explicit question) that were then never re-fed — judged zero
+times, no card, no error surfaced.
+
+Fix: make success and failure distinguishable and commit the cursor only on
+success. `classify` now returns a discriminated `ClassifyResult`
+(`{ok:true, triggers}` | `{ok:false}`); a set run `error` (timeout / dead
+session), empty output, missing JSON, or a `JSON.parse` throw all map to
+`ok:false`. The parse is extracted to a pure `parseClassifierResponse` so the
+distinction is unit-tested without the SDK. `classifierDelta` no longer mutates
+the cursor — it returns the window's end index and `runClassify` commits it only
+on `ok:true`; on `ok:false` the cursor stays put, so the window is re-fed next
+pass. This is safe because classify is serialised (the `classifying` guard), so
+no second delta runs during the await to double-feed or skip lines; the end
+index is captured at delta time, so lines that arrive mid-await are still judged
+next pass, not folded into the committed window.
+
+Re-feed loop bounded: `MAX_CLASSIFY_RETRIES` (3) consecutive failures → give up
+on that window and advance anyway, so a persistently failing classifier can't
+stall the pipeline or grow the re-fed window without bound. Retries are
+utterance-driven (the existing debounce/`rerunWanted` path), so in an active
+conversation a failed window is re-judged within seconds; only in dead silence
+does it wait for the next utterance. Residual: on re-feed the persistent session
+may see the failed window's lines a second time, but the classifier is already
+told to treat near-duplicates as one, and re-judging is strictly better than the
+previous silent drop.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

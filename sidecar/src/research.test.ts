@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cardKind, replyTask, researchTask } from "./trigger.js";
+import { cardKind, parseClassifierResponse, replyTask, researchTask } from "./trigger.js";
 
 test("cardKind maps question to answer, others unchanged", () => {
   assert.equal(cardKind("question"), "answer");
@@ -47,4 +47,62 @@ test("replyTask omits the transcript block when there is no transcript", () => {
   const task = replyTask("context", "Foo", "Foo is a thing.", "tell me more", "   ");
   assert.doesNotMatch(task, /<transcript>/);
   assert.match(task, /<followup>\ntell me more\n<\/followup>/);
+});
+
+// parseClassifierResponse is the root of issue #43: a genuine "found nothing"
+// (ok:true, empty triggers) must be distinguishable from a failure to classify
+// (ok:false), so main.ts only advances the classifier cursor on success.
+
+test("parseClassifierResponse: valid JSON with no triggers is a success, not a failure", () => {
+  const r = parseClassifierResponse('{"triggers":[]}');
+  assert.deepEqual(r, { ok: true, triggers: [] });
+});
+
+test("parseClassifierResponse: valid JSON with triggers is a success", () => {
+  const r = parseClassifierResponse(
+    '{"triggers":[{"kind":"question","subject":"GDP","query":"what is France GDP"}]}'
+  );
+  assert.deepEqual(r, {
+    ok: true,
+    triggers: [{ kind: "question", subject: "GDP", query: "what is France GDP" }],
+  });
+});
+
+test("parseClassifierResponse: extracts JSON embedded in surrounding prose", () => {
+  const r = parseClassifierResponse('Here you go: {"triggers":[]} — done');
+  assert.deepEqual(r, { ok: true, triggers: [] });
+});
+
+test("parseClassifierResponse: drops triggers missing required fields, caps at MAX_TRIGGERS_PER_PASS", () => {
+  const r = parseClassifierResponse(
+    '{"triggers":[' +
+      '{"kind":"question","subject":"a","query":"qa"},' +
+      '{"kind":"context"},' + // missing subject/query — dropped
+      '{"kind":"context","subject":"b","query":"qb"},' +
+      '{"kind":"factcheck","subject":"c","query":"qc"}' + // 3rd valid — over the cap of 2
+      "]}"
+  );
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.ok && r.triggers, [
+    { kind: "question", subject: "a", query: "qa" },
+    { kind: "context", subject: "b", query: "qb" },
+  ]);
+});
+
+test("parseClassifierResponse: a run error (timeout / dead session) is a failure", () => {
+  assert.deepEqual(parseClassifierResponse("", "timed out"), { ok: false });
+  // error wins even if partial text is present
+  assert.deepEqual(parseClassifierResponse('{"triggers":[]}', "timed out"), { ok: false });
+});
+
+test("parseClassifierResponse: empty output is a failure (re-feed, don't drop)", () => {
+  assert.deepEqual(parseClassifierResponse(""), { ok: false });
+});
+
+test("parseClassifierResponse: output with no JSON object is a failure", () => {
+  assert.deepEqual(parseClassifierResponse("sorry, I can't do that"), { ok: false });
+});
+
+test("parseClassifierResponse: unparseable JSON is a failure", () => {
+  assert.deepEqual(parseClassifierResponse('{"triggers":[oops]}'), { ok: false });
 });

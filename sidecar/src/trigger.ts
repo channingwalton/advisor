@@ -173,9 +173,13 @@ export async function warmClassifier(): Promise<void> {
   }
 }
 
-export interface ClassifyResult {
-  triggers: Trigger[];
-}
+/// Outcome of one classify pass. `ok:true` is a real result — the classifier ran
+/// and returned valid JSON, even if it found nothing (`triggers: []`). `ok:false`
+/// is a failure to classify at all: a timeout, a dead session, empty output, or
+/// unparseable output. The two were previously conflated as `{triggers: []}`,
+/// which let the caller advance its cursor past a window that was never actually
+/// judged (issue #43). The caller must only commit the cursor on `ok:true`.
+export type ClassifyResult = { ok: true; triggers: Trigger[] } | { ok: false };
 
 export async function classify(window: string, covered: string[]): Promise<ClassifyResult> {
   const prompt = `Already covered: ${covered.join(", ") || "(none)"}
@@ -184,13 +188,28 @@ Transcript window (newest last):
 ${window}
 
 JSON:`;
-  const { text } = await ensureSession().run(prompt, undefined, 30_000);
-  if (!text) return { triggers: [] };
+  const { text, error } = await ensureSession().run(prompt, undefined, 30_000);
+  return parseClassifierResponse(text, error);
+}
 
+/// Pure parse of the classifier's raw turn into a ClassifyResult. Extracted from
+/// classify() so the success-vs-failure distinction is unit-testable without the
+/// SDK. A set `error` (timeout / dead session), empty text, missing JSON, or a
+/// JSON.parse throw all yield `ok:false` (a window to re-judge); valid JSON —
+/// including an empty triggers array — yields `ok:true`.
+export function parseClassifierResponse(text: string, error?: string): ClassifyResult {
+  if (error) {
+    log(`classifier turn failed: ${error}`);
+    return { ok: false };
+  }
+  if (!text) {
+    log(`classifier returned empty output`);
+    return { ok: false };
+  }
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) {
     log(`classifier returned no JSON: ${text.slice(0, 200)}`);
-    return { triggers: [] };
+    return { ok: false };
   }
   try {
     const parsed = JSON.parse(match[0]) as { triggers?: Trigger[] };
@@ -198,9 +217,9 @@ JSON:`;
     const triggers = (parsed.triggers ?? [])
       .filter((t) => t.kind && t.subject && t.query && enabled[t.kind])
       .slice(0, MAX_TRIGGERS_PER_PASS);
-    return { triggers };
+    return { ok: true, triggers };
   } catch (err) {
     log(`classifier JSON parse failed: ${err}`);
-    return { triggers: [] };
+    return { ok: false };
   }
 }

@@ -320,12 +320,19 @@ const COVERED_TTL_MS = 10 * 60 * 1000;
 /// New-since-last-classify utterances, with consecutive same-source lines
 /// merged so the classifier sees sentences, not STT fragments. The classifier
 /// session is persistent, so it has already seen everything earlier — feeding
-/// only the delta guarantees every line is judged exactly once.
-function classifierDelta(): { text: string; anchorId?: string } {
+/// only the delta means each line is judged once on a successful classify.
+///
+/// This does NOT advance the classifier cursor — it returns `end` (the window's
+/// exclusive upper bound) and lets runClassify commit it only after a successful
+/// classify. On a failed/timed-out classify the cursor stays put so the window
+/// is re-fed next pass rather than skipped (issue #43). Because classify is
+/// serialised (the `classifying` guard), no second delta runs during the await,
+/// so deferring the commit can neither double-feed nor skip lines.
+function classifierDelta(): { text: string; anchorId?: string; end: number } {
   const seen = cursors.get("classifier") ?? 0;
   const fresh = transcript.slice(seen);
-  cursors.set("classifier", transcript.length);
-  if (fresh.length === 0) return { text: "" };
+  const end = transcript.length;
+  if (fresh.length === 0) return { text: "", end };
   const blocks: { source: TranscriptSource; text: string }[] = [];
   for (const e of fresh) {
     const last = blocks[blocks.length - 1];
@@ -341,12 +348,20 @@ function classifierDelta(): { text: string; anchorId?: string } {
   return {
     text: blocks.map((b) => transcriptLine(b.source, b.text)).join("\n"),
     anchorId: fresh[fresh.length - 1].id,
+    end,
   };
 }
 
 let debounceTimer: NodeJS.Timeout | undefined;
 let classifying = false;
 let rerunWanted = false;
+/// Consecutive classify failures (timeout / dead session / unparseable output).
+/// On failure the classifier cursor is NOT advanced, so the window is re-fed on
+/// the next pass. Bounded: after MAX_CLASSIFY_RETRIES straight failures we give
+/// up on that window and advance anyway, so a persistently failing classifier
+/// can't stall the pipeline or grow the re-fed window without bound.
+const MAX_CLASSIFY_RETRIES = 3;
+let classifyFailStreak = 0;
 const covered = new Map<string, number>();
 const researchQueue: Trigger[] = [];
 
@@ -384,13 +399,32 @@ async function runClassify(): Promise<void> {
   }
   classifying = true;
   try {
-    const { text: window, anchorId } = classifierDelta();
+    const { text: window, anchorId, end } = classifierDelta();
     if (!window) return;
     log(`classify start (window ${window.length} chars)`);
     const ct0 = Date.now();
-    const { triggers } = await classify(window, coveredSubjects());
+    const result = await classify(window, coveredSubjects());
+    if (!result.ok) {
+      // Failed to classify (timeout / dead session / unparseable). Leave the
+      // cursor un-advanced so this window is re-fed next pass instead of being
+      // silently dropped (issue #43). Bounded: after MAX_CLASSIFY_RETRIES
+      // straight failures, give up and advance past it so a persistently
+      // failing classifier can't stall the pipeline or grow the window forever.
+      if (++classifyFailStreak >= MAX_CLASSIFY_RETRIES) {
+        log(`classify failed ${classifyFailStreak}x — giving up on this window, advancing cursor`);
+        cursors.set("classifier", end);
+        classifyFailStreak = 0;
+      } else {
+        log(`classify failed (${Date.now() - ct0}ms, attempt ${classifyFailStreak}) — re-feeding window next pass`);
+      }
+      return;
+    }
+    classifyFailStreak = 0;
+    // Success (including a genuine "found nothing"): commit the cursor past this
+    // window so its lines are judged exactly once.
+    cursors.set("classifier", end);
+    const { triggers } = result;
     log(`classify ${Date.now() - ct0}ms → ${triggers.length} trigger(s)`);
-    log(`classify → ${triggers.length} trigger(s)`);
     // The session may have ended during the classify await — drop its triggers
     // so no research is enqueued for a session that's gone.
     if (!sessionActive) return;
@@ -437,6 +471,7 @@ function handle(msg: Inbound): void {
       transcript = [];
       cursors.clear();
       covered.clear();
+      classifyFailStreak = 0;
       researchQueue.length = 0;
       // Seed the live session prompt; the app may update it mid-session.
       sessionContext = msg.context ?? "";
