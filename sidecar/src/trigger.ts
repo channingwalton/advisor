@@ -206,20 +206,73 @@ export function parseClassifierResponse(text: string, error?: string): ClassifyR
     log(`classifier returned empty output`);
     return { ok: false };
   }
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) {
-    log(`classifier returned no JSON: ${text.slice(0, 200)}`);
+  const obj = extractFirstJsonObject(text);
+  if (!obj) {
+    log(`classifier returned no parseable JSON: ${text.slice(0, 200)}`);
     return { ok: false };
   }
-  try {
-    const parsed = JSON.parse(match[0]) as { triggers?: Trigger[] };
-    const enabled = cfg?.triggers ?? { question: true, context: true, factcheck: true };
-    const triggers = (parsed.triggers ?? [])
-      .filter((t) => t.kind && t.subject && t.query && enabled[t.kind])
-      .slice(0, MAX_TRIGGERS_PER_PASS);
-    return { ok: true, triggers };
-  } catch (err) {
-    log(`classifier JSON parse failed: ${err}`);
-    return { ok: false };
+  const enabled = cfg?.triggers ?? { question: true, context: true, factcheck: true };
+  const raw = Array.isArray(obj.triggers) ? (obj.triggers as Trigger[]) : [];
+  const triggers = raw
+    .filter((t) => t && t.kind && t.subject && t.query && enabled[t.kind])
+    .slice(0, MAX_TRIGGERS_PER_PASS);
+  return { ok: true, triggers };
+}
+
+/// Extract the first balanced, brace-delimited JSON object that parses. The
+/// classifier is told to emit strict JSON, but LLMs deviate — a prose prefix, a
+/// trailing sentence, or a stray second object. The old greedy first-`{`-to-last-
+/// `}` slice spanned across all of that into an unparseable string, so a single
+/// `}` of trailing junk dropped every trigger for the window (issue #44). Scan
+/// for balanced braces instead, then prefer the first object that actually
+/// carries a `triggers` array; fall back to the first object that merely parses
+/// so a valid-but-triggers-less object still counts as a successful (empty)
+/// classification rather than a failure.
+function extractFirstJsonObject(text: string): Record<string, unknown> | undefined {
+  let fallback: Record<string, unknown> | undefined;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{") continue;
+    const candidate = scanBalancedObject(text, i);
+    if (candidate === undefined) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      if (Array.isArray(record.triggers)) return record;
+      fallback ??= record;
+    }
   }
+  return fallback;
+}
+
+/// Scan from `start` (which must point at `{`) to its matching close brace,
+/// tracking nesting depth. Characters inside a double-quoted string — and the
+/// single char following a backslash escape — are skipped, so a `{`, `}`, or `"`
+/// inside a JSON string value (e.g. a query containing `}`) never affects the
+/// depth count. Returns the inclusive `[start, close]` substring, or undefined
+/// if the braces never balance before end of input.
+function scanBalancedObject(text: string, start: number): string | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let j = start; j < text.length; j++) {
+    const c = text[j];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, j + 1);
+    }
+  }
+  return undefined;
 }

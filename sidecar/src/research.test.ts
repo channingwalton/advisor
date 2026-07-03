@@ -106,3 +106,72 @@ test("parseClassifierResponse: output with no JSON object is a failure", () => {
 test("parseClassifierResponse: unparseable JSON is a failure", () => {
   assert.deepEqual(parseClassifierResponse('{"triggers":[oops]}'), { ok: false });
 });
+
+// Issue #44: greedy first-`{`-to-last-`}` extraction spanned across trailing
+// content and dropped every trigger. Extraction now takes the first balanced
+// JSON object, respecting string literals so a brace inside a value can't
+// truncate it early.
+
+test("parseClassifierResponse: prose prefix + valid object + trailing junk object still extracts triggers (issue #44 repro)", () => {
+  const r = parseClassifierResponse(
+    'sure! {"triggers":[{"kind":"question","subject":"x","query":"y"}]} and also {"junk":1}'
+  );
+  assert.deepEqual(r, {
+    ok: true,
+    triggers: [{ kind: "question", subject: "x", query: "y" }],
+  });
+});
+
+test("parseClassifierResponse: a } inside a string value does not truncate the object early", () => {
+  const r = parseClassifierResponse(
+    '{"triggers":[{"kind":"question","subject":"regex","query":"what does the } in a}b glob mean"}]}'
+  );
+  assert.deepEqual(r, {
+    ok: true,
+    triggers: [{ kind: "question", subject: "regex", query: "what does the } in a}b glob mean" }],
+  });
+});
+
+test("parseClassifierResponse: an escaped quote inside a string value is handled", () => {
+  const r = parseClassifierResponse(
+    '{"triggers":[{"kind":"context","subject":"quote","query":"they said \\"} done\\" out loud"}]}'
+  );
+  assert.deepEqual(r, {
+    ok: true,
+    triggers: [{ kind: "context", subject: "quote", query: 'they said "} done" out loud' }],
+  });
+});
+
+test("parseClassifierResponse: prose-wrapped single object with triggers", () => {
+  const r = parseClassifierResponse(
+    'Here is the JSON you asked for:\n{"triggers":[{"kind":"factcheck","subject":"gdp","query":"is France GDP $3tn"}]}\nHope that helps.'
+  );
+  assert.deepEqual(r, {
+    ok: true,
+    triggers: [{ kind: "factcheck", subject: "gdp", query: "is France GDP $3tn" }],
+  });
+});
+
+test("parseClassifierResponse: a leading incomplete { fragment before the real object is skipped", () => {
+  const r = parseClassifierResponse(
+    '{ oops truncated {"triggers":[{"kind":"question","subject":"x","query":"y"}]}'
+  );
+  assert.deepEqual(r, {
+    ok: true,
+    triggers: [{ kind: "question", subject: "x", query: "y" }],
+  });
+});
+
+test("parseClassifierResponse: a junk object before the triggers object is skipped in favour of the triggers object", () => {
+  const r = parseClassifierResponse(
+    'per rule {"max":2} the result is {"triggers":[{"kind":"context","subject":"a","query":"qa"}]}'
+  );
+  assert.deepEqual(r, {
+    ok: true,
+    triggers: [{ kind: "context", subject: "a", query: "qa" }],
+  });
+});
+
+test("parseClassifierResponse: a parseable object without a triggers array is a success with no triggers", () => {
+  assert.deepEqual(parseClassifierResponse('{"junk":1}'), { ok: true, triggers: [] });
+});
