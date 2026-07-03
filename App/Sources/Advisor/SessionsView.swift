@@ -1025,11 +1025,19 @@ private struct SessionDetailPane: View {
             answerBody = body
             answerState = state
             if state == "done" {
-                SessionArchive.upsertSummary(body, to: file)
-                NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
-                answerBody = ""
-                answerState = ""
-                summarising = false
+                // Issue #51: only clear and reload once the summary is on disk. On
+                // failure keep it visible (leave answerBody / answerState) so it
+                // isn't lost, and don't post — but still drop `summarising` so the
+                // UI isn't stuck.
+                if SessionArchive.upsertSummary(body, to: file) {
+                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                    answerBody = ""
+                    answerState = ""
+                    summarising = false
+                } else {
+                    askNote = "Summary couldn't be saved to disk."
+                    summarising = false
+                }
             }
         }
         if sent == nil {
@@ -1051,10 +1059,15 @@ private struct SessionDetailPane: View {
             // toolbar edit would overwrite this one from a stale array.
             NotificationCenter.default.post(
                 name: .advisorLiveTagsChanged, object: nil, userInfo: ["tags": tags])
+            NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+        } else if SessionArchive.setTags(tags, in: file) {
+            NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
         } else {
-            SessionArchive.setTags(tags, in: file)
+            // Issue #51: the write failed — surface it and don't post the change
+            // notification, which would reload from disk and show the OLD tags as
+            // if nothing had changed.
+            askNote = "Couldn't save tags to disk."
         }
-        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
     /// Persist the renamed title via the shared, live-note-aware helper.
@@ -1333,13 +1346,20 @@ private struct SessionDetailPane: View {
             answerBody = body
             answerState = state
             if state == "done" {
-                SessionArchive.appendFollowUp(question: q, answer: body, to: file)
-                // Refresh the parent list cache (and so this pane's `detail`),
-                // not just a pane-local copy, or the appended Q&A would vanish on
-                // navigating away and back or via search.
-                NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
-                answerBody = ""
-                answerState = ""
+                // Issue #51: only clear the answer and reload once the append is
+                // on disk. On failure keep the answer visible (leave answerBody /
+                // answerState as they are) so the Q&A isn't lost, and don't post —
+                // a reload would drop the unsaved answer.
+                if SessionArchive.appendFollowUp(question: q, answer: body, to: file) {
+                    // Refresh the parent list cache (and so this pane's `detail`),
+                    // not just a pane-local copy, or the appended Q&A would vanish on
+                    // navigating away and back or via search.
+                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                    answerBody = ""
+                    answerState = ""
+                } else {
+                    askNote = "Answer couldn't be saved to disk — copy it before navigating away."
+                }
             }
         }
         if sent == nil {

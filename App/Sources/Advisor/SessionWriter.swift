@@ -179,7 +179,17 @@ final class SessionWriter {
             utterances: store.utterances, cards: store.cards, notes: store.notes,
             started: started, ended: ended,
             context: context, name: name, tags: tags)
-        try? md.write(to: fileURL, atomically: true, encoding: .utf8)
+        do {
+            try md.write(to: fileURL, atomically: true, encoding: .utf8)
+        } catch {
+            // Issue #51: a failed save was silently swallowed, so the live
+            // transcript could stop persisting unnoticed. Surface it and bail
+            // before posting .advisorSessionsChanged — posting would falsely imply
+            // the on-disk note updated.
+            store.status = "⚠️ session note not saved: \(error.localizedDescription)"
+            appLog.write("[advisor] session note write failed: \(error)")
+            return
+        }
         // A live rename only reaches the Sessions browser once the note it titles
         // is rewritten — post now that the new name is on disk, so its sidebar
         // drops the start-time title. Cleared so a later content write stays quiet.
