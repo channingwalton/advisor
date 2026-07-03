@@ -183,11 +183,14 @@ export interface Agent {
 }
 
 /// Connector action verbs — tools that can change external state. Matched as a
-/// word (start, or after _ / -, ending at _ / - / end / a camelCase boundary) in
-/// the bare tool name. Case-sensitive: connector verbs are always lower-case
-/// (`createJiraIssue`, `send_message`, `lib-install`), so this avoids "set"
-/// matching "settings". Checked BEFORE the read allowlist so a name carrying
-/// both an action and a read verb (e.g. `ddsql_upsert_saved_query`) is gated.
+/// word (start, or after _ / -, ending at _ / - / end) in the bare tool name,
+/// which is first normalised (`normaliseVerbName`) so a verb glued mid-camelCase
+/// (`fetchAndDelete` → `fetch_and_delete`) becomes a delimited, lower-case word
+/// the anchor can see — without that step such a verb is invisible and the name
+/// fails OPEN via a leading read verb. The trailing `set` etc. only match a whole
+/// word, so `settings`/`assets` never trip. Checked BEFORE the read allowlist so
+/// a name carrying both an action and a read verb (e.g. `ddsql_upsert_saved_query`,
+/// `searchAndUpdate`) is gated.
 const MCP_ACTION_PATTERN =
   /(?:^|[_-])(send|post|create|update|upsert|delete|remove|write|upload|install|uninstall|add|run|exec|execute|start|stop|enable|disable|schedule|transition|invite|archive|publish|edit|move|rename|merge|close|cancel|assign|apply|approve|reject|import|export|reset|clear|drop|grant|revoke|set|authenticate|complete)(?:[_-]|[A-Z]|$)/;
 
@@ -203,13 +206,22 @@ function bareMcpName(toolName: string): string {
   return i >= 0 ? toolName.slice(i + 2) : toolName;
 }
 
+/// Split camelCase into `_`-delimited words and lower-case, so the verb patterns'
+/// `^ / _ / -` word anchors also see a verb embedded mid-camelCase. Without this,
+/// `fetchAndDelete` hides `delete` behind a lower-case letter (no anchor) and,
+/// being upper-cased, dodges the case-sensitive match too — so the action gate
+/// misses it and a leading read verb (`fetch`) waves it through: a fail-OPEN.
+function normaliseVerbName(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+}
+
 /// MCP connector permission. Fail closed: when actions are disabled a tool is
 /// allowed only if it is recognised as a read/search. An action verb, OR any
 /// name we don't recognise, is denied — a new mutating tool we've never seen is
 /// blocked by default rather than waved through.
 export function mcpPermission(toolName: string, allowMcpActions: boolean): "allow" | "deny" {
   if (allowMcpActions) return "allow";
-  const name = bareMcpName(toolName);
+  const name = normaliseVerbName(bareMcpName(toolName));
   if (MCP_ACTION_PATTERN.test(name)) return "deny";
   if (MCP_READ_PATTERN.test(name)) return "allow";
   return "deny";

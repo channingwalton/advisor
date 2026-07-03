@@ -117,6 +117,32 @@ test("MCP gate allows read/search tools when actions are disabled", () => {
   }
 });
 
+test("MCP gate denies action verbs embedded mid-camelCase (issue #42 fail-open)", () => {
+  // The verb sits after a lower-case letter and is upper-cased, so it dodges the
+  // `^ / _ / -` word anchor; a leading read verb (fetch/get/search/view) would
+  // otherwise wave the tool through. Must fail closed.
+  for (const t of [
+    "mcp__x__fetchAndDelete",
+    "mcp__x__getOrDeleteItem",
+    "mcp__x__searchAndUpdate",
+    "mcp__x__viewAndReset",
+    "mcp__x__read_and_delete", // snake-cased sibling — already correct
+  ]) {
+    assert.equal(mcpPermission(t, false), "deny", t);
+  }
+});
+
+test("MCP gate still allows read-only camelCase tools (no embedded action verb)", () => {
+  for (const t of [
+    "mcp__x__getItem",
+    "mcp__x__searchMessages",
+    "mcp__x__getUpdates", // "update" is not a whole word here (trailing "s")
+    "mcp__x__listChannels",
+  ]) {
+    assert.equal(mcpPermission(t, false), "allow", t);
+  }
+});
+
 test("MCP gate fails closed for unrecognised tools when actions are disabled", () => {
   assert.equal(mcpPermission("mcp__some_server__frobnicate", false), "deny");
 });
