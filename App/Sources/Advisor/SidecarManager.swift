@@ -165,6 +165,13 @@ final class SidecarManager {
         stdinHandle = nil
         process = nil
         if stopping { stopping = false; return } // deliberate stop()
+        // Genuine crash: the restarted sidecar has no memory of prior card ids, so
+        // any still-researching card can never receive its terminal card_update and
+        // would spin forever (issue #49). Fail them now — on every crash path
+        // (restart and exhausted-attempts alike), before the restart backoff below.
+        for idx in store.cards.indices where store.cards[idx].isResearching {
+            store.cards[idx].state = "failed"
+        }
         // A crash after a healthy run is a fresh failure, not part of a loop.
         if let lastSpawn, Date().timeIntervalSince(lastSpawn) > healthyRunSeconds {
             restartAttempts = 0

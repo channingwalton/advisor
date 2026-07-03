@@ -955,14 +955,30 @@ struct TranscriptView: View {
         if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
         spaceMonitor = nil
         withAnimation { finishing = true }
+        // Backstop: a card wedged in "researching" (e.g. a sidecar crash before
+        // issue #49's fix runs, or any other stall) would otherwise make poll()
+        // recurse forever and the window never close. Bound it at ~200s — just
+        // beyond the sidecar's 180s per-task timeout, so a legitimately-completing
+        // card is never truncated. 200s / 0.3s ≈ 667 polls.
+        let maxPolls = 667
+        var polls = 0
+        func closeNow() {
+            services.writer.flush()
+            // Drop the overlay before dismissing so the close guard (which
+            // ignores closes while finishing) lets this one through, and no
+            // stale veil survives on the single-instance window's reuse.
+            finishing = false
+            dismissWindow(id: "recording")
+        }
         func poll() {
             if !store.cards.contains(where: { $0.isResearching }) {
-                services.writer.flush()
-                // Drop the overlay before dismissing so the close guard (which
-                // ignores closes while finishing) lets this one through, and no
-                // stale veil survives on the single-instance window's reuse.
-                finishing = false
-                dismissWindow(id: "recording")
+                closeNow()
+                return
+            }
+            polls += 1
+            if polls >= maxPolls {
+                appLog.write("waitForAgentsThenClose: forcing close with cards still in-flight after ~200s")
+                closeNow()
                 return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: poll)
