@@ -346,9 +346,16 @@ final class Recorder {
         micMuted.store(false, ordering: .relaxed)
         capture.stop()
         Task {
+            // Stop audio SOURCES before tearing down the STT SINKS. The mic
+            // source is already stopped synchronously above (capture.stop's
+            // removeTap guarantees no further mic callbacks). stopSystem awaits
+            // SCStream.stopCapture, which drains delivery — after it returns
+            // appleSys.append can no longer be called, so nilling appleSys's
+            // engine state below is race-free. Ordering the other way round
+            // leaves a live SCStream feeding a half-torn-down engine.
+            await stopSystem()
             await appleMic.stop()
             await appleSys.stop()
-            await stopSystem()
             await MainActor.run {
                 store.listening = false
                 store.micMuted = false
