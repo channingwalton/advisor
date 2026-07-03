@@ -149,6 +149,7 @@ async function runCard(
   const cardId = `c${++cardCounter}`;
   lane.currentCardId = cardId;
   send({ type: "card", id: cardId, trigger: triggerId, kind, title, body: "…", state: "pending" });
+  let failed = false;
   try {
     const prompt = sessionContextPrefix(sessionContext) + transcriptDelta(lane.name) + task;
     const { text, error } = await lane.session.run(prompt, (body) => {
@@ -156,11 +157,13 @@ async function runCard(
         send({ type: "card_update", id: cardId, body, state: "streaming" });
       }
     });
+    failed = Boolean(error);
     if (!cancelledCards.has(cardId)) {
       const outcome = cardOutcome(text, error);
       send({ type: "card_update", id: cardId, body: outcome.body, state: outcome.state });
     }
   } catch (err) {
+    failed = true;
     log(`agent error: ${err}`);
     if (!cancelledCards.has(cardId)) {
       send({
@@ -171,6 +174,16 @@ async function runCard(
       });
     }
   } finally {
+    // Recycle a pooled (research/query) lane after any failure — timeout/error.
+    // Unlike the transient reply/summary/document lanes (disposed every turn),
+    // these persist to keep their session warm; but a timed-out turn may have
+    // wedged (interrupt is best-effort), so without this every later trigger
+    // routed to this lane would burn a full timeout indefinitely (issue #46).
+    // reset() drops the session; the next drainResearch dispatch re-spawns clean.
+    // Ordering: this runs before drainResearch's `.finally` clears `lane.busy`,
+    // so the re-dispatch always sees a fresh session. The warm session is kept on
+    // the success path (failed === false).
+    if (failed) lane.session.reset();
     lane.currentCardId = undefined;
     cancelledCards.delete(cardId);
   }

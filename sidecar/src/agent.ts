@@ -168,6 +168,11 @@ export interface AgentSessionOptions {
   allowMcpActions?: boolean;
 }
 
+/// The SDK entry point. Aliased so it can be injected (default: the real
+/// `query`) — tests drive a fake stream to exercise the timeout/reset lifecycle
+/// without spawning a subprocess (mirrors the injectable `realpath` above).
+export type QueryFn = typeof query;
+
 /// A long-lived agent backend. Tasks are answered in FIFO order; the session
 /// retains context across tasks until reset().
 export interface Agent {
@@ -237,7 +242,10 @@ export class AgentSession implements Agent {
   private pending: PendingTask[] = [];
   private firstRunAfterSpawn = false;
 
-  constructor(private readonly opts: AgentSessionOptions) {}
+  constructor(
+    private readonly opts: AgentSessionOptions,
+    private readonly queryFn: QueryFn = query
+  ) {}
 
   private stream?: ReturnType<typeof query>;
 
@@ -245,6 +253,23 @@ export class AgentSession implements Agent {
   reset(): void {
     this.input?.end();
     this.input = undefined;
+    this.stream = undefined;
+    // Detach the current queue from its (now-abandoned) stream loop and settle
+    // anything still unresolved. Pooled lanes are recycled through here on a
+    // timeout/error, so a turn that was interrupted but never emitted a `result`
+    // can't leave its settled task at the queue head — where it would suppress
+    // the next task's streaming (the `!current.settled` guard) or desync results
+    // by mis-shifting a later `result` onto the wrong task (issue #46). The old
+    // loop keeps draining its own captured queue (see ensure), so replacing the
+    // reference here can't make two generations fight over one array.
+    const orphaned = this.pending;
+    this.pending = [];
+    for (const p of orphaned) {
+      if (!p.settled) {
+        p.settled = true;
+        p.resolve({ text: p.buffer, error: "agent session reset" });
+      }
+    }
   }
 
   /** Interrupt the currently-running turn (the task resolves with its partial buffer). */
@@ -261,6 +286,17 @@ export class AgentSession implements Agent {
     onText?: (accumulated: string) => void,
     timeoutMs = 180_000
   ): Promise<TaskResult> {
+    // A previous turn that timed out (or was interrupted) but never emitted a
+    // clean `result` leaves its settled task at the head of the queue. Reusing
+    // the session would let that stale head suppress this task's streaming and
+    // mis-shift results, so recycle first (issue #46). The normal success path
+    // shifts the task on `result`, leaving the queue empty — so the warm session
+    // is preserved. This also recovers a wedged classifier or warm-up turn,
+    // which settle via timeout but don't go through runCard's failure recycle.
+    if (this.pending.some((p) => p.settled)) {
+      log(`${this.opts.name}: recycling session (abandoned task at queue head)`);
+      this.reset();
+    }
     this.ensure();
     const cold = this.firstRunAfterSpawn;
     this.firstRunAfterSpawn = false;
@@ -357,7 +393,13 @@ export class AgentSession implements Agent {
     this.firstRunAfterSpawn = true;
     const q = new AsyncQueue<SDKUserMessage>();
     this.input = q;
-    const stream = query({
+    // Give this spawn its own pending queue, captured by the loop below. After a
+    // reset()/recycle the previous loop keeps draining this (now orphaned) array
+    // while the next spawn gets a fresh one, so two generations never shift from
+    // one shared queue (issue #46).
+    const pending: PendingTask[] = [];
+    this.pending = pending;
+    const stream = this.queryFn({
       prompt: q,
       options: {
         // (stream kept for interrupt())
@@ -380,7 +422,7 @@ export class AgentSession implements Agent {
     void (async () => {
       try {
         for await (const msg of stream) {
-          const current = this.pending[0];
+          const current = pending[0];
           if (msg.type === "assistant") {
             for (const block of msg.message.content) {
               if (block.type === "text" && current && !current.settled) {
@@ -396,7 +438,7 @@ export class AgentSession implements Agent {
               }
             }
           } else if (msg.type === "result") {
-            const p = this.pending.shift();
+            const p = pending.shift();
             if (p) {
               const finalText = msg.subtype === "success" ? msg.result : p.buffer;
               log(`${this.opts.name}: run done +${Date.now() - p.t0}ms (cold=${p.cold}) final: ${JSON.stringify((finalText ?? "").slice(0, 400))}`);
@@ -414,7 +456,7 @@ export class AgentSession implements Agent {
         log(`${this.opts.name}: session died: ${err}`);
       } finally {
         if (this.input === q) this.input = undefined;
-        for (const p of this.pending.splice(0)) {
+        for (const p of pending.splice(0)) {
           if (!p.settled) {
             p.settled = true;
             p.resolve({ text: p.buffer, error: "agent session ended" });

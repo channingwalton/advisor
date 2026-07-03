@@ -1072,6 +1072,52 @@ may see the failed window's lines a second time, but the classifier is already
 told to treat near-duplicates as one, and re-judging is strictly better than the
 previous silent drop.
 
+## Pooled lanes recycle on failure, never wedge (2026-07-03, issue #46)
+
+Transient lanes (reply/summary/document) `reset()` their session every turn;
+pooled lanes (the 1–8 research lanes + the query lane) deliberately do **not** —
+they keep the SDK subprocess warm and carry transcript-delta context across
+triggers (M5). But that meant a pooled lane had *no* recycle path: if a turn
+timed out, `AgentSession.run`'s 180 s timeout settled the task and fired a
+best-effort `interrupt()`, but if the interrupt failed the SDK turn never emitted
+a `result`, so its settled `PendingTask` stayed at the FIFO head forever. Every
+later trigger `drainResearch` routed to that lane then (a) queued behind the
+wedged turn and burned a full 180 s with no output, indefinitely, and (b)
+desynced — the stream loop's `!current.settled` guard (head still settled)
+suppressed the new task's streaming, and a late `result` shifted the *stale* head
+rather than the new task.
+
+Fix, two parts:
+
+- **Recycle on failure (main.ts `runCard`).** After any failure outcome
+  (timeout or error) on a pooled lane, `reset()` the session so the next
+  `drainResearch` dispatch re-spawns clean. This mirrors the transient lanes'
+  `reset()`-in-`finally`, but gated on failure so the **success path keeps the
+  warm session and its context**. Ordering is load-bearing: `runCard`'s `finally`
+  (the reset) completes before `drainResearch`'s chained `.finally` clears
+  `lane.busy` and re-dispatches, so the re-dispatch always sees a fresh session
+  and a consistent `busy` flag. Cost accepted: a failed card pays one cold-spawn
+  (and loses pre-failure session memory — the lane rebuilds context from
+  subsequent deltas; the `cursors` entry is intentionally left as-is, so no giant
+  whole-transcript replay).
+
+- **`reset()` made robust + a defensive recycle in `run()` (agent.ts).**
+  `reset()` now also settles any unresolved queued task (so a caller's promise
+  can't hang) and clears the queue. Each spawn binds its **own** `pending` array,
+  captured by that generation's stream loop, so after a recycle the old
+  (possibly wedged) loop drains its orphaned queue and can never fight the new
+  generation over a shared array. As a backstop, `run()` recycles up-front if it
+  finds an already-settled task at the queue head — this also recovers a wedged
+  **classifier** or **warm-up** turn, which settle via timeout but don't pass
+  through `runCard`. A genuinely wedged SDK subprocess may still linger until GC /
+  sidecar restart (interrupt is best-effort), but it no longer stalls the pool.
+
+Unit-tested without the SDK via an injectable `queryFn` (default: the real
+`query`; the pattern mirrors the injectable `realpath`): a fake stream drives the
+timeout → recycle → fresh-spawn lifecycle and asserts no result desync, that
+streaming lands on the recycled task, and that the success path reuses the warm
+spawn (`agent.test.ts`).
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
