@@ -145,16 +145,16 @@ final class SessionWriter {
 
     /// Copy the current session note to `dest`. Export is just sharing the
     /// transcript: the saved note and the export are byte-identical, so flush
-    /// any pending debounced write first, then copy the file (overwriting).
+    /// any pending debounced write first, then write atomically (read source,
+    /// then replace). Issue #52: no pre-delete — a failed write leaves any
+    /// existing file at `dest` intact (mirrors the Sessions browser's export).
     func export(to dest: URL) throws {
         flush()
         guard let fileURL else { return }
-        // Exporting onto the live note itself would delete the source mid-copy.
+        // Exporting onto the live note itself would needlessly churn a temp file.
         guard dest.standardizedFileURL != fileURL.standardizedFileURL else { return }
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try FileManager.default.removeItem(at: dest)
-        }
-        try FileManager.default.copyItem(at: fileURL, to: dest)
+        let data = try Data(contentsOf: fileURL)
+        try data.write(to: dest, options: .atomic)
     }
 
     /// Write the note now, cancelling any pending debounced write.
