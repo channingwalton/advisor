@@ -157,6 +157,12 @@ struct TranscriptView: View {
     /// When stopped, the moment of stopping — freezes the timer and marks the
     /// session resumable. Nil while recording or idle.
     @State private var stoppedAt: Date?
+    /// In-flight latch for `resumeRecording()`: `stoppedAt` is only cleared after
+    /// the async `recorder.start` returns, so without this a second Space during
+    /// that await would re-enter and start audio twice concurrently (issue #50).
+    /// Set synchronously on the main actor before the Task, so the second press
+    /// is a no-op — mirrors how `startSession` guards on `sessionStart`.
+    @State private var resuming = false
     @State private var spaceMonitor: Any?
     /// True while a "Wait"-to-close is draining the session's in-flight agents.
     /// Covers the window with a blocking overlay so the about-to-close UI can't
@@ -831,13 +837,20 @@ struct TranscriptView: View {
     /// same session (no generation bump, so existing utterances are kept; no new
     /// `session_start`/note). The frozen-timer state holds until audio is live.
     private func resumeRecording() {
-        guard let recorder, let stoppedAt else { return }
+        guard let recorder, let stoppedAt, !resuming else { return }
+        // Latch synchronously before the await so a second Space is a no-op
+        // (issue #50). `recorder.start` is non-throwing, so its return — and
+        // hence this reset — is always reached.
+        resuming = true
         if let start = sessionStart {
             sessionStart = RecordControl.resumedStart(start, stoppedAt: stoppedAt, now: Date())
         }
         Task {
             await recorder.start(device: selectedDevice, captureSystem: captureSystem)
-            await MainActor.run { self.stoppedAt = nil }
+            await MainActor.run {
+                self.stoppedAt = nil
+                self.resuming = false
+            }
         }
     }
 
