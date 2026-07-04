@@ -13,6 +13,7 @@ import {
 } from "./prompts.js";
 import { cardOutcome, boundedPush } from "./cards.js";
 import { Inbound, log, send } from "./protocol.js";
+import { handleCancel } from "./cancel.js";
 import {
   cardKind,
   classify,
@@ -263,11 +264,16 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
 /// request id. Cap concurrent ones so a burst can't fork unbounded subprocesses.
 const MAX_CONCURRENT_DOC_QUESTIONS = 2;
 let activeDocQuestions = 0;
+/// In-flight document lanes (history-browser ask/summarise), keyed via
+/// currentCardId (the request id) so a `cancel` can find and interrupt them.
+/// Transient, outside the research pool — like reply/summary lanes.
+const documentLanes: Lane[] = [];
 
 /// Run a one-shot task over a self-contained document (a saved transcript),
 /// streaming the result back as document_answer on `id`. Shared by ask_document
 /// (a question) and summarise_document (the Summarise button), which differ only
-/// in the prompt.
+/// in the prompt. Cancel-aware like runCardReply: a `cancel` for `id` interrupts
+/// the run and suppresses the remaining sends so the app's "cancelled" stands.
 async function runDocumentTask(id: string, prompt: string): Promise<void> {
   if (activeDocQuestions >= MAX_CONCURRENT_DOC_QUESTIONS) {
     send({
@@ -280,23 +286,34 @@ async function runDocumentTask(id: string, prompt: string): Promise<void> {
   }
   activeDocQuestions++;
   const lane = makeLane("document");
+  lane.currentCardId = id;
+  documentLanes.push(lane);
   send({ type: "document_answer", id, body: "…", state: "pending" });
   try {
-    const { text, error } = await lane.session.run(prompt, (body) =>
-      send({ type: "document_answer", id, body, state: "streaming" })
-    );
-    const outcome = cardOutcome(text, error);
-    send({ type: "document_answer", id, body: outcome.body, state: outcome.state });
+    const { text, error } = await lane.session.run(prompt, (body) => {
+      if (!cancelledCards.has(id)) {
+        send({ type: "document_answer", id, body, state: "streaming" });
+      }
+    });
+    if (!cancelledCards.has(id)) {
+      const outcome = cardOutcome(text, error);
+      send({ type: "document_answer", id, body: outcome.body, state: outcome.state });
+    }
   } catch (err) {
     log(`document task error: ${err}`);
-    send({
-      type: "document_answer",
-      id,
-      body: `error: ${err instanceof Error ? err.message : String(err)}`,
-      state: "failed",
-    });
+    if (!cancelledCards.has(id)) {
+      send({
+        type: "document_answer",
+        id,
+        body: `error: ${err instanceof Error ? err.message : String(err)}`,
+        state: "failed",
+      });
+    }
   } finally {
     lane.session.reset(); // dispose the transient session
+    const i = documentLanes.indexOf(lane);
+    if (i >= 0) documentLanes.splice(i, 1);
+    cancelledCards.delete(id);
     activeDocQuestions--;
   }
 }
@@ -600,18 +617,14 @@ function handle(msg: Inbound): void {
         drainResearch();
       }
       break;
-    case "cancel": {
-      cancelledCards.add(msg.cardId);
-      send({ type: "card_update", id: msg.cardId, body: "cancelled", state: "cancelled" });
-      const lane = [...researchLanes, queryLane, ...replyLanes, ...summaryLanes].find(
-        (l) => l.currentCardId === msg.cardId
-      );
-      if (lane) {
-        log(`cancelling ${msg.cardId} on ${lane.name}`);
-        void lane.session.interrupt().catch(guard("interrupt"));
-      }
+    case "cancel":
+      handleCancel(msg.cardId, {
+        cancelledCards,
+        cardLanes: [...researchLanes, queryLane, ...replyLanes, ...summaryLanes],
+        documentLanes,
+        send,
+      });
       break;
-    }
     case "card_reply":
       // Transient session, parallel-safe — no busy gate, no pool slot.
       void runCardReply(msg).catch(guard("card_reply"));
