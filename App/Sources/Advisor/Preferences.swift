@@ -281,7 +281,7 @@ struct AuthModeView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("\(providerLabel) API key")
                         HStack {
-                            TextField("Paste your \(providerLabel) API key", text: $draft)
+                            SecureField("Paste your \(providerLabel) API key", text: $draft)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(minWidth: 280)
                                 .onSubmit { commit() }
