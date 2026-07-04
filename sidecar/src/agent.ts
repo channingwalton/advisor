@@ -415,7 +415,11 @@ export class AgentSession implements Agent {
         // where personal context like vault locations belongs, not in Advisor.
         // Components that don't need it (the classifier) pass [] to skip it.
         settingSources: this.opts.settingSources ?? ["user"],
-        maxTurns: 1000,
+        // A research/query turn realistically needs a handful of search/fetch/read
+        // rounds; a ceiling in the tens bounds a looping or prompt-injected agent's
+        // tool-call/cost burn. The 180 s task timeout is the primary bound — this
+        // is the secondary guard against a tight loop within it (issue #58).
+        maxTurns: 40,
       },
     });
     this.stream = stream;
