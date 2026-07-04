@@ -1139,6 +1139,69 @@ changes the line) and if `www/index.html` is already dirty — the release
 commit must contain only the sync, never sweep up unrelated edits. Pushing
 commit and tag stays manual.
 
+## Review-suggestion batch: hardening + de-duplication (2026-07-04, issues #55–66)
+
+The 2026-07-03 codebase review's lower-severity half landed as a batch. Most were
+mechanical fixes (git history and the closed issues carry those); the decisions
+worth not re-litigating:
+
+- **`cancelledCards` is bounded by construction (#55).** A `cancel` marks an id
+  only while a lane is actually running it — the set can therefore hold at most
+  one id per live lane, and each run clears its own id in `finally`. Previously a
+  cancel for an already-terminal card (or any document id) was added and never
+  removed, leaking for the process lifetime. Cancellation also routes by pool: a
+  document task streams back as `document_answer` (keyed by request id on the app
+  side), a card as `card_update` — sending the wrong frame was a silent no-op on
+  both ends. The handler lives in a side-effect-free `cancel.ts` so it is testable
+  without main.ts's stdin/lane globals. The document-cancel path is latent today
+  (the history-browser ask UI has no cancel affordance) but no longer a dead end.
+
+- **One cancel-aware run skeleton (`guardedRun`, #66).** `runCard`,
+  `runCardReply`, `runDocumentTask` and `runSummariseLive` had repeated the same
+  run→stream→terminal→error block, differing only in the message they build.
+  Extracted to `guardedRun(session, cardId, task, frame, …)`: it streams via
+  `frame(body, state)`, suppresses everything once the id is cancelled, and
+  returns whether the turn failed (so a pooled lane can recycle per #46). Each
+  caller supplies only its `frame`.
+
+- **Shared intrinsic-height text view (#66).** The transcript's `ActionTextView`
+  and the card renderer each carried a byte-identical copy of the #12
+  height-reporting machinery (`intrinsicContentSize` + width-tracked
+  `setFrameSize`) — a divergence risk for exactly the bug it fixes. Both now
+  subclass `IntrinsicHeightTextView`. Toolbar controls likewise share a
+  `.controlChrome()` modifier; the two accent-toggle buttons keep their own
+  state-dependent fill and are deliberately left out of it.
+
+- **`maxTurns` is a secondary bound (#58).** Dropped 1000 → 40. The 180 s task
+  timeout is the real ceiling; `maxTurns` only caps a tight loop or prompt
+  injection within it, so a realistic tens-scale value is enough.
+
+- **#57 is already prevented, not fixed.** The reset()+immediate-run() FIFO
+  hazard the review flagged was made unreachable by the per-spawn `pending`
+  capture from #46; it is pinned by a regression test rather than re-fixed — do
+  not re-add a guard.
+
+Deliberately **not** done (won't-fix at current scale, recorded so they aren't
+re-opened blindly): memoising `SessionsView.filtered` (#61 — the O(folders ×
+n log n) per-body-pass recompute is microseconds at single-user scale, and a
+correct memoise means restructuring the sidebar view); de-duplicating card and
+tag-pill *view scaffolding* (#66 tail — CPD flags it by token overlap, but
+forcing shared views there trades clarity for DRY on UI that needs a live session
+to verify); and a SidecarManager crash/restart injection harness plus codex.ts
+streaming tests (#65 — real value, poor ROI versus the fake-process scaffolding
+they need). SidecarManager's restart path is consequently the one area still
+without a unit harness; its #63 fix (clear pipe readability handlers on exit;
+retry a spawn that throws inside `restart()` so the sidecar isn't stranded) was
+verified by build + inspection, not a runtime harness.
+
+Small policy also folded in: `config.json` now writes `.atomic` and logs failures
+rather than silently resetting every preference on a mid-write crash (#60);
+`package.sh` prunes dev deps from the shipped bundle and prints install output on
+failure (#64); `renameFolder`/`deleteFolder` route names through
+`sanitiseFolderName` as defence-in-depth (#62); the API-key field is a
+`SecureField` (#59); and `askedTime` anchors to the `_Asked …_` footer rather
+than the first "Asked " anywhere in a card (#65).
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
