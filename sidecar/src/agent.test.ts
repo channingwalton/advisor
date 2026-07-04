@@ -116,3 +116,31 @@ test("reset() settles an unresolved in-flight task (issue #46)", async () => {
   spawns[1].messages.push(success("a2"));
   assert.equal((await r2p).text, "a2");
 });
+
+// reset() + immediate run() on the SAME instance: the old stream's async
+// teardown must splice only its own captured pending array, never the new
+// task's. Were `pending` shared across spawns, the old finally would resolve
+// task2 with "agent session ended" and the next result would desync the FIFO
+// (issue #57). Guards the per-spawn capture from issue #46.
+test("reset() then immediate run() keeps the new task off the old teardown (issue #57)", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+
+  const r1p = session.run("task1", undefined, 1000);
+  assert.equal(spawns.length, 1);
+  session.reset();
+  assert.equal((await r1p).error, "agent session reset");
+
+  // task2 spawns fresh (spawn 2) with its own pending array.
+  const r2p = session.run("task2", undefined, 1000);
+  assert.equal(spawns.length, 2);
+
+  // Now let spawn 1's stream end so its finally runs *after* task2 is enqueued.
+  spawns[0].messages.end();
+  await new Promise((r) => setTimeout(r, 0));
+
+  spawns[1].messages.push(success("answer2"));
+  const r2 = await r2p;
+  assert.equal(r2.text, "answer2"); // not "" with error "agent session ended"
+  assert.equal(r2.error, undefined);
+});
