@@ -321,8 +321,9 @@ export class AgentSession implements Agent {
       session_id: "",
     } as SDKUserMessage);
 
-    const timeout = new Promise<TaskResult>((res) =>
-      setTimeout(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<TaskResult>((res) => {
+      timer = setTimeout(() => {
         if (!p.settled) {
           p.settled = true;
           log(`${this.opts.name}: task timed out`);
@@ -331,9 +332,11 @@ export class AgentSession implements Agent {
           void this.interrupt();
           res({ text: p.buffer, error: "timed out" });
         }
-      }, timeoutMs)
-    );
-    return Promise.race([answer, timeout]);
+      }, timeoutMs);
+    });
+    // Clear the timer once the race settles so a completed task doesn't retain
+    // its PendingTask closure + buffer until the timeout fires (issue #56).
+    return Promise.race([answer, timeout]).finally(() => clearTimeout(timer));
   }
 
   /// Sandbox policy: web tools allowed; Read/Grep/Glob only inside readRoots;
