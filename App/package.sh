@@ -25,6 +25,14 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Advisor "$APP/Contents/MacOS/Advisor"
 cp Resources/Info.plist   "$APP/Contents/Info.plist"
 
+# Stamp the version: marketing version from the repo-root VERSION file, build
+# number from the commit count (monotonic, no bookkeeping).
+VERSION=$(tr -d '[:space:]' < "$ROOT/VERSION")
+BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 1)
+echo "==> stamp version $VERSION ($BUILD)"
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+plutil -replace CFBundleVersion -string "$BUILD" "$APP/Contents/Info.plist"
+
 echo "==> compile app icon"
 # AppIcon.iconset (the PNG source) -> AppIcon.icns in the bundle. Info.plist
 # points at it via CFBundleIconFile/CFBundleIconName = AppIcon.

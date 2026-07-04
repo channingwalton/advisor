@@ -2,12 +2,13 @@
 # Build, Developer-ID-sign, notarise and staple Advisor.app, then wrap it in a
 # signed, notarised and stapled compressed DMG for distribution.
 #
-# Output: App/dist/Advisor.dmg
+# Output: App/dist/Advisor-<version>.dmg (version from the repo-root VERSION file)
 set -e
 cd "$(dirname "$0")"            # App/
 
 APP=dist/Advisor.app
-DMG=dist/Advisor.dmg
+VERSION=$(tr -d '[:space:]' < ../VERSION)
+DMG=dist/Advisor-$VERSION.dmg
 RW_DMG=dist/Advisor-rw.dmg
 MOUNT=dist/dmg-mount
 VOLNAME=Advisor

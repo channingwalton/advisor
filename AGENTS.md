@@ -33,7 +33,12 @@ sh test/replay.sh                      # replay fragments through the pipeline
 cd App && sh package.sh                # → dist/Advisor.app (self-contained, ad-hoc signed)
 cd App && sh install.sh                # clean build + install to ~/Applications
 cd App && sh notarize.sh               # Developer ID sign + notarise + staple (distribution)
+just release                           # DMG + sync www version line + commit + tag vVERSION
 ```
+
+Versioning: the repo-root `VERSION` file is the single source of truth —
+`package.sh` stamps it into the bundle (build number = commit count) and
+`dmg.sh` names the DMG from it. Bump `VERSION` before `just release`.
 
 Resource paths resolve via `AppResources` (bundle when packaged, `repoRoot`
 in a dev checkout) — keep new runtime-resource lookups going through it.

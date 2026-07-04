@@ -84,8 +84,9 @@ If `just` is installed, common tasks are available from the repo root:
 
 ```sh
 just commit-check   # clean build and test
-just dmg            # create App/dist/Advisor.dmg
+just dmg            # create App/dist/Advisor-<version>.dmg
 just create-dmg     # alias for just dmg
+just release        # dmg + sync website version line + commit + tag vVERSION
 just install        # install to ~/Applications/Advisor.app
 ```
 
@@ -148,7 +149,7 @@ once. (A Developer ID cert, if present, is preferred over the self-signed one.)
 signing isn't enough — Gatekeeper wants a Developer ID signature + notarisation.
 
 ```sh
-cd App && sh dmg.sh            # → App/dist/Advisor.dmg
+cd App && sh dmg.sh            # → App/dist/Advisor-<version>.dmg
 ```
 
 `dmg.sh` runs `notarize.sh` to build, Developer-ID-sign, notarise and staple the
@@ -166,6 +167,20 @@ xcrun notarytool store-credentials "advisor-notary" \
 It exits early with guidance if no Developer ID cert is found, so it's safe to
 run before you're set up. (Mac App Store isn't viable — the App Sandbox fights
 the bundled Node sidecar and `$HOME` reads.)
+
+**Versioning & cutting a release.** The repo-root `VERSION` file is the single
+source of truth. `package.sh` stamps it into the bundle as
+`CFBundleShortVersionString`, with `CFBundleVersion` set from the commit count,
+and `dmg.sh` names its output `Advisor-<version>.dmg`. To release: bump
+`VERSION`, then
+
+```sh
+just release
+```
+
+which builds the DMG, rewrites the version/size line on `www/index.html`,
+commits that sync, and tags `vVERSION` (it refuses to run if the tag already
+exists). Push the commit and tag yourself.
 
 ## Use
 

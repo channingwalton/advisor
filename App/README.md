@@ -23,7 +23,7 @@ launching terminal.
 
 ```sh
 sh package.sh        # → dist/Advisor.app (self-contained, locally signed)
-sh dmg.sh            # → dist/Advisor.dmg (Developer ID signed, notarised, stapled)
+sh dmg.sh            # → dist/Advisor-<version>.dmg (Developer ID signed, notarised, stapled)
 ```
 
 `dmg.sh` requires a Developer ID Application certificate and stored notarytool
