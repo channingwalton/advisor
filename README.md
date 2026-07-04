@@ -179,8 +179,10 @@ just release
 ```
 
 which builds the DMG, rewrites the version/size line on `www/index.html`,
-commits that sync, and tags `vVERSION` (it refuses to run if the tag already
-exists). Push the commit and tag yourself.
+commits that sync, and tags `vVERSION`. It refuses to run if the tag already
+exists (bump `VERSION` first) or if `www/index.html` has uncommitted changes
+(so the release commit contains only the sync). Push the commit and tag
+yourself.
 
 ## Use
 

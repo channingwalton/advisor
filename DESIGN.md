@@ -1118,6 +1118,27 @@ timeout → recycle → fresh-spawn lifecycle and asserts no result desync, that
 streaming lands on the recycled task, and that the success path reuses the warm
 spawn (`agent.test.ts`).
 
+## Versioning and the release cut (2026-07-04)
+
+The repo-root `VERSION` file is the single source of truth for the app
+version, chosen over deriving it from git tags: tags demand tagging
+discipline this repo doesn't have (work lands straight on main between
+releases), untagged builds would get noisy `git describe` versions, and a
+forgotten tag silently reuses the previous version. A one-line file is
+edited deliberately and reads the same everywhere — scripts, CI, a tarball
+without git. `package.sh` stamps it into the bundle as
+`CFBundleShortVersionString`; `CFBundleVersion` is the commit count
+(`git rev-list --count HEAD`, falling back to 1 without git) — monotonic
+with zero bookkeeping. `dmg.sh` names its artefact `Advisor-<version>.dmg`.
+
+`just release` cuts a release: build the DMG, rewrite the version/size line
+on `www/index.html` from the real artefact, commit that sync, tag
+`v<version>`. Two guards make it honest: it refuses to run if the tag
+already exists (forcing a `VERSION` bump, which also guarantees the sed
+changes the line) and if `www/index.html` is already dirty — the release
+commit must contain only the sync, never sweep up unrelated edits. Pushing
+commit and tag stays manual.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
