@@ -11,13 +11,14 @@ import { AgentSession, AsyncQueue, type QueryFn } from "./agent.js";
 interface FakeSpawn {
   messages: AsyncQueue<unknown>;
   interrupted: boolean;
+  args: unknown;
 }
 
 function makeFakeQuery(): { queryFn: QueryFn; spawns: FakeSpawn[] } {
   const spawns: FakeSpawn[] = [];
-  const queryFn = (() => {
+  const queryFn = ((args: unknown) => {
     const messages = new AsyncQueue<unknown>();
-    const rec: FakeSpawn = { messages, interrupted: false };
+    const rec: FakeSpawn = { messages, interrupted: false, args };
     spawns.push(rec);
     return {
       [Symbol.asyncIterator]: () => messages[Symbol.asyncIterator](),
@@ -143,4 +144,38 @@ test("reset() then immediate run() keeps the new task off the old teardown (issu
   const r2 = await r2p;
   assert.equal(r2.text, "answer2"); // not "" with error "agent session ended"
   assert.equal(r2.error, undefined);
+});
+
+// The CLI subprocess's stderr was dropped, so a spawn-time crash surfaced only
+// as "exited with code 1" (the v0.2.0 DMG's entitlement break). The session
+// must hand the SDK a stderr callback that logs lines under the session name.
+test("passes the SDK a stderr callback that logs CLI stderr", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+
+  const r1p = session.run("task1", undefined, 100);
+  const { options } = spawns[0].args as { options: { stderr?: (data: string) => void } };
+  assert.equal(typeof options.stderr, "function");
+
+  const written: string[] = [];
+  const orig = process.stderr.write;
+  process.stderr.write = ((chunk: unknown) => {
+    written.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    // A real crash dump is one multi-KB chunk with the error at the END (the
+    // v0.2.0 break: ~2.5KB of minified source context first). The error line
+    // must survive logging, so the callback must split lines, not cap the chunk.
+    options.stderr!(`${"x".repeat(3000)}\n\nReferenceError: SharedArrayBuffer is not defined\n`);
+  } finally {
+    process.stderr.write = orig;
+  }
+  assert.ok(
+    written.some((s) => s.includes("test: cli stderr: ReferenceError: SharedArrayBuffer is not defined")),
+    `buried stderr line not logged: ${JSON.stringify(written.map((s) => s.slice(0, 80)))}`,
+  );
+
+  spawns[0].messages.push(success("done"));
+  await r1p;
 });

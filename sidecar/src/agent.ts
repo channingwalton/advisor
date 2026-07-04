@@ -423,6 +423,17 @@ export class AgentSession implements Agent {
         // tool-call/cost burn. The 180 s task timeout is the primary bound — this
         // is the secondary guard against a tight loop within it (issue #58).
         maxTurns: 40,
+        // Without this the CLI's stderr is dropped and a spawn-time crash
+        // surfaces only as "exited with code 1" (the v0.2.0 DMG entitlement
+        // break was invisible for exactly this reason). Per line, not per
+        // chunk: a crash dump arrives as one multi-KB chunk with the actual
+        // error at the end — a chunk-level cap would log only its prefix.
+        stderr: (data: string) => {
+          for (const raw of data.split("\n")) {
+            const line = raw.trim();
+            if (line) log(`${this.opts.name}: cli stderr: ${line.slice(0, 400)}`);
+          }
+        },
       },
     });
     this.stream = stream;
