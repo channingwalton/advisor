@@ -16,7 +16,14 @@ echo "==> swift build (release)"
 swift build -c release
 
 echo "==> build sidecar"
-( cd "$ROOT/sidecar" && npm install --include=dev >/dev/null 2>&1 && npm run build >/dev/null )
+# Dev deps (typescript) are needed to compile. Capture output to a log and print
+# it on failure, so a broken install/build is diagnosable rather than swallowed
+# by set -e with no message (issue #64).
+SIDECAR_LOG=$(mktemp)
+if ! ( cd "$ROOT/sidecar" && npm install --include=dev && npm run build ) >"$SIDECAR_LOG" 2>&1; then
+  echo "sidecar build failed:"; cat "$SIDECAR_LOG"; rm -f "$SIDECAR_LOG"; exit 1
+fi
+rm -f "$SIDECAR_LOG"
 
 echo "==> assemble $APP"
 rm -rf "$APP"
@@ -43,6 +50,15 @@ cp "$(node -e 'console.log(process.execPath)')" "$APP/Contents/Resources/node"
 mkdir -p "$APP/Contents/Resources/sidecar"
 cp -R "$ROOT/sidecar/dist" "$ROOT/sidecar/node_modules" "$ROOT/sidecar/package.json" \
       "$APP/Contents/Resources/sidecar/"
+# Drop dev dependencies (typescript, @types) from the shipped copy — the dev
+# checkout's node_modules is left intact for the next build (issue #64). Bloat
+# only, so a prune failure warns rather than aborting the package.
+PRUNE_LOG=$(mktemp)
+if ! ( cd "$APP/Contents/Resources/sidecar" && npm prune --omit=dev ) >"$PRUNE_LOG" 2>&1; then
+  echo "warning: could not prune dev deps from bundled sidecar (shipping full node_modules):"
+  cat "$PRUNE_LOG"
+fi
+rm -f "$PRUNE_LOG"
 
 sh sign-local.sh "$APP"
 
