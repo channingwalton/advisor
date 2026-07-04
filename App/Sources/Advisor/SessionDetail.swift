@@ -111,11 +111,18 @@ struct SessionDetail: Equatable {
         return (label, title, truncated(snippet ?? "", max: 80))
     }
 
-    /// Pulls `HH:MM` out of a follow-up's `_Asked HH:MM:SS · …_` footer.
+    /// Pulls `HH:MM` out of a follow-up's `_Asked HH:MM:SS · …_` footer. Anchored
+    /// to the italic footer line (`_Asked …_`, optionally blockquote-prefixed),
+    /// not the first "Asked " anywhere — an answer body mentioning "Asked …" must
+    /// not be read as the timestamp (issue #65).
     private static func askedTime(_ markdown: String) -> String {
-        guard let range = markdown.range(of: "Asked ") else { return "" }
-        let after = markdown[range.upperBound...]
-        return String(after.prefix(5)) // HH:MM
+        for line in markdown.components(separatedBy: "\n") {
+            var t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix(">") { t = t.dropFirst().trimmingCharacters(in: .whitespaces) }
+            guard t.hasPrefix("_Asked ") else { continue }
+            return String(t.dropFirst("_Asked ".count).prefix(5)) // HH:MM
+        }
+        return ""
     }
 
     private static func truncated(_ s: String, max: Int) -> String {

@@ -82,6 +82,29 @@ context: Effect systems research talk
     ])
 }
 
+@Test func askedTimeAnchorsToFooterNotAnswerBody() {
+    // The answer body mentions "Asked 09:99"; the real stamp is the `_Asked …_`
+    // footer. askedAt must anchor to the footer, not the first "Asked " in the
+    // block (issue #65).
+    let withDecoy = """
+---
+context: x
+---
+
+# Follow-ups
+
+> **Q · When did it start?**
+>
+> They Asked 09:99 to begin, per the notes.
+>
+> _Asked 14:30 · 2026-06-18_
+"""
+    let d = SessionDetail.parse(contents: withDecoy, fallbackTitle: "x")
+    #expect(d.questions == [
+        AskedQuestion(question: "When did it start?", askedAt: "14:30"),
+    ])
+}
+
 @Test func frontmatterParsesContext() {
     #expect(SessionArchive.frontmatter(note)["context"] == "Effect systems research talk")
 }
