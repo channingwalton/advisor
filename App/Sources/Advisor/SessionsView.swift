@@ -1013,6 +1013,8 @@ private struct SessionDetailPane: View {
     /// disk and refreshes the browser so the summary card shows.
     private func submitSummarise() {
         guard !isAsking, !isLive else { return }
+        // Beta expiry (issue #67): say why, not "sidecar not running".
+        if let notice = BetaExpiry.notice { askNote = notice; return }
         guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
 
         askNote = ""
@@ -1334,6 +1336,8 @@ private struct SessionDetailPane: View {
     private func submitQuestion() {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !isAsking, !isLive else { return }
+        // Beta expiry (issue #67): say why, not "sidecar not running".
+        if let notice = BetaExpiry.notice { askNote = notice; return }
         guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
 
         askNote = ""

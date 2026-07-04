@@ -407,7 +407,7 @@ struct TranscriptView: View {
     private func shouldShowStatus(_ s: String) -> Bool {
         if fatalError != nil { return true }
         let l = s.lowercased()
-        return ["fail", "crash", "error", "denied", "permission", "stopped", "exhausted", "restart"]
+        return ["fail", "crash", "error", "denied", "permission", "stopped", "exhausted", "restart", "expired"]
             .contains { l.contains($0) }
     }
 
@@ -838,6 +838,11 @@ struct TranscriptView: View {
     /// `session_start`/note). The frozen-timer state holds until audio is live.
     private func resumeRecording() {
         guard let recorder, let stoppedAt, !resuming else { return }
+        // Beta expiry (issue #67): resuming is more recording — same block.
+        if let notice = BetaExpiry.notice {
+            store.status = notice
+            return
+        }
         // Latch synchronously before the await so a second Space is a no-op
         // (issue #50). `recorder.start` is non-throwing, so its return — and
         // hence this reset — is always reached.
@@ -885,6 +890,12 @@ struct TranscriptView: View {
     private func submitQuery() {
         let text = queryText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
+        // Beta expiry (issue #67): keep the typed question rather than
+        // clearing it into a query the sidecar will refuse.
+        if let notice = BetaExpiry.notice {
+            store.status = notice
+            return
+        }
         services.sidecar.sendQuery(text)
         queryText = ""
     }
@@ -1015,6 +1026,11 @@ struct TranscriptView: View {
     /// window and opening a new one from the Sessions browser.
     private func startSession() async {
         guard let recorder, sessionStart == nil else { return }
+        // Beta expiry (issue #67): no new recordings past the limit.
+        if let notice = BetaExpiry.notice {
+            store.status = notice
+            return
+        }
         // Open a new STT session generation before clearing/starting, on the
         // main actor with no `await` in between, so a previous session's
         // in-flight finals are already stale by the time they try to write.

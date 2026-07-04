@@ -1139,6 +1139,34 @@ changes the line) and if `www/index.html` is already dirty — the release
 commit must contain only the sync, never sweep up unrelated edits. Pushing
 commit and tag stays manual.
 
+## Beta time limit (2026-07-04, issue #67)
+
+Packaged betas expire one month after packaging: `package.sh` stamps
+`AdvisorBetaExpiry` (packaging date + 1 month, `yyyy-MM-dd`) into the bundle's
+Info.plist, and from midnight UTC on that day the app blocks recording **and
+all AI interaction**. Remove the stamp from `package.sh` when cutting the real
+(non-beta) release; `BetaExpiry.swift` treats a missing key as "no limit", so
+dev builds (no bundle plist) never expire. `ADVISOR_BETA_EXPIRY=yyyy-MM-dd`
+overrides the stamp so a dev build can exercise the expired state. A
+malformed stamp fails open — a bad date must not brick a shipped build.
+
+Enforcement is one chokepoint plus UX guards. The chokepoint is
+`SidecarManager`: `spawn()` refuses when expired (no agent process exists at
+all, covering every path including crash-restart replay), and `send()` drops
+every message that initiates or feeds AI. `cancel`, `session_end` and `config`
+still pass (`allowedAfterExpiry`) — blocking `cancel` would leave in-flight
+agents *running* past the limit when a session crosses the expiry boundary.
+That crossing session finishes naturally (audio keeps recording locally; its
+utterances just stop reaching the classifier) — new sessions, resumes,
+queries, actions, replies and document asks are what's blocked. The UI guards
+(`startSession`/`resumeRecording`/`submitQuery` in the recording window,
+ask/summarise in the Sessions browser) exist only to say *why* — they surface
+`BetaExpiry.notice` instead of a misleading "sidecar not running".
+
+This is a courtesy gate for honest beta users, not DRM: anyone can flip
+their clock or edit the plist. Chosen deliberately over licence servers or
+signed timestamps — no server exists in this architecture (REQUIREMENTS.md).
+
 ## Review-suggestion batch: hardening + de-duplication (2026-07-04, issues #55–66)
 
 The 2026-07-03 codebase review's lower-severity half landed as a batch. Most were

@@ -112,6 +112,12 @@ The script runs a release `swift build`, builds the sidecar (`npm install` +
 `tsc`), assembles the `.app`, and signs it. Re-run it any time; it rebuilds
 `dist/Advisor.app` from scratch.
 
+Packaged builds are **time-limited betas** (issue #67): `package.sh` stamps
+`AdvisorBetaExpiry` (packaging date + 1 month) into the bundle, and from that
+day the app refuses to record or contact the AI sidecar — download or build a
+newer version to keep going. Dev builds (`swift build`) never expire;
+`ADVISOR_BETA_EXPIRY=yyyy-MM-dd` overrides the stamp for testing.
+
 To clean-build **and** install over your own copy in one step:
 
 ```sh
