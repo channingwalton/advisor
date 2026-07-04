@@ -349,3 +349,7 @@ it stays on your machine.
 Overlapping simultaneous speakers on a mixed mono feed cannot be fully
 transcribed by any single-stream STT. The trigger classifier and research
 agents consume Claude Max subscription allowance.
+
+## www
+
+Hosted by Cloudfare.
