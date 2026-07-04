@@ -14,6 +14,7 @@ import {
 import { cardOutcome, boundedPush } from "./cards.js";
 import { Inbound, log, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
+import { guardedRun } from "./guardedRun.js";
 import {
   cardKind,
   classify,
@@ -153,27 +154,11 @@ async function runCard(
   let failed = false;
   try {
     const prompt = sessionContextPrefix(sessionContext) + transcriptDelta(lane.name) + task;
-    const { text, error } = await lane.session.run(prompt, (body) => {
-      if (!cancelledCards.has(cardId)) {
-        send({ type: "card_update", id: cardId, body, state: "streaming" });
-      }
-    });
-    failed = Boolean(error);
-    if (!cancelledCards.has(cardId)) {
-      const outcome = cardOutcome(text, error);
-      send({ type: "card_update", id: cardId, body: outcome.body, state: outcome.state });
-    }
-  } catch (err) {
-    failed = true;
-    log(`agent error: ${err}`);
-    if (!cancelledCards.has(cardId)) {
-      send({
-        type: "card_update",
-        id: cardId,
-        body: `error: ${err instanceof Error ? err.message : String(err)}`,
-        state: "failed",
-      });
-    }
+    failed = await guardedRun(
+      lane.session, cardId, prompt,
+      (body, state) => ({ type: "card_update", id: cardId, body, state }),
+      "agent error", { cancelledCards, send }
+    );
   } finally {
     // Recycle a pooled (research/query) lane after any failure — timeout/error.
     // Unlike the transient reply/summary/document lanes (disposed every turn),
@@ -223,30 +208,11 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
     const task =
       sessionContextPrefix(sessionContext) +
       replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
-    const { text, error } = await lane.session.run(task, (body) => {
-      if (!cancelledCards.has(msg.cardId)) {
-        send({ type: "card_update", id: msg.cardId, body: header + body, state: "streaming" });
-      }
-    });
-    if (!cancelledCards.has(msg.cardId)) {
-      const outcome = cardOutcome(text, error);
-      send({
-        type: "card_update",
-        id: msg.cardId,
-        body: header + outcome.body,
-        state: outcome.state,
-      });
-    }
-  } catch (err) {
-    log(`reply error: ${err}`);
-    if (!cancelledCards.has(msg.cardId)) {
-      send({
-        type: "card_update",
-        id: msg.cardId,
-        body: header + `error: ${err instanceof Error ? err.message : String(err)}`,
-        state: "failed",
-      });
-    }
+    await guardedRun(
+      lane.session, msg.cardId, task,
+      (body, state) => ({ type: "card_update", id: msg.cardId, body: header + body, state }),
+      "reply error", { cancelledCards, send }
+    );
   } finally {
     lane.session.reset(); // dispose the transient session
     lane.currentCardId = undefined;
@@ -290,25 +256,11 @@ async function runDocumentTask(id: string, prompt: string): Promise<void> {
   documentLanes.push(lane);
   send({ type: "document_answer", id, body: "…", state: "pending" });
   try {
-    const { text, error } = await lane.session.run(prompt, (body) => {
-      if (!cancelledCards.has(id)) {
-        send({ type: "document_answer", id, body, state: "streaming" });
-      }
-    });
-    if (!cancelledCards.has(id)) {
-      const outcome = cardOutcome(text, error);
-      send({ type: "document_answer", id, body: outcome.body, state: outcome.state });
-    }
-  } catch (err) {
-    log(`document task error: ${err}`);
-    if (!cancelledCards.has(id)) {
-      send({
-        type: "document_answer",
-        id,
-        body: `error: ${err instanceof Error ? err.message : String(err)}`,
-        state: "failed",
-      });
-    }
+    await guardedRun(
+      lane.session, id, prompt,
+      (body, state) => ({ type: "document_answer", id, body, state }),
+      "document task error", { cancelledCards, send }
+    );
   } finally {
     lane.session.reset(); // dispose the transient session
     const i = documentLanes.indexOf(lane);
@@ -348,25 +300,11 @@ async function runSummariseLive(msg: Extract<Inbound, { type: "summarise_live" }
     send({ type: "card", id: cardId, kind: "summary", title: "Summary", body: "…", state: "pending" });
   }
   try {
-    const { text, error } = await lane.session.run(summaryTask(msg.transcript), (body) => {
-      if (!cancelledCards.has(cardId)) {
-        send({ type: "card_update", id: cardId, body, state: "streaming" });
-      }
-    });
-    if (!cancelledCards.has(cardId)) {
-      const outcome = cardOutcome(text, error);
-      send({ type: "card_update", id: cardId, body: outcome.body, state: outcome.state });
-    }
-  } catch (err) {
-    log(`summarise error: ${err}`);
-    if (!cancelledCards.has(cardId)) {
-      send({
-        type: "card_update",
-        id: cardId,
-        body: `error: ${err instanceof Error ? err.message : String(err)}`,
-        state: "failed",
-      });
-    }
+    await guardedRun(
+      lane.session, cardId, summaryTask(msg.transcript),
+      (body, state) => ({ type: "card_update", id: cardId, body, state }),
+      "summarise error", { cancelledCards, send }
+    );
   } finally {
     lane.session.reset(); // dispose the transient session
     lane.currentCardId = undefined;
