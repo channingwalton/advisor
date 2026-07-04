@@ -147,6 +147,10 @@ final class SidecarManager {
             if !data.isEmpty { appLog.appendSidecar(data) }
         }
         p.terminationHandler = { [weak self] proc in
+            // Detach the read handlers: once the process is gone the read ends
+            // signal readable-with-0-bytes in a tight loop until dealloc (issue #63).
+            outPipe.fileHandleForReading.readabilityHandler = nil
+            errPipe.fileHandleForReading.readabilityHandler = nil
             appLog.flushSidecar()   // emit any buffered partial stderr line
             Task { @MainActor in self?.handleTermination(proc.terminationStatus) }
         }
@@ -156,7 +160,12 @@ final class SidecarManager {
             stdinHandle = inPipe.fileHandleForWriting
             lastSpawn = Date()
         } catch {
-            Task { @MainActor in self.store.status = "sidecar failed to start: \(error)" }
+            // The process never started, so its terminationHandler will never fire.
+            // Detach the handlers and schedule a retry here, or a spawn failure
+            // during restart() strands the sidecar with no recovery (issue #63).
+            outPipe.fileHandleForReading.readabilityHandler = nil
+            errPipe.fileHandleForReading.readabilityHandler = nil
+            Task { @MainActor [weak self] in self?.handleSpawnFailure(error) }
         }
     }
 
@@ -176,15 +185,32 @@ final class SidecarManager {
         if let lastSpawn, Date().timeIntervalSince(lastSpawn) > healthyRunSeconds {
             restartAttempts = 0
         }
+        scheduleRestart(reason: "sidecar crashed (\(code))")
+    }
+
+    /// A spawn that threw before the process ever ran (issue #63): no
+    /// terminationHandler will fire, so drive recovery from here on the same
+    /// backoff budget rather than leaving the sidecar stranded.
+    @MainActor
+    private func handleSpawnFailure(_ error: Error) {
+        stdinHandle = nil
+        process = nil
+        if stopping { stopping = false; return } // stopped during the backoff window
+        scheduleRestart(reason: "sidecar failed to start: \(error)")
+    }
+
+    /// Schedule a backoff restart under the shared attempt budget, or report
+    /// exhaustion. `reason` is the failure prefix for the status line.
+    @MainActor
+    private func scheduleRestart(reason: String) {
         guard restartAttempts < maxRestarts else {
-            store.status =
-                "sidecar crashed (\(code)) — restart attempts exhausted; stop and start listening again"
+            store.status = "\(reason) — restart attempts exhausted; stop and start listening again"
             return
         }
         restartAttempts += 1
         let attempt = restartAttempts
         let delay = min(8.0, pow(2.0, Double(attempt - 1))) // 1, 2, 4, 8, 8 s
-        store.status = "sidecar crashed (\(code)); restarting (\(attempt)/\(maxRestarts))…"
+        store.status = "\(reason); restarting (\(attempt)/\(maxRestarts))…"
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.restart()
         }
