@@ -226,10 +226,7 @@ struct ListeningToolbar: View {
             }
             .padding(.horizontal, 11)
             .frame(height: 34)
-            .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
-                    .stroke(Theme.hairline, lineWidth: 0.5))
+            .controlChrome()
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -297,10 +294,7 @@ struct ListeningToolbar: View {
             }
             .padding(.horizontal, 11)
             .frame(height: 34)
-            .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
-                    .stroke(Theme.hairline, lineWidth: 0.5))
+            .controlChrome()
         }
         .buttonStyle(.plain)
         .popover(isPresented: $showName, arrowEdge: .bottom) {
@@ -339,10 +333,7 @@ struct ListeningToolbar: View {
             }
             .padding(.horizontal, 11)
             .frame(height: 34)
-            .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
-                    .stroke(Theme.hairline, lineWidth: 0.5))
+            .controlChrome()
         }
         .buttonStyle(.plain)
         .popover(isPresented: $showFocus, arrowEdge: .bottom) {
@@ -471,10 +462,7 @@ struct ListeningToolbar: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 34, height: 34)
-                .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
-                        .stroke(Theme.hairline, lineWidth: 0.5))
+                .controlChrome()
         }
         .buttonStyle(.plain)
         .disabled(!canSummarise)
@@ -487,10 +475,7 @@ struct ListeningToolbar: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 34, height: 34)
-                .background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
-                        .stroke(Theme.hairline, lineWidth: 0.5))
+                .controlChrome()
         }
         .buttonStyle(.plain)
         .disabled(!canExport)
@@ -526,5 +511,19 @@ struct Waveform: View {
         active
             ? .easeInOut(duration: 0.45).repeatForever(autoreverses: true).delay(Double(i) * 0.15)
             : .easeOut(duration: 0.2)
+    }
+}
+
+extension View {
+    /// The standard toolbar control chrome: a `surfaceControl` fill with a
+    /// hairline stroke, both at `buttonRadius`. Applied after sizing (frame /
+    /// padding) so it wraps the control's final bounds. Extracted from the pill
+    /// and icon buttons that repeated it verbatim (issue #66). Toggle buttons
+    /// with a state-dependent accent fill keep their own `.background`.
+    func controlChrome() -> some View {
+        background(Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
+                    .stroke(Theme.hairline, lineWidth: 0.5))
     }
 }

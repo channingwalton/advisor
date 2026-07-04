@@ -107,11 +107,7 @@ struct TagsChip: View {
             }
             .padding(.horizontal, 11)
             .frame(height: 34)
-            .background(
-                Theme.surfaceControl, in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
-                    .stroke(Theme.hairline, lineWidth: 0.5))
+            .controlChrome()
         }
         .buttonStyle(.plain)
         .popover(isPresented: $show, arrowEdge: .bottom) {
