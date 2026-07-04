@@ -248,14 +248,14 @@ final class Recorder {
         }
     }
 
-    private static func tokens(_ s: String) -> [String] {
+    static func tokens(_ s: String) -> [String] {
         s.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
     }
 
     /// Non-speech artefacts: "[BLANK_AUDIO]", "*Bell rings*", "(claps)", lone punctuation.
-    private static func isJunk(_ text: String) -> Bool {
+    static func isJunk(_ text: String) -> Bool {
         let t = text.trimmingCharacters(in: .whitespaces)
         if t.rangeOfCharacter(from: .alphanumerics) == nil { return true }
         if let first = t.first, let last = t.last,
@@ -267,7 +267,7 @@ final class Recorder {
 
     /// Distinctive tokens only — stopword-length words inflate echo matches
     /// and caused genuine speech to be suppressed.
-    private static func distinctive(_ tokens: [String]) -> [String] {
+    static func distinctive(_ tokens: [String]) -> [String] {
         tokens.filter { $0.count > 3 }
     }
 
