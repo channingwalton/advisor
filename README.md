@@ -158,12 +158,13 @@ signing isn't enough — Gatekeeper wants a Developer ID signature + notarisatio
 cd App && sh dmg.sh            # → App/dist/Advisor-<version>.dmg
 ```
 
-`dmg.sh` runs `notarize.sh` to build, Developer-ID-sign, notarise and staple the
-app, wraps that app in a compressed DMG with an Applications link, then signs,
-notarises, staples and Gatekeeper-checks the DMG. `notarize.sh` remains available
-when you need the zipped app instead. One-off setup first: an Apple Developer
-Program membership, a Developer ID Application cert in your keychain, and stored
-notary credentials —
+`dmg.sh` runs `sign.sh` to build and Developer-ID-sign the app, wraps it in a
+compressed DMG with an Applications link, then signs, notarises, staples and
+Gatekeeper-checks the DMG. One notary round: Apple scans the nested app as part
+of the DMG submission, so the app needs no round of its own (it carries no
+stapled ticket — Gatekeeper fetches it online on first launch). One-off setup
+first: an Apple Developer Program membership, a Developer ID Application cert
+in your keychain, and stored notary credentials —
 
 ```sh
 xcrun notarytool store-credentials "advisor-notary" \

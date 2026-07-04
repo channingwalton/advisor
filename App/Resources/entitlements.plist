@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <!--
-    Hardened-runtime entitlements for Developer ID distribution (see notarize.sh).
+    Hardened-runtime entitlements for Developer ID distribution (see sign.sh).
     The app is NOT sandboxed (it spawns a Node sidecar and reads $HOME), so this
     is the non-MAS set. Microphone access also needs the audio-input entitlement
     under the hardened runtime; Info.plist only supplies the user-facing TCC

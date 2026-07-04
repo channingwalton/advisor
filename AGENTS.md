@@ -32,7 +32,7 @@ cd sidecar && npm run build            # tsc (npm install --include=dev first)
 sh test/replay.sh                      # replay fragments through the pipeline
 cd App && sh package.sh                # → dist/Advisor.app (self-contained, ad-hoc signed)
 cd App && sh install.sh                # clean build + install to ~/Applications
-cd App && sh notarize.sh               # Developer ID sign + notarise + staple (distribution)
+cd App && sh dmg.sh                    # signed + notarised DMG (runs sign.sh; one notary round)
 just release                           # DMG + sync www version line + commit + tag vVERSION
 ```
 

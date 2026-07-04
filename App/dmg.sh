@@ -1,6 +1,12 @@
 #!/bin/sh
-# Build, Developer-ID-sign, notarise and staple Advisor.app, then wrap it in a
-# signed, notarised and stapled compressed DMG for distribution.
+# Build and Developer-ID-sign Advisor.app (sign.sh), wrap it in a compressed
+# DMG, then sign, notarise and staple the DMG. One notary round: Apple scans
+# the nested .app as part of the DMG submission (see sign.sh).
+#
+# Prerequisite beyond sign.sh's: stored notarytool credentials, e.g.
+#   xcrun notarytool store-credentials "advisor-notary" \
+#     --apple-id you@example.com --team-id TEAMID --password <app-specific-pw>
+# NOTARY_PROFILE overrides the profile name (default: advisor-notary).
 #
 # Output: App/dist/Advisor-<version>.dmg (version from the repo-root VERSION file)
 set -e
@@ -36,8 +42,8 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-echo "==> build, sign, notarise and staple app"
-SIGN_IDENTITY="$SIGN_IDENTITY" NOTARY_PROFILE="$NOTARY_PROFILE" sh notarize.sh
+echo "==> build and sign app"
+SIGN_IDENTITY="$SIGN_IDENTITY" sh sign.sh
 
 echo "==> create writable image"
 rm -f "$DMG" "$RW_DMG"

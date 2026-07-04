@@ -1,29 +1,27 @@
 #!/bin/sh
-# Build, Developer-ID-sign, notarize and staple Advisor.app for distribution
-# OUTSIDE the Mac App Store. The Mac App Store is impractical here: it requires
-# the App Sandbox, which fights the bundled Node sidecar + $HOME reads.
+# Build and Developer-ID-sign Advisor.app (hardened runtime, inside-out).
+# Notarisation happens once, in dmg.sh: submitting the DMG makes Apple scan the
+# nested .app too, so a separate app-level round (the old notarize.sh zip
+# upload) is redundant. Trade-off: the app inside the DMG carries no stapled
+# ticket, so Gatekeeper fetches it online on first launch — fine for website
+# distribution. The Mac App Store is impractical here: it requires the App
+# Sandbox, which fights the bundled Node sidecar + $HOME reads.
 #
 # Prerequisites (one-off):
 #   - Apple Developer Program membership.
 #   - A "Developer ID Application" certificate in your login keychain.
-#   - Stored notarytool credentials, e.g.:
-#       xcrun notarytool store-credentials "advisor-notary" \
-#         --apple-id you@example.com --team-id TEAMID --password <app-specific-pw>
 #
 # Config (env overrides):
 #   SIGN_IDENTITY   signing identity; defaults to the first "Developer ID
 #                   Application" found in the keychain.
-#   NOTARY_PROFILE  notarytool keychain profile name (default: advisor-notary).
 #
-# Output: App/dist/Advisor.app (signed + stapled) and App/dist/Advisor.zip.
+# Output: App/dist/Advisor.app (signed, not notarised).
 # Safe to run before you have a cert: it exits early with a clear message.
 set -e
 cd "$(dirname "$0")"            # App/
 
 APP=dist/Advisor.app
 ENT=Resources/entitlements.plist
-ZIP=dist/Advisor.zip
-NOTARY_PROFILE="${NOTARY_PROFILE:-advisor-notary}"
 
 # Resolve the signing identity (explicit override, else first Developer ID in keychain).
 SIGN_IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning \
@@ -51,9 +49,13 @@ find "$APP/Contents/Resources/sidecar/node_modules" \
       --sign "$SIGN_IDENTITY" {}
 
 echo "==> sign bundled Mach-O executables"
+# Entitlements on every nested executable, not just node: the agent SDK vendors
+# a Bun-compiled `claude` binary, and JavaScriptCore under the hardened runtime
+# without allow-jit loses SharedArrayBuffer — the CLI then exits 1 at startup
+# (broke the v0.2.0 DMG).
 find "$APP/Contents" -type f -perm -111 -print | while IFS= read -r candidate; do
   if file "$candidate" | grep -q 'Mach-O'; then
-    sign "$candidate"
+    sign --entitlements "$ENT" "$candidate"
   fi
 done
 
@@ -65,31 +67,4 @@ sign --entitlements "$ENT" "$APP"
 echo "==> verify signature"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
-echo "==> notarize (this can take a few minutes)"
-rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
-# --wait blocks until Apple finishes, then we inspect the final status before
-# stapling. Some Xcode versions print "Invalid" but still return success.
-SUBMISSION_PLIST=$(mktemp "${TMPDIR:-/tmp}/advisor-notary.XXXXXX")
-trap 'rm -f "$SUBMISSION_PLIST"' EXIT
-xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait \
-  --output-format plist >"$SUBMISSION_PLIST"
-STATUS=$(plutil -extract status raw -o - "$SUBMISSION_PLIST")
-SUBMISSION_ID=$(plutil -extract id raw -o - "$SUBMISSION_PLIST")
-if [ "$STATUS" != "Accepted" ]; then
-  echo "error: notarization $SUBMISSION_ID finished with status: $STATUS" >&2
-  xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "$NOTARY_PROFILE" >&2 || true
-  exit 1
-fi
-
-echo "==> staple ticket (so it verifies offline)"
-xcrun stapler staple "$APP"
-
-echo "==> Gatekeeper assessment"
-spctl -a -vvv -t install "$APP"
-
-# Re-zip the stapled app for distribution (the pre-notarization zip lacks the ticket).
-rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
-
-echo "==> done: $APP (stapled) and $ZIP (distributable)"
+echo "==> done: $APP (signed; dmg.sh notarises the DMG)"

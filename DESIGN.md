@@ -1230,6 +1230,28 @@ failure (#64); `renameFolder`/`deleteFolder` route names through
 `SecureField` (#59); and `askedTime` anchors to the `_Asked …_` footer rather
 than the first "Asked " anywhere in a card (#65).
 
+## Notarisation: nested entitlements + one notary round (2026-07-05)
+
+The v0.2.0 DMG shipped a broken sidecar: every SDK lane died in ~70 ms with
+"Claude Code process exited with code 1". Root cause: the agent SDK (2.1.x)
+vendors a Bun-compiled `claude` binary
+(`@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`), and `notarize.sh`
+hardened-runtime-signed nested Mach-O executables **without entitlements** —
+JavaScriptCore without `allow-jit` loses `SharedArrayBuffer`, so the CLI
+crashed at startup. Dev builds (unsigned) never hit it. Fix: the nested-binary
+signing loop now applies `entitlements.plist` (the JIT set `node` already got).
+The crash was invisible because the sidecar dropped the CLI's stderr;
+`AgentSession` now passes a `stderr` callback that logs per line (per chunk
+would truncate a crash dump whose error sits at the end).
+
+Same day, the double notary round was dropped: `notarize.sh` used to zip and
+notarise the app, staple it, then `dmg.sh` notarised the DMG again (~220 MB
+uploaded twice). Apple scans the DMG's nested content in one submission, so
+`sign.sh` (renamed from `notarize.sh`) now only builds and signs; `dmg.sh` owns
+the single notarise+staple. Trade-off accepted: the app inside the DMG carries
+no stapled ticket, so a recipient's first launch needs the network for
+Gatekeeper's ticket lookup — fine for website distribution.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
