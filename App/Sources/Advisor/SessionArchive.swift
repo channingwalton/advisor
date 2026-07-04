@@ -450,9 +450,10 @@ enum SessionArchive {
     static func renameFolder(
         from old: String, to new: String, in directory: URL = SessionArchive.directory
     ) -> Bool {
-        guard let newName = sanitiseFolderName(new) else { return false }
+        guard let newName = sanitiseFolderName(new),
+            let oldName = sanitiseFolderName(old) else { return false }
         let fm = FileManager.default
-        let src = directory.appendingPathComponent(old, isDirectory: true)
+        let src = directory.appendingPathComponent(oldName, isDirectory: true)
         let dst = directory.appendingPathComponent(newName, isDirectory: true)
         guard fm.fileExists(atPath: src.path) else { return false }
         if src.standardizedFileURL == dst.standardizedFileURL { return true }
@@ -470,8 +471,9 @@ enum SessionArchive {
     /// are never destroyed. Returns true when the directory was removed.
     @discardableResult
     static func deleteFolder(_ name: String, in directory: URL = SessionArchive.directory) -> Bool {
+        guard let safe = sanitiseFolderName(name) else { return false }
         let fm = FileManager.default
-        let folderURL = directory.appendingPathComponent(name, isDirectory: true)
+        let folderURL = directory.appendingPathComponent(safe, isDirectory: true)
         for file in list(in: folderURL) {
             let dest = directory.appendingPathComponent(file.url.lastPathComponent)
             if fm.fileExists(atPath: dest.path) { continue }
@@ -481,7 +483,7 @@ enum SessionArchive {
         // must not be destroyed if the delete is aborted: ignore it when checking
         // emptiness, and only remove it once everything else is gone (a same-named
         // note that couldn't un-file keeps the folder — and its context — intact).
-        let ctx = folderContextURL(name, root: directory)
+        let ctx = folderContextURL(safe, root: directory)
         let remaining = ((try? fm.contentsOfDirectory(
             at: folderURL, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.standardizedFileURL != ctx?.standardizedFileURL }

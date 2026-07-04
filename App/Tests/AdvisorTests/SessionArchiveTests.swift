@@ -350,6 +350,39 @@ private func makeFolderedArchive(
     #expect(files.contains { $0.folder == "Work" })
 }
 
+@Test func renameFolderRejectsUnsafeSourceName() throws {
+    // Defence-in-depth (issue #62): a traversing `from` must be rejected, not
+    // used to move a directory that lives outside the archive into it.
+    let fm = FileManager.default
+    let base = fm.temporaryDirectory
+        .appendingPathComponent("advisor-folder-escape-\(UUID().uuidString)")
+    let archive = base.appendingPathComponent("archive", isDirectory: true)
+    let secret = base.appendingPathComponent("secret", isDirectory: true)
+    try fm.createDirectory(at: archive, withIntermediateDirectories: true)
+    try fm.createDirectory(at: secret, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: base) }
+
+    #expect(!SessionArchive.renameFolder(from: "../secret", to: "Pulled", in: archive))
+    #expect(fm.fileExists(atPath: secret.path))                                    // untouched
+    #expect(!fm.fileExists(atPath: archive.appendingPathComponent("Pulled").path)) // nothing pulled in
+}
+
+@Test func deleteFolderRejectsUnsafeName() throws {
+    // Defence-in-depth (issue #62): a traversing name must be rejected, not used
+    // to un-file/remove a directory outside the archive.
+    let fm = FileManager.default
+    let base = fm.temporaryDirectory
+        .appendingPathComponent("advisor-folder-escape-\(UUID().uuidString)")
+    let archive = base.appendingPathComponent("archive", isDirectory: true)
+    let secret = base.appendingPathComponent("secret", isDirectory: true)
+    try fm.createDirectory(at: archive, withIntermediateDirectories: true)
+    try fm.createDirectory(at: secret, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: base) }
+
+    #expect(!SessionArchive.deleteFolder("../secret", in: archive))
+    #expect(fm.fileExists(atPath: secret.path)) // external dir untouched
+}
+
 @Test func setFolderIntoCurrentFolderIsANoOp() throws {
     let dir = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
     defer { try? FileManager.default.removeItem(at: dir) }
