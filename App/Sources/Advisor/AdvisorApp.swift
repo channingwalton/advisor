@@ -1159,40 +1159,18 @@ struct SelectableTranscriptText: NSViewRepresentable {
 /// NSTextView that swaps the default editing context menu for transcript AI
 /// actions and copy — all operating on the current selection (or the whole
 /// line when nothing is highlighted).
-final class ActionTextView: NSTextView {
+final class ActionTextView: IntrinsicHeightTextView {
     var menuActions: [TranscriptAction] = []
     var onAction: ((String, String) -> Void)?
     var onAddNote: ((String, Int) -> Void)?
     var onCorrect: ((TranscriptCorrectionRequest) -> Void)?
-    private var lastLaidOutWidth: CGFloat = -1
     /// Where an "Add note here…" should anchor: the end of the current selection,
     /// or — with no selection — the character nearest the right-click point.
     /// Captured when the menu opens (issue #34).
     private var noteAnchorOffset = 0
 
-    /// Height that fits the text at the current width; width stays flexible
-    /// (noIntrinsicMetric) so the view fills the transcript column. SwiftUI reads
-    /// this for the row height, so it always matches the drawn wrap (issue #12).
-    override var intrinsicContentSize: NSSize {
-        guard let lm = layoutManager, let container = textContainer else {
-            return super.intrinsicContentSize
-        }
-        lm.ensureLayout(for: container)
-        return NSSize(
-            width: NSView.noIntrinsicMetric, height: ceil(lm.usedRect(for: container).height))
-    }
-
-    // Whenever SwiftUI gives us a new width (window resize, session switch,
-    // sidebar reflow) the container has already tracked to it via super, so the
-    // freshly invalidated intrinsic height reflects the new wrap. Guarded on a
-    // real width change to avoid a layout loop.
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        if abs(newSize.width - lastLaidOutWidth) > 0.5 {
-            lastLaidOutWidth = newSize.width
-            invalidateIntrinsicContentSize()
-        }
-    }
+    // Intrinsic-height / width-tracking machinery is shared via
+    // IntrinsicHeightTextView (issue #12).
 
     /// Highlighted substring, or the whole line when the selection is empty.
     private var effectiveSelection: String {

@@ -37,11 +37,11 @@ struct MarkdownText: NSViewRepresentable {
     let markdown: String
     var style: MarkdownTextStyle
 
-    func makeNSView(context: Context) -> MarkdownTextNSView {
+    func makeNSView(context: Context) -> IntrinsicHeightTextView {
         // Convenience init owns the TextKit stack (storage included); touching
         // `layoutManager` forces the TextKit 1 fallback so height measurement
         // works — same pattern as the transcript view (issue #12).
-        let tv = MarkdownTextNSView(frame: .zero)
+        let tv = IntrinsicHeightTextView(frame: .zero)
         _ = tv.layoutManager
         tv.isHorizontallyResizable = false
         tv.isVerticallyResizable = true
@@ -58,11 +58,11 @@ struct MarkdownText: NSViewRepresentable {
         return tv
     }
 
-    func updateNSView(_ tv: MarkdownTextNSView, context: Context) {
+    func updateNSView(_ tv: IntrinsicHeightTextView, context: Context) {
         apply(to: tv)
     }
 
-    private func apply(to tv: MarkdownTextNSView) {
+    private func apply(to tv: IntrinsicHeightTextView) {
         // Accent links, no underline (the hand cursor is the affordance).
         tv.linkTextAttributes = [
             .foregroundColor: style.link,
@@ -181,24 +181,3 @@ struct MarkdownText: NSViewRepresentable {
 }
 
 /// Read-only text view that reports a height fitting its content at the current
-/// width, so SwiftUI lays it out like a wrapping label — mirrors `ActionTextView`
-/// (issue #12) but for rich, link-bearing card text.
-final class MarkdownTextNSView: NSTextView {
-    private var lastLaidOutWidth: CGFloat = -1
-
-    override var intrinsicContentSize: NSSize {
-        guard let lm = layoutManager, let container = textContainer else {
-            return super.intrinsicContentSize
-        }
-        lm.ensureLayout(for: container)
-        return NSSize(width: NSView.noIntrinsicMetric, height: ceil(lm.usedRect(for: container).height))
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        if abs(newSize.width - lastLaidOutWidth) > 0.5 {
-            lastLaidOutWidth = newSize.width
-            invalidateIntrinsicContentSize()
-        }
-    }
-}
