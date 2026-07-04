@@ -108,7 +108,14 @@ struct AdvisorConfig: Codable, Equatable {
             at: Self.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try? encoder.encode(self).write(to: Self.fileURL)
+        do {
+            try encoder.encode(self).write(to: Self.fileURL, options: .atomic)
+        } catch {
+            // A non-atomic write could leave a corrupt file that `load()` then
+            // silently resets to defaults; `.atomic` avoids that, and we surface
+            // the failure rather than swallow it so a lost save is diagnosable.
+            appLog.write("config save failed: \(error)")
+        }
     }
 
     /// Persist only the saved-context library, leaving every other key as it is
