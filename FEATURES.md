@@ -24,7 +24,9 @@ you talk.
 - **On-device speech-to-text** — uses Apple SpeechAnalyzer (macOS 26+). Audio
   never leaves your Mac; only text is ever sent anywhere.
 - **No audio kept** — nothing is recorded. Only the transcript is stored.
-- **Locale-aware** — choose the speech recognition locale in Preferences.
+- **Locale-aware** — pick the speech recognition locale in Preferences from
+  the supported list, or leave it on **System default** to follow your Mac's
+  locale.
 
 ## Proactive assistance
 
@@ -53,10 +55,16 @@ surfaces a card inline, anchored to the moment it relates to:
   **Answer / Context / Fact check** on it directly — the same actions the
   assistant triggers automatically — with the card anchored under that line.
   The menu also copies the selected text.
+- **Editorial notes** — right-click a transcript line ▸ *Add note here…* to
+  inject your own note as a distinct NOTE card anchored at that line. The
+  assistant treats it as authoritative context — it can itself trigger
+  research — and it round-trips through the saved markdown. Deletable.
 - **Card follow-ups** — once a card is done, ask a follow-up on it and the
   reply is appended in place, turning a card into a short thread.
-- **Card controls** — collapse, expand, or dismiss any card; dismissing one
-  that's still researching cancels its work.
+- **Card controls** — collapse, expand, copy, or dismiss any card; dismissing
+  one that's still researching cancels its work.
+- **Summarise on demand** — one tap distils the whole conversation into a
+  Summary card — live or on a saved session — and it's kept with the note.
 
 ## Recording window
 
@@ -68,6 +76,10 @@ surfaces a card inline, anchored to the moment it relates to:
 - **Session context prompt** — set who's present, the topic, and what to focus
   on before you start, or edit it live to steer the assistant; each change
   applies to the next card.
+- **Rename live** — a Name chip in the toolbar renames the session while
+  recording; the Sessions sidebar updates immediately.
+- **Cards-only view** — hide the transcript with one tap to watch just the
+  cards stream in.
 - **Export** — copy the current session note to a location you choose.
 
 ## Sessions browser
@@ -91,6 +103,12 @@ The app opens on a master/detail browser of your past sessions:
 
 ## Organisation
 
+- **Folders** — organise sessions into folders in the Sessions sidebar, with
+  children indented under their folder. Each folder header has a record button
+  to start a recording straight into that folder, and can carry a **folder
+  context** that seeds the session prompt of recordings started there (stored
+  as a hidden `.context.md` that travels with renames and storage-dir moves).
+  Re-file existing sessions later via *Move to Folder*.
 - **Tags** — a user-managed library of coloured tags. Apply them from the live
   toolbar or the browser; they show as coloured pills on session rows and are
   searchable (type `#tag` to filter). Renaming a tag updates it everywhere.
