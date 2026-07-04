@@ -438,15 +438,29 @@ final class SidecarManager {
 
     private func consume(_ data: Data) {
         buffer.append(data)
-        while let nl = buffer.firstIndex(of: 0x0A) {
-            let line = buffer.subdata(in: buffer.startIndex..<nl)
-            buffer.removeSubrange(buffer.startIndex...nl)
+        let (frames, remainder) = Self.ndjsonFrames(buffer)
+        buffer = remainder
+        for line in frames {
             guard !line.isEmpty,
                 let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                 let type = obj["type"] as? String
             else { continue }
             Task { @MainActor in self.handle(type: type, obj) }
         }
+    }
+
+    /// Split accumulated bytes into complete newline-delimited frames and the
+    /// trailing partial line. Pure so the NDJSON framing — partial-line assembly
+    /// across chunks, multiple frames per chunk — is testable without the live
+    /// pipe (issue #65). The caller keeps `remainder` as the next chunk's prefix.
+    static func ndjsonFrames(_ buffer: Data) -> (frames: [Data], remainder: Data) {
+        var frames: [Data] = []
+        var rest = buffer
+        while let nl = rest.firstIndex(of: 0x0A) {
+            frames.append(rest.subdata(in: rest.startIndex..<nl))
+            rest.removeSubrange(rest.startIndex...nl)
+        }
+        return (frames, rest)
     }
 
     @MainActor
