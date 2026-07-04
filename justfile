@@ -29,6 +29,12 @@ release:
         echo "error: tag v$version already exists — bump VERSION first" >&2
         exit 1
     fi
+    # The bump must be committed: the tag must point at a commit containing
+    # the version it names (v0.2.0 tagged a commit still carrying 0.1.0).
+    if ! git diff --quiet -- VERSION || ! git diff --quiet --staged -- VERSION; then
+        echo "error: VERSION has uncommitted changes — commit the bump first" >&2
+        exit 1
+    fi
     # www/index.html must be clean: the release commit must contain only the
     # version-line sync, never sweep up unrelated edits.
     if ! git diff --quiet -- www/index.html || ! git diff --quiet --staged -- www/index.html; then
