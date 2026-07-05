@@ -355,4 +355,4 @@ agents consume Claude Max subscription allowance.
 
 ## www
 
-Hosted by Cloudfare.
+Hosted by Cloudfare. The dmg is stored in an R2 bucket called `advisor-downloads` with a custom domain of `downloads.advisor.monoidal.co.uk`. Download link is `https://downloads.advisor.monoidal.co.uk/Advisor-a.b.c.dmg`
