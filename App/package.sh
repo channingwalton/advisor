@@ -52,6 +52,9 @@ echo "==> compile app icon"
 # points at it via CFBundleIconFile/CFBundleIconName = AppIcon.
 iconutil -c icns Resources/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 
+# Terms of use, shown by the first-run acceptance sheet (TermsAcceptance).
+cp "$ROOT/TERMS.md" "$APP/Contents/Resources/TERMS.md"
+
 echo "==> bundle node + sidecar"
 cp "$(node -e 'console.log(process.execPath)')" "$APP/Contents/Resources/node"
 mkdir -p "$APP/Contents/Resources/sidecar"

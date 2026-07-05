@@ -1167,6 +1167,28 @@ This is a courtesy gate for honest beta users, not DRM: anyone can flip
 their clock or edit the plist. Chosen deliberately over licence servers or
 signed timestamps — no server exists in this architecture (REQUIREMENTS.md).
 
+## Terms of use + first-run acceptance (2026-07-05)
+
+The repo-root `TERMS.md` is the canonical terms text (licence, beta limits,
+agent-action responsibility, AI-accuracy and recording-consent disclaimers,
+E&W liability caps). `package.sh` bundles it; `AppResources.termsURL` resolves
+bundle-then-repo like every other resource. `www/terms.html` carries the same
+text for the site — a material change means updating **both**, bumping the
+"Version" line in each, and bumping `TermsAcceptance.currentVersion` to match
+(a test pins the constant to TERMS.md's version line).
+
+First run, the Sessions window presents a blocking sheet (`TermsSheet`):
+Accept persists `acceptedTermsVersion` (app-side only key in config.json, like
+`sttLocale`); Decline quits. Any other accepted version — older terms or "" —
+re-presents the sheet. Because ⌘N can open the recording window behind the
+sheet, the same three UI entry points that check `BetaExpiry`
+(`startSession`/`resumeRecording`/`submitQuery`) also surface
+`TermsAcceptance.notice`; unlike the beta limit there is no `SidecarManager`
+chokepoint — the sheet is the enforcement, the guards close the ⌘N gap.
+
+Known gap, accepted: Monoidal Ltd's company number/registered office and a
+contact email are still to be added to TERMS.md and terms.html.
+
 ## Review-suggestion batch: hardening + de-duplication (2026-07-04, issues #55–66)
 
 The 2026-07-03 codebase review's lower-severity half landed as a batch. Most were

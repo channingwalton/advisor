@@ -62,6 +62,11 @@ struct AdvisorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var services = AppServices()
     @AppStorage("agentLanes") private var agentLanes = 3
+    /// First-run terms gate: true until the current TERMS.md version has been
+    /// accepted. Presents the blocking sheet over the Sessions window; the
+    /// recording/query entry points are also gated (`TermsAcceptance.notice`)
+    /// so ⌘N can't sidestep it.
+    @State private var termsNeeded = TermsAcceptance.needed
 
     var body: some Scene {
         // The Sessions browser is the main window: it opens at launch and is a
@@ -71,6 +76,13 @@ struct AdvisorApp: App {
         Window("Sessions", id: "sessions") {
             SessionsView()
                 .task { services.start(lanes: agentLanes) }
+                .sheet(isPresented: $termsNeeded) {
+                    TermsSheet {
+                        TermsAcceptance.accept()
+                        termsNeeded = false
+                    }
+                    .interactiveDismissDisabled()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultLaunchBehavior(.presented)
@@ -839,7 +851,8 @@ struct TranscriptView: View {
     private func resumeRecording() {
         guard let recorder, let stoppedAt, !resuming else { return }
         // Beta expiry (issue #67): resuming is more recording — same block.
-        if let notice = BetaExpiry.notice {
+        // Terms gate likewise — ⌘N can open this window behind the sheet.
+        if let notice = TermsAcceptance.notice ?? BetaExpiry.notice {
             store.status = notice
             return
         }
@@ -890,9 +903,9 @@ struct TranscriptView: View {
     private func submitQuery() {
         let text = queryText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
-        // Beta expiry (issue #67): keep the typed question rather than
-        // clearing it into a query the sidecar will refuse.
-        if let notice = BetaExpiry.notice {
+        // Beta expiry (issue #67) and the terms gate: keep the typed question
+        // rather than clearing it into a query that must be refused.
+        if let notice = TermsAcceptance.notice ?? BetaExpiry.notice {
             store.status = notice
             return
         }
@@ -1026,8 +1039,9 @@ struct TranscriptView: View {
     /// window and opening a new one from the Sessions browser.
     private func startSession() async {
         guard let recorder, sessionStart == nil else { return }
-        // Beta expiry (issue #67): no new recordings past the limit.
-        if let notice = BetaExpiry.notice {
+        // Beta expiry (issue #67): no new recordings past the limit. Terms
+        // gate likewise: no recording before first-run acceptance.
+        if let notice = TermsAcceptance.notice ?? BetaExpiry.notice {
             store.status = notice
             return
         }

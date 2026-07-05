@@ -63,12 +63,16 @@ struct AdvisorConfig: Codable, Equatable {
     /// session notes, so the sidecar never sees this — like `sttLocale`. Resolved
     /// through `SessionArchive.directory`.
     var sessionDir = ""
+    /// App-side only: the TERMS.md version the user accepted at first run
+    /// (`TermsAcceptance`). "" = not yet accepted. The sidecar never sees it.
+    var acceptedTermsVersion = ""
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
         case provider, model, sttLocale, authMode, appearance, contexts, tags, sessionDir
+        case acceptedTermsVersion
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -88,6 +92,7 @@ struct AdvisorConfig: Codable, Equatable {
         contexts = try c.decodeIfPresent([SavedContext].self, forKey: .contexts) ?? []
         tags = try c.decodeIfPresent([SavedTag].self, forKey: .tags) ?? []
         sessionDir = try c.decodeIfPresent(String.self, forKey: .sessionDir) ?? ""
+        acceptedTermsVersion = try c.decodeIfPresent(String.self, forKey: .acceptedTermsVersion) ?? ""
     }
 
     static var fileURL: URL {
