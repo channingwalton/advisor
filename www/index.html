@@ -448,7 +448,7 @@
     <div data-reveal style="text-align: center; margin-bottom: 44px;">
       <div style="font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #3a5ce0; margin-bottom: 14px;">Pricing</div>
       <h2 style="font-size: 46px; line-height: 1.07; letter-spacing: -1.4px; font-weight: 700; margin: 0; color: #1c1a22;">One plan. Everything in.</h2>
-      <p style="max-width: 500px; margin: 18px auto 28px; font-size: 17px; line-height: 1.55; color: #56545d;">Advisor is currently a free beta — each beta build expires one month after release. The pricing below applies to the full release, which will start with a free 14-day trial. Cancel any time.</p>
+      <p style="max-width: 500px; margin: 18px auto 28px; font-size: 17px; line-height: 1.55; color: #56545d;">Advisor is currently a free beta — each beta build expires one month after release. The pricing below applies to the full release, which will start with a free 7-day trial. Cancel any time.</p>
       <!-- toggle -->
       <div style="display: inline-flex; align-items: center; gap: 4px; padding: 4px; border-radius: 12px; background: #fff; border: 0.5px solid rgba(0,0,0,0.08); box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
         <button onClick="{{ setMonthly }}" style="{{ monthlyBtnStyle }}">Monthly</button>
@@ -565,7 +565,7 @@ class Component extends DCLogic {
         (!isMonthly ? 'background:rgba(108,124,255,0.3); color:#c6cbff;' : 'background:#e6f4ec; color:#2f8d5b;'),
       priceBig: isMonthly ? monthly : annual,
       priceUnit: isMonthly ? '/ month' : '/ year',
-      priceSub: isMonthly ? 'Billed monthly · 14-day free trial' : 'Billed yearly \u2014 two months free \u00B7 14-day free trial',
+      priceSub: isMonthly ? 'Billed monthly · 7-day free trial' : 'Billed yearly \u2014 two months free \u00B7 7-day free trial',
     };
   }
 }
