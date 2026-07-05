@@ -47,6 +47,9 @@ release:
     sed -i '' -E "s/Version [^<]+ MB/Version $version · $size_mb MB/" www/index.html
     grep -q "Version $version · $size_mb MB" www/index.html \
         || { echo "error: website version line not updated" >&2; exit 1; }
+    sed -i '' -E "s|downloads\.advisor\.monoidal\.co\.uk/Advisor-[^\"]+\.dmg|downloads.advisor.monoidal.co.uk/Advisor-$version.dmg|" www/index.html
+    grep -q "downloads.advisor.monoidal.co.uk/Advisor-$version.dmg" www/index.html \
+        || { echo "error: website download link not updated" >&2; exit 1; }
     if ! git diff --quiet -- www/index.html; then
         git commit -m "release: v$version" -- www/index.html
     fi
