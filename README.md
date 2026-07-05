@@ -10,10 +10,6 @@ conversation on demand (live or from a saved session). The Obsidian vault,
 the web, and connected tools are its sources; nothing is recorded, only
 transcripts are kept.
 
-## DMG
-
-On [google drive](https://drive.google.com/drive/folders/1O6Lw2FbwappOptTV97AKHyrZia9A-w4U)
-
 ## Getting started
 
 1. **Install.** Drag `Advisor.app` to `/Applications` and open it. (The first
