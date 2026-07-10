@@ -82,11 +82,10 @@ Recording permissions. A packaged app prompts as Advisor; a bare
 If `mise` is installed, common tasks are available from the repo root:
 
 ```sh
-mise run commit-check   # clean build and test
-mise run dmg            # create App/dist/Advisor-<version>.dmg
-mise run create-dmg     # alias for mise run dmg
-mise run release        # dmg + sync website version line + commit + tag vVERSION
-mise run install        # install to ~/Applications/Advisor.app
+mise run check      # clean build and test
+mise run dmg        # create App/dist/Advisor-<version>.dmg
+mise run release    # dmg + sync website version line + commit + tag vVERSION
+mise run install    # install to ~/Applications/Advisor.app
 ```
 
 ## Build a release

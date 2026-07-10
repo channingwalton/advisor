@@ -1276,6 +1276,16 @@ the single notarise+staple. Trade-off accepted: the app inside the DMG carries
 no stapled ticket, so a recipient's first launch needs the network for
 Gatekeeper's ticket lookup — fine for website distribution.
 
+## Live-feed tail following (2026-07-10, issue #70)
+
+The live feed auto-scrolls only while it is following the bottom. A user scroll
+that moves the viewport away disables following, so incoming utterances and
+cards do not yank earlier content away while it is being read. Continuous scroll
+geometry re-enables following as soon as the viewport is within 24 pt (roughly
+one transcript line) of the bottom. Following disables only when the visible
+bottom moves upwards while the container size stays fixed, so it does not depend
+on SwiftUI scroll-phase delivery and content growth alone never disables it.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
