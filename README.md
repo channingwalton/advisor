@@ -79,14 +79,14 @@ Recording permissions. A packaged app prompts as Advisor; a bare
 
 ## Developer shortcuts
 
-If `just` is installed, common tasks are available from the repo root:
+If `mise` is installed, common tasks are available from the repo root:
 
 ```sh
-just commit-check   # clean build and test
-just dmg            # create App/dist/Advisor-<version>.dmg
-just create-dmg     # alias for just dmg
-just release        # dmg + sync website version line + commit + tag vVERSION
-just install        # install to ~/Applications/Advisor.app
+mise run commit-check   # clean build and test
+mise run dmg            # create App/dist/Advisor-<version>.dmg
+mise run create-dmg     # alias for mise run dmg
+mise run release        # dmg + sync website version line + commit + tag vVERSION
+mise run install        # install to ~/Applications/Advisor.app
 ```
 
 ## Build a release
@@ -181,7 +181,7 @@ and `dmg.sh` names its output `Advisor-<version>.dmg`. To release: bump
 `VERSION`, then
 
 ```sh
-just release
+mise run release
 ```
 
 which builds the DMG, rewrites the version/size line on `www/index.html`,

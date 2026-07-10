@@ -1133,7 +1133,7 @@ without git. `package.sh` stamps it into the bundle as
 (`git rev-list --count HEAD`, falling back to 1 without git) — monotonic
 with zero bookkeeping. `dmg.sh` names its artefact `Advisor-<version>.dmg`.
 
-`just release` cuts a release: build the DMG, rewrite the version/size line
+`mise run release` cuts a release: build the DMG, rewrite the version/size line
 on `www/index.html` from the real artefact, commit that sync, tag
 `v<version>`. Two guards make it honest: it refuses to run if the tag
 already exists (forcing a `VERSION` bump, which also guarantees the sed
