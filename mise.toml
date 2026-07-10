@@ -2,7 +2,7 @@
 description = "List available tasks"
 run = "mise tasks ls --local --extended"
 
-[tasks.check]
+[tasks.commit-check]
 alias = "cc"
 description = "Clean, build, and test the app and sidecar"
 run = [
