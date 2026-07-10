@@ -161,6 +161,7 @@ struct TranscriptView: View {
     /// Experiment: hide transcript paragraphs (and the interim line) so the feed
     /// shows only cards. Per-window UI state, not persisted.
     @State private var hideTranscript = false
+    @State private var transcriptAutoScroll = TranscriptAutoScroll()
     @State private var pinned = false
     /// When the current session started — drives the toolbar timer. Non-nil for
     /// the whole session (Listen until the window closes), even while stopped.
@@ -467,6 +468,10 @@ struct TranscriptView: View {
         }
     }
 
+    private enum ScrollTarget: Hashable {
+        case bottom
+    }
+
     /// Transcript, cards and editorial notes merged chronologically, so answers
     /// and the user's own notes appear in context. At equal times an utterance
     /// sorts first, then a note anchored to that line, then a card — so the note
@@ -586,7 +591,7 @@ struct TranscriptView: View {
         return items
     }
 
-    /// Changes whenever a final line or card is added — the auto-scroll trigger
+    /// Changes whenever a final line or card is added — the tail-follow trigger
     /// (a growing paragraph keeps its id, so id-based scrolling alone misses it).
     private var scrollKey: String {
         "\(store.utterances.count)|\(store.cards.count)|\(store.notes.count)"
@@ -651,6 +656,17 @@ struct TranscriptView: View {
                 .padding(.top, Theme.Metric.contentTopPad)
                 .padding(.horizontal, Theme.Metric.contentSidePad)
                 .padding(.bottom, Theme.Metric.contentBottomPad)
+                // Target the padded feed, not its last item: aligning the last
+                // item leaves the bottom padding below the visible viewport.
+                .id(ScrollTarget.bottom)
+            }
+            .onScrollGeometryChange(for: TranscriptViewport.self) { geometry in
+                TranscriptViewport(
+                    visibleBottom: geometry.visibleRect.maxY,
+                    contentHeight: geometry.contentSize.height,
+                    containerHeight: geometry.containerSize.height)
+            } action: { previous, current in
+                transcriptAutoScroll.viewportChanged(from: previous, to: current)
             }
             .onChange(of: scrollKey) { _, _ in
                 // Don't auto-scroll while the user is typing in an editable text
@@ -658,9 +674,9 @@ struct TranscriptView: View {
                 // transcript yanks focus away mid-keystroke, and a stray space then
                 // toggles recording (issue #37). The non-editable selectable
                 // transcript NSTextView is fine to scroll past.
-                guard !isEditingTextField else { return }
-                if let last = displayedItems.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                guard transcriptAutoScroll.followsTail, !isEditingTextField else { return }
+                if !displayedItems.isEmpty {
+                    withAnimation { proxy.scrollTo(ScrollTarget.bottom, anchor: .bottom) }
                 }
             }
         }
