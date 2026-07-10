@@ -2,10 +2,20 @@ import AVFAudio
 import Foundation
 import Speech
 
+protocol SpeechEngineProtocol: AnyObject, Sendable {
+    var onFinal: ((String, Int) -> Void)? { get set }
+    var onVolatile: ((String, Int) -> Void)? { get set }
+    var onUnexpectedEnd: ((Error, Int, Int) -> Void)? { get set }
+
+    func start(sessionToken: Int, runToken: Int) async throws
+    func append(_ samples: [Float])
+    func stop() async
+}
+
 /// Apple's on-device SpeechAnalyzer/SpeechTranscriber (macOS 26+) as the STT
 /// engine. Streaming with built-in endpointing — no hand-rolled VAD — and
 /// resistant to hallucinating sentences from noise.
-final class AppleSpeechEngine {
+final class AppleSpeechEngine: SpeechEngineProtocol, @unchecked Sendable {
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
     private var input: AsyncStream<AnalyzerInput>.Continuation?
@@ -23,13 +33,16 @@ final class AppleSpeechEngine {
     /// In-progress (volatile) text for the current utterance; superseded by
     /// onFinal. Tagged with the session token from `start`.
     var onVolatile: ((String, Int) -> Void)?
+    /// Unexpected result-stream failure, tagged with the session token from
+    /// `start` so the recorder can ignore stale failures after stop/restart.
+    var onUnexpectedEnd: ((Error, Int, Int) -> Void)?
 
     init(name: String, locale: String = "") {
         self.name = name
         self.localeIdentifier = locale
     }
 
-    func start(sessionToken: Int) async throws {
+    func start(sessionToken: Int, runToken: Int) async throws {
         // start() isn't re-entrant: dispose any prior engine before creating new
         // state, so a second start() without an intervening stop() (issue #48)
         // doesn't leak the previous continuation/resultsTask. No-op when fresh.
@@ -78,8 +91,10 @@ final class AppleSpeechEngine {
         self.analyzer = analyzer
         self.transcriber = transcriber
 
-        resultsTask = Task { [weak self, name, sessionToken] in
-            guard let results = self?.transcriber?.results else { return }
+        // Capture this run's transcriber directly. Teardown may nil the
+        // lifecycle-owned property before this task first executes.
+        resultsTask = Task { [weak self, name, sessionToken, runToken, transcriber] in
+            let results = transcriber.results
             do {
                 for try await result in results {
                     let text = String(result.text.characters)
@@ -91,8 +106,11 @@ final class AppleSpeechEngine {
                         self?.onVolatile?(text, sessionToken)
                     }
                 }
+            } catch is CancellationError {
+                return
             } catch {
                 appLog.write("[advisor] apple-stt(\(name)) results ended: \(error)")
+                self?.onUnexpectedEnd?(error, sessionToken, runToken)
             }
         }
         log("ready (locale \(locale.identifier))")

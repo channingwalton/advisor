@@ -130,13 +130,33 @@ final class TranscriptStore: ObservableObject {
     }
 }
 
+protocol MicrophoneCaptureProtocol: AnyObject, Sendable {
+    var onSamples: (([Float]) -> Void)? { get set }
+
+    func start(device: InputDevice?, echoCancellation: Bool) throws
+    func stop()
+}
+
+protocol SystemAudioCaptureProtocol: AnyObject, Sendable {
+    var onSamples: (([Float]) -> Void)? { get set }
+    var onStopped: ((Error?) -> Void)? { get set }
+
+    func start() async throws
+    func stop() async
+}
+
+extension AudioCapture: MicrophoneCaptureProtocol, @unchecked Sendable {}
+extension SystemAudioCapture: SystemAudioCaptureProtocol, @unchecked Sendable {}
+
 /// Wires capture → Apple speech transcription → dedup → store.
-final class Recorder {
-    private let capture = AudioCapture()
-    private let systemCapture = SystemAudioCapture()
-    private let appleMic: AppleSpeechEngine
-    private let appleSys: AppleSpeechEngine
+final class Recorder: @unchecked Sendable {
+    private let capture: any MicrophoneCaptureProtocol
+    private let systemCapture: any SystemAudioCaptureProtocol
+    private let appleMic: any SpeechEngineProtocol
+    private let appleSys: any SpeechEngineProtocol
     private let store: TranscriptStore
+    private let requestMicPermission: @Sendable () async -> Bool
+    private let requestSystemAccess: @MainActor @Sendable () -> Bool
     private let sttQueue = DispatchQueue(label: "advisor.stt")
     // These flags are read on the realtime audio/sysaudio capture threads and
     // written from the control path (start/stop/mute), so they are atomic to
@@ -145,15 +165,61 @@ final class Recorder {
     private let systemActive = Atomic<Bool>(false)
     /// When true, mic callbacks drop audio (system audio keeps flowing).
     private let micMuted = Atomic<Bool>(false)
+    /// False before capture sources drain and until both speech sinks are ready.
+    /// This is a fast callback-thread gate; source draining remains the teardown
+    /// synchronisation boundary.
+    private let samplesEnabled = Atomic<Bool>(false)
     /// Recent `them` utterances for echo dedup. Only touched on sttQueue.
     private var recentThem: [(time: Date, tokens: [String])] = []
+
+    // Lifecycle requests are registered synchronously on the main actor, then
+    // executed by one FIFO task chain. The epoch invalidates a suspended start or
+    // recovery immediately; its queued successor owns any required teardown.
+    @MainActor private var lifecycleTail: Task<Void, Never>?
+    @MainActor private var lifecycleEpoch = 0
+    @MainActor private var desiredRunning = false
+    @MainActor private var stopQueued = false
+    @MainActor private var pendingStopStatus = "idle"
+    @MainActor private var recoveryInFlight = false
+    @MainActor private var sinksMayBeActive = false
+    @MainActor private var micCaptureActive = false
+    @MainActor private var speechRunToken = 0
+    @MainActor private var listeningStatus = "listening"
+    @MainActor private var currentDevice: InputDevice?
     /// Called on the main actor for each accepted utterance.
     var onUtterance: ((Utterance) -> Void)?
 
-    init(store: TranscriptStore, locale: String) throws {
+    convenience init(store: TranscriptStore, locale: String) throws {
+        try self.init(
+            store: store,
+            micEngine: AppleSpeechEngine(name: "mic", locale: locale),
+            sysEngine: AppleSpeechEngine(name: "sys", locale: locale),
+            capture: AudioCapture(),
+            systemCapture: SystemAudioCapture(),
+            requestMicPermission: { await AudioCapture.requestPermission() },
+            requestSystemAccess: { SystemAudioCapture.requestAccessIfNeeded() })
+    }
+
+    init(
+        store: TranscriptStore,
+        micEngine: any SpeechEngineProtocol,
+        sysEngine: any SpeechEngineProtocol,
+        capture: any MicrophoneCaptureProtocol = AudioCapture(),
+        systemCapture: any SystemAudioCaptureProtocol = SystemAudioCapture(),
+        requestMicPermission: @escaping @Sendable () async -> Bool = {
+            await AudioCapture.requestPermission()
+        },
+        requestSystemAccess: @escaping @MainActor @Sendable () -> Bool = {
+            SystemAudioCapture.requestAccessIfNeeded()
+        }
+    ) throws {
         self.store = store
-        appleMic = AppleSpeechEngine(name: "mic", locale: locale)
-        appleSys = AppleSpeechEngine(name: "sys", locale: locale)
+        appleMic = micEngine
+        appleSys = sysEngine
+        self.capture = capture
+        self.systemCapture = systemCapture
+        self.requestMicPermission = requestMicPermission
+        self.requestSystemAccess = requestSystemAccess
 
         // The engine tags each result with the session token it was started with,
         // so a result from a superseded session is dropped at the store write.
@@ -161,23 +227,165 @@ final class Recorder {
         appleSys.onFinal = { [weak self] text, gen in self?.acceptAsync(text, from: .them, gen: gen) }
         appleMic.onVolatile = { [weak self] text, gen in self?.setVolatile(text, for: .me, gen: gen) }
         appleSys.onVolatile = { [weak self] text, gen in self?.setVolatile(text, for: .them, gen: gen) }
+        appleMic.onUnexpectedEnd = { [weak self] error, gen, runToken in
+            self?.recoverFromSpeechEnd(
+                engineName: "mic", error: error, gen: gen, runToken: runToken)
+        }
+        appleSys.onUnexpectedEnd = { [weak self] error, gen, runToken in
+            self?.recoverFromSpeechEnd(
+                engineName: "sys", error: error, gen: gen, runToken: runToken)
+        }
 
         capture.onSamples = { [weak self] samples in
-            guard let self, !self.micMuted.load(ordering: .relaxed) else { return }
+            guard let self,
+                self.samplesEnabled.load(ordering: .relaxed),
+                !self.micMuted.load(ordering: .relaxed)
+            else { return }
             self.appleMic.append(samples)
         }
         systemCapture.onSamples = { [weak self] samples in
-            self?.appleSys.append(samples)
+            guard let self, self.samplesEnabled.load(ordering: .relaxed) else { return }
+            self.appleSys.append(samples)
         }
         systemCapture.onStopped = { [weak self] error in
             guard let self else { return }
+            self.systemActive.store(false, ordering: .relaxed)
             Task { @MainActor in
+                guard self.desiredRunning,
+                    self.samplesEnabled.load(ordering: .relaxed)
+                else { return }
                 if let error {
                     self.store.status = SystemAudioCapture.startFailureNote(for: error)
                 } else {
                     self.store.status = "system audio stopped: ok"
                 }
             }
+        }
+    }
+
+    private func recoverFromSpeechEnd(engineName: String, error: Error, gen: Int, runToken: Int) {
+        Task { @MainActor in
+            guard self.desiredRunning,
+                gen == self.store.sessionGeneration,
+                runToken == self.speechRunToken
+            else { return }
+
+            // A result stream can fail while its start is still suspended. Do
+            // not let the remaining setup publish a live session with dead STT.
+            // The serial stop cleans any partially-created engine state.
+            guard self.store.listening else {
+                appLog.write(
+                    "[advisor] apple-stt(\(engineName)) ended during start; stopping: \(error)")
+                _ = self.requestStop(status: "Apple STT failed during start: \(error)")
+                return
+            }
+
+            if self.recoveryInFlight {
+                appLog.write(
+                    "[advisor] apple-stt(\(engineName)) ended during STT recovery; stopping: \(error)")
+                _ = self.requestStop(
+                    status: "Apple STT failed after restart: \(error)")
+                return
+            }
+
+            self.recoveryInFlight = true
+            self.lifecycleEpoch += 1
+            let epoch = self.lifecycleEpoch
+            let restartRunToken = self.nextSpeechRunToken()
+            let restartSystem = self.systemActive.load(ordering: .relaxed)
+            self.samplesEnabled.store(false, ordering: .relaxed)
+            self.stopMicrophoneSource()
+            self.store.status = "Apple STT stopped; restarting…"
+            appLog.write("[advisor] apple-stt(\(engineName)) ended unexpectedly; restarting STT: \(error)")
+
+            _ = self.enqueueLifecycle {
+                await self.performRecovery(
+                    epoch: epoch,
+                    sessionGeneration: gen,
+                    runToken: restartRunToken,
+                    restartSystem: restartSystem)
+            }
+        }
+    }
+
+    @MainActor
+    private func nextSpeechRunToken() -> Int {
+        speechRunToken += 1
+        return speechRunToken
+    }
+
+    @MainActor
+    private func isCurrent(_ epoch: Int) -> Bool {
+        desiredRunning && lifecycleEpoch == epoch && !Task.isCancelled
+    }
+
+    @MainActor
+    private func enqueueLifecycle(
+        _ operation: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never> {
+        let previous = lifecycleTail
+        let task = Task { @MainActor in
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            await operation()
+        }
+        lifecycleTail = task
+        return task
+    }
+
+    @MainActor
+    private func performRecovery(
+        epoch: Int,
+        sessionGeneration: Int,
+        runToken: Int,
+        restartSystem: Bool
+    ) async {
+        // Finish draining both sources before touching either sink. Once sink
+        // teardown begins, complete it even if stop invalidates this recovery;
+        // the queued stop then sees no live sinks and does not repeat teardown.
+        await stopSystem()
+        await stopSinksIfNeeded()
+        guard isCurrent(epoch) else { return }
+
+        sinksMayBeActive = true
+        do {
+            try await appleMic.start(
+                sessionToken: sessionGeneration, runToken: runToken)
+            guard isCurrent(epoch) else { return }
+            try await appleSys.start(
+                sessionToken: sessionGeneration, runToken: runToken)
+            guard isCurrent(epoch) else { return }
+
+            var notes: [String] = []
+            if restartSystem {
+                do {
+                    try await systemCapture.start()
+                    systemActive.store(true, ordering: .relaxed)
+                } catch {
+                    notes.append(SystemAudioCapture.startFailureNote(for: error))
+                }
+                guard isCurrent(epoch) else { return }
+            }
+
+            samplesEnabled.store(true, ordering: .relaxed)
+            do {
+                try capture.start(device: currentDevice, echoCancellation: false)
+                micCaptureActive = true
+            } catch {
+                samplesEnabled.store(false, ordering: .relaxed)
+                _ = requestStop(
+                    status: "Apple STT failed after restart: \(error)")
+                return
+            }
+            guard isCurrent(epoch) else { return }
+
+            recoveryInFlight = false
+            let status = ([listeningStatus] + notes).joined(separator: " | ")
+            store.status = "\(status) | Apple STT restarted"
+        } catch {
+            guard isCurrent(epoch) else { return }
+            _ = requestStop(
+                status: "Apple STT failed after restart: \(error)")
         }
     }
 
@@ -290,88 +498,175 @@ final class Recorder {
         }
     }
 
-    func start(device: InputDevice?, captureSystem: Bool) async {
-        // The caller bumps `sessionGeneration` synchronously before this `await`;
-        // read it here and tag every result with it, so anything still in flight
-        // from the previous session is dropped at the store write.
-        let gen = await MainActor.run { store.sessionGeneration }
-        guard await AudioCapture.requestPermission() else {
-            await MainActor.run { store.status = "microphone permission denied" }
+    /// Register a start synchronously so a following close/stop can invalidate
+    /// it even before its first suspension resumes.
+    @MainActor
+    @discardableResult
+    func start(device: InputDevice?, captureSystem: Bool) -> Task<Void, Never> {
+        desiredRunning = true
+        recoveryInFlight = false
+        lifecycleEpoch += 1
+        let epoch = lifecycleEpoch
+        let sessionGeneration = store.sessionGeneration
+        let runToken = nextSpeechRunToken()
+        currentDevice = device
+
+        samplesEnabled.store(false, ordering: .relaxed)
+        stopMicrophoneSource()
+        store.listening = false
+        store.status = "starting Apple speech engine…"
+
+        return enqueueLifecycle {
+            await self.performStart(
+                epoch: epoch,
+                sessionGeneration: sessionGeneration,
+                runToken: runToken,
+                device: device,
+                captureSystem: captureSystem)
+        }
+    }
+
+    @MainActor
+    private func performStart(
+        epoch: Int,
+        sessionGeneration: Int,
+        runToken: Int,
+        device: InputDevice?,
+        captureSystem: Bool
+    ) async {
+        // A direct duplicate start is treated like a restart. Normal resume has
+        // an earlier queued stop, so these are no-ops there.
+        await stopSystem()
+        await stopSinksIfNeeded()
+        guard isCurrent(epoch) else { return }
+
+        guard await requestMicPermission() else {
+            guard isCurrent(epoch) else { return }
+            desiredRunning = false
+            lifecycleEpoch += 1
+            store.status = "microphone permission denied"
             return
         }
+        guard isCurrent(epoch) else { return }
+
+        sinksMayBeActive = true
         do {
-            await MainActor.run { store.status = "starting Apple speech engine…" }
-            try await appleMic.start(sessionToken: gen)
-            try await appleSys.start(sessionToken: gen)
+            try await appleMic.start(
+                sessionToken: sessionGeneration, runToken: runToken)
+            guard isCurrent(epoch) else { return }
+            try await appleSys.start(
+                sessionToken: sessionGeneration, runToken: runToken)
+            guard isCurrent(epoch) else { return }
         } catch {
-            // If appleMic.start() succeeded but appleSys.start() threw, the mic
-            // engine is left running — stop both before bailing (issue #48).
-            await appleMic.stop()
-            await appleSys.stop()
-            await MainActor.run { store.status = "Apple STT failed: \(error)" }
+            guard isCurrent(epoch) else { return }
+            _ = requestStop(status: "Apple STT failed: \(error)")
             return
         }
+
         var notes: [String] = []
         systemActive.store(false, ordering: .relaxed)
         if captureSystem {
-            if await SystemAudioCapture.requestAccessIfNeeded() {
+            if requestSystemAccess() {
                 do {
                     try await systemCapture.start()
                     systemActive.store(true, ordering: .relaxed)
                 } catch {
                     notes.append(SystemAudioCapture.startFailureNote(for: error))
                 }
+                guard isCurrent(epoch) else { return }
             } else {
                 notes.append(SystemAudioCapture.permissionRequiredNote)
             }
         }
+
+        // Both sinks are ready before either source can feed them. AEC remains
+        // disabled: it fails or mutes the mic on supported multichannel setups.
+        samplesEnabled.store(true, ordering: .relaxed)
         do {
-            // AEC (voice processing) disabled: on this setup it either fails
-            // to initialise (-10875, multichannel output) or mutes the mic.
-            // Echo from speakers is handled downstream by text dedup instead.
             try capture.start(device: device, echoCancellation: false)
-            let detail = [
-                "listening — \(device?.label ?? "default input")",
-                systemActive.load(ordering: .relaxed) ? "+ system audio" : nil,
-            ]
-            .compactMap { $0 }.joined(separator: " ")
-            let status = ([detail] + notes).joined(separator: " | ")
-            await MainActor.run {
-                store.listening = true
-                store.status = status
-            }
+            micCaptureActive = true
         } catch {
-            // Both Apple engines are running here — stop the SCStream source
-            // first, then the STT sinks (source-before-sink, matching stop() /
-            // issue #47), so neither engine is left running (issue #48).
-            await stopSystem()
-            await appleMic.stop()
-            await appleSys.stop()
-            await MainActor.run { store.status = "error: \(error)" }
+            samplesEnabled.store(false, ordering: .relaxed)
+            _ = requestStop(status: "error: \(error)")
+            return
+        }
+        guard isCurrent(epoch) else { return }
+
+        let detail = [
+            "listening — \(device?.label ?? "default input")",
+            systemActive.load(ordering: .relaxed) ? "+ system audio" : nil,
+        ]
+        .compactMap { $0 }.joined(separator: " ")
+        listeningStatus = detail
+        store.listening = true
+        store.status = ([detail] + notes).joined(separator: " | ")
+    }
+
+    @MainActor
+    @discardableResult
+    func stop() -> Task<Void, Never> {
+        requestStop(status: "idle")
+    }
+
+    @MainActor
+    private func requestStop(status: String) -> Task<Void, Never> {
+        let hasLifecycleWork = desiredRunning
+            || sinksMayBeActive
+            || micCaptureActive
+            || systemActive.load(ordering: .relaxed)
+            || recoveryInFlight
+        if !hasLifecycleWork, !stopQueued {
+            store.listening = false
+            store.micMuted = false
+            store.volatile = [:]
+            store.status = status
+            return Task { @MainActor in }
+        }
+
+        desiredRunning = false
+        recoveryInFlight = false
+        lifecycleEpoch += 1
+        _ = nextSpeechRunToken()
+        samplesEnabled.store(false, ordering: .relaxed)
+        micMuted.store(false, ordering: .relaxed)
+        stopMicrophoneSource()
+        store.listening = false
+        store.micMuted = false
+        store.volatile = [:]
+        pendingStopStatus = status
+        store.status = status == "idle" ? "stopping…" : status
+
+        if stopQueued, let lifecycleTail { return lifecycleTail }
+        stopQueued = true
+        return enqueueLifecycle {
+            await self.performStop()
         }
     }
 
-    func stop() {
-        micMuted.store(false, ordering: .relaxed)
+    @MainActor
+    private func performStop() async {
+        // Mic source was synchronously drained by requestStop. Drain the async
+        // system source before touching either plain-state speech sink.
+        await stopSystem()
+        await stopSinksIfNeeded()
+        stopQueued = false
+        guard !desiredRunning else { return }
+        store.status = pendingStopStatus
+    }
+
+    @MainActor
+    private func stopMicrophoneSource() {
+        guard micCaptureActive else { return }
+        micCaptureActive = false
         capture.stop()
-        Task {
-            // Stop audio SOURCES before tearing down the STT SINKS. The mic
-            // source is already stopped synchronously above (capture.stop's
-            // removeTap guarantees no further mic callbacks). stopSystem awaits
-            // SCStream.stopCapture, which drains delivery — after it returns
-            // appleSys.append can no longer be called, so nilling appleSys's
-            // engine state below is race-free. Ordering the other way round
-            // leaves a live SCStream feeding a half-torn-down engine.
-            await stopSystem()
-            await appleMic.stop()
-            await appleSys.stop()
-            await MainActor.run {
-                store.listening = false
-                store.micMuted = false
-                store.status = "idle"
-                store.volatile = [:]
-            }
-        }
+    }
+
+    @MainActor
+    private func stopSinksIfNeeded() async {
+        guard sinksMayBeActive else { return }
+        await appleMic.stop()
+        await appleSys.stop()
+        sinksMayBeActive = false
     }
 
     /// Mute/unmute the local mic. System audio keeps being captured and
@@ -385,6 +680,7 @@ final class Recorder {
         }
     }
 
+    @MainActor
     private func stopSystem() async {
         guard systemActive.load(ordering: .relaxed) else { return }
         systemActive.store(false, ordering: .relaxed)

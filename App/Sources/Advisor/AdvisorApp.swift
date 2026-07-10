@@ -170,11 +170,13 @@ struct TranscriptView: View {
     /// session resumable. Nil while recording or idle.
     @State private var stoppedAt: Date?
     /// In-flight latch for `resumeRecording()`: `stoppedAt` is only cleared after
-    /// the async `recorder.start` returns, so without this a second Space during
-    /// that await would re-enter and start audio twice concurrently (issue #50).
-    /// Set synchronously on the main actor before the Task, so the second press
-    /// is a no-op — mirrors how `startSession` guards on `sessionStart`.
+    /// the recorder start operation finishes, so a second Space cannot enqueue a
+    /// second start during permission/model/capture setup (issue #50).
     @State private var resuming = false
+    /// Actual recorder lifecycle operation, registered before the UI returns.
+    /// Closing cancels this handle and `Recorder.stop()` invalidates its epoch.
+    @State private var recorderStartTask: Task<Void, Never>?
+    @State private var recorderStartID: UUID?
     @State private var spaceMonitor: Any?
     /// True while a "Wait"-to-close is draining the session's in-flight agents.
     /// Covers the window with a blocking overlay so the about-to-close UI can't
@@ -225,7 +227,12 @@ struct TranscriptView: View {
             // shared sidecar running so the Sessions browser keeps working. A
             // stopped-but-resumable session is still in progress (sessionStart set
             // though not listening), so end on the session, not the audio state.
-            if sessionStart != nil { endSession() }
+            if sessionStart != nil {
+                endSession()
+            } else {
+                cancelRecorderStart()
+                recorder?.stop()
+            }
             // Drop any folder target so reopening the window with the global record
             // button (or ⌘N) starts un-foldered (issue #35).
             winCtx.pendingFolder = nil
@@ -357,7 +364,7 @@ struct TranscriptView: View {
                 autoCards: $autoCards,
                 hideTranscript: $hideTranscript,
                 pinned: $pinned,
-                onStart: { Task { await startSession() } },
+                onStart: { startSession() },
                 onResume: { resumeRecording() },
                 onMuteToggle: { recorder?.setMicMuted(!store.micMuted) },
                 onStop: { stopRecording() },
@@ -828,7 +835,7 @@ struct TranscriptView: View {
             switch RecordControl.state(listening: store.listening, stopped: stoppedAt != nil) {
             case .recording: stopRecording()
             case .stopped: resumeRecording()
-            case .idle: Task { await startSession() }
+            case .idle: startSession()
             }
             return nil
         }
@@ -856,20 +863,44 @@ struct TranscriptView: View {
             store.status = notice
             return
         }
-        // Latch synchronously before the await so a second Space is a no-op
-        // (issue #50). `recorder.start` is non-throwing, so its return — and
-        // hence this reset — is always reached.
+        // Latch synchronously so a second Space is a no-op (issue #50).
         resuming = true
-        if let start = sessionStart {
-            sessionStart = RecordControl.resumedStart(start, stoppedAt: stoppedAt, now: Date())
-        }
-        Task {
-            await recorder.start(device: selectedDevice, captureSystem: captureSystem)
-            await MainActor.run {
+        let operation = recorder.start(
+            device: selectedDevice, captureSystem: captureSystem)
+        trackRecorderStart(operation) {
+            if store.listening, let start = sessionStart {
+                sessionStart = RecordControl.resumedStart(
+                    start, stoppedAt: stoppedAt, now: Date())
                 self.stoppedAt = nil
-                self.resuming = false
             }
+            resuming = false
         }
+    }
+
+    /// Observe completion without making lifecycle registration asynchronous.
+    /// The identity prevents an old completion from clearing a newer operation.
+    private func trackRecorderStart(
+        _ operation: Task<Void, Never>,
+        completion: @escaping @MainActor () -> Void = {}
+    ) {
+        recorderStartTask?.cancel()
+        let id = UUID()
+        recorderStartID = id
+        recorderStartTask = operation
+        Task { @MainActor in
+            await operation.value
+            guard recorderStartID == id else { return }
+            recorderStartTask = nil
+            recorderStartID = nil
+            completion()
+        }
+    }
+
+    private func cancelRecorderStart() {
+        recorderStartTask?.cancel()
+        recorderStartTask = nil
+        recorderStartID = nil
+        resuming = false
     }
 
     /// Share the current session note to a chosen location via a save panel.
@@ -956,6 +987,7 @@ struct TranscriptView: View {
     /// longer ends a session, since it's now resumable (issue #6). Safe whether
     /// the session was recording or already stopped.
     private func endSession() {
+        cancelRecorderStart()
         recorder?.stop()
         services.sidecar.sendSessionEnd()
         services.writer.end()
@@ -1037,7 +1069,7 @@ struct TranscriptView: View {
     /// sidecar session. Stop no longer ends a session (it's resumable), so this
     /// only runs from the idle Listen control — a new session means closing the
     /// window and opening a new one from the Sessions browser.
-    private func startSession() async {
+    private func startSession() {
         guard let recorder, sessionStart == nil else { return }
         // Beta expiry (issue #67): no new recordings past the limit. Terms
         // gate likewise: no recording before first-run acceptance.
@@ -1066,7 +1098,9 @@ struct TranscriptView: View {
         // A transcript window opened on this note must disable asking until
         // the live writer is done with it.
         TranscriptWindowContext.shared.liveFileURL = services.writer.currentFileURL
-        await recorder.start(device: selectedDevice, captureSystem: captureSystem)
+        let operation = recorder.start(
+            device: selectedDevice, captureSystem: captureSystem)
+        trackRecorderStart(operation)
     }
 }
 

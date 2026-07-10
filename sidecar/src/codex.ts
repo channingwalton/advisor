@@ -51,7 +51,10 @@ export class CodexAgentSession implements Agent {
   private firstTurn = true;
   private controller?: AbortController;
 
-  constructor(private readonly opts: AgentSessionOptions) {}
+  constructor(
+    private readonly opts: AgentSessionOptions,
+    private readonly threadFactory?: (options: ThreadOptions) => Thread
+  ) {}
 
   reset(): void {
     this.controller?.abort();
@@ -64,8 +67,14 @@ export class CodexAgentSession implements Agent {
   }
 
   private ensure(): Thread {
-    if (!this.codex) this.codex = new Codex(codexConstructorOptions(process.env));
-    if (!this.thread) this.thread = this.codex.startThread(codexThreadOptions(this.opts));
+    if (!this.thread) {
+      if (this.threadFactory) {
+        this.thread = this.threadFactory(codexThreadOptions(this.opts));
+      } else {
+        if (!this.codex) this.codex = new Codex(codexConstructorOptions(process.env));
+        this.thread = this.codex.startThread(codexThreadOptions(this.opts));
+      }
+    }
     return this.thread;
   }
 
@@ -126,16 +135,24 @@ export class CodexAgentSession implements Agent {
       })();
     });
 
-    const timeout = new Promise<TaskResult>((resolve) =>
-      setTimeout(() => {
+    let timeoutHandle!: NodeJS.Timeout;
+    const timeout = new Promise<TaskResult>((resolve) => {
+      timeoutHandle = setTimeout(() => {
         if (!settled) {
           log(`${this.opts.name}: codex task timed out`);
           controller.abort();
           finish(resolve, "timed out");
         }
-      }, timeoutMs)
-    );
+      }, timeoutMs);
+    });
+    timeoutHandle.unref();
 
-    return Promise.race([turn, timeout]);
+    try {
+      return await Promise.race([turn, timeout]);
+    } finally {
+      // Do not retain this run or let a later reset abort its completed process.
+      clearTimeout(timeoutHandle);
+      if (this.controller === controller) this.controller = undefined;
+    }
   }
 }

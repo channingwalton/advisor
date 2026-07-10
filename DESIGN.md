@@ -79,6 +79,8 @@ Sidecar → Swift:
 ```
 
 Versioned with a `hello` exchange at startup.
+Card ids are opaque: new cards include a random sidecar-process incarnation
+prefix, so a restarted process cannot collide with cards retained by Swift.
 
 ## Latency budget (best efforts; ≤5 s utterance → useful card is the aspiration)
 
@@ -93,7 +95,7 @@ The placeholder-then-stream pattern is what makes the budget achievable; a full 
 
 ## Error handling
 
-Sidecar crash → supervisor restarts with exponential backoff (≤5; a healthy run resets the budget), replays the session context (`session_start` + lane/auto config), status line shows the crash and the restart attempt; budget exhausted → status asks the user to stop and start listening again. STT stall → watchdog restarts decode queue. LLM/tool failure → card flips to `failed` with reason; never silent. Anthropic key missing/invalid → blocking banner at session start, not mid-conversation.
+Sidecar crash → supervisor restarts with exponential backoff (≤5; a healthy run resets the budget), replays the session context (`session_start` + lane/auto config), status line shows the crash and the restart attempt; budget exhausted → status asks the user to stop and start listening again. Apple STT result-stream failure (for example Speech helper disconnect `NSCocoaErrorDomain` 4099) → status line shows recovery, audio sources drain before both speech engines restart, then sources resume; simultaneous mic/sys failures are coalesced, and a failed restart stops listening with the error. Recorder start, recovery, and teardown share one serial lifecycle queue so Stop/close cannot overlap or be outlived by suspended setup. LLM/tool failure → card flips to `failed` with reason; never silent. Anthropic key missing/invalid → blocking banner at session start, not mid-conversation.
 
 ## Trade-offs made
 
@@ -353,8 +355,10 @@ as `card_reply` (`makeLane("document")` then `reset()` in `finally`): no pool
 slot, no `busy` gate, no live-session state, parallel-safe, works mid-session.
 Streamed back as `document_answer` keyed by request id; `SidecarManager` routes
 each frame to a per-id handler registered by `askDocument` (kept out of the live
-`store.cards`) and drops it on a terminal state. Concurrent document questions
-are capped (2) like replies, so a burst can't fork unbounded SDK subprocesses.
+`store.cards`) and drops it on a terminal state. Sidecar crash, spawn failure and
+deliberate stop fail and clear every outstanding handler, so saved-session Ask
+and Summarise cannot remain pending across process loss. Concurrent document
+questions are capped (2) like replies, so a burst can't fork unbounded SDK subprocesses.
 
 On `done` the answer is appended to the note under a one-time `# Follow-ups`
 heading as a `>`-quoted block matching the inline-card style
@@ -371,10 +375,8 @@ becomes askable once the next session starts or the app restarts. Because the
 Sessions window is a sibling scene (not a child of the live view), it can't
 receive the sidecar/owned-file as params; `TranscriptWindowContext` (a
 `@MainActor` shared holder the live view populates) carries both across scenes.
-Residual limitations (accepted for a single-user local tool): an `ask_document`
-whose sidecar dies mid-stream leaks its handler and the pane stays "asking"
-(parity with `card_reply`); the list refreshes on open and on
-`.advisorSessionsChanged` (posted when a session starts or ends).
+Residual limitation (accepted for a single-user local tool): the list refreshes
+on open and on `.advisorSessionsChanged` (posted when a session starts or ends).
 
 ## Appearance preference (2026-06-18)
 

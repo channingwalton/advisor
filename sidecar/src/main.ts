@@ -12,6 +12,7 @@ import {
   TranscriptSource,
 } from "./prompts.js";
 import { cardOutcome, boundedPush } from "./cards.js";
+import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { guardedRun } from "./guardedRun.js";
@@ -123,7 +124,7 @@ let transcript: TranscriptEntry[] = [];
 // Each persistent session tracks which transcript entries it has already seen.
 const cursors = new Map<string, number>();
 let busy = false; // user queries (priority lane)
-let cardCounter = 0;
+const cardIDs = new ProcessCardIDs();
 let auto = true;
 /// True between session_start and session_end. Gates the auto-classifier so a
 /// classify already scheduled or in flight when the session ends can't enqueue
@@ -148,7 +149,7 @@ async function runCard(
   task: string,
   triggerId?: string
 ): Promise<void> {
-  const cardId = `c${++cardCounter}`;
+  const cardId = cardIDs.next();
   lane.currentCardId = cardId;
   send({ type: "card", id: cardId, trigger: triggerId, kind, title, body: "…", state: "pending" });
   let failed = false;
@@ -290,7 +291,7 @@ const summaryLanes: Lane[] = [];
 /// (card_update), so there is only ever one summary card per session.
 async function runSummariseLive(msg: Extract<Inbound, { type: "summarise_live" }>): Promise<void> {
   const reusing = msg.cardId !== undefined;
-  const cardId = msg.cardId ?? `c${++cardCounter}`;
+  const cardId = msg.cardId ?? cardIDs.next();
   const lane = makeLane("summary");
   lane.currentCardId = cardId;
   summaryLanes.push(lane);

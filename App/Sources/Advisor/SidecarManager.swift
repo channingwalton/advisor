@@ -48,6 +48,42 @@ struct Card: Identifiable, Equatable {
     var isResearching: Bool { state == "pending" || state == "streaming" }
 }
 
+/// Main-actor registry for saved-document requests. Removing terminal handlers
+/// before invoking them prevents late frames or re-entrant callbacks from
+/// retaining a completed Sessions view.
+@MainActor
+final class DocumentRequestHandlers {
+    typealias Handler = (String, String) -> Void
+
+    private var handlers: [String: Handler] = [:]
+
+    var count: Int { handlers.count }
+
+    func register(_ id: String, handler: @escaping Handler) {
+        handlers[id] = handler
+    }
+
+    func remove(_ id: String) {
+        handlers[id] = nil
+    }
+
+    func receive(id: String, body: String, state: String) {
+        guard let handler = handlers[id] else { return }
+        if Self.isTerminal(state) { handlers[id] = nil }
+        handler(body, state)
+    }
+
+    func failAll(reason: String) {
+        let pending = Array(handlers.values)
+        handlers.removeAll()
+        for handler in pending { handler(reason, "failed") }
+    }
+
+    private static func isTerminal(_ state: String) -> Bool {
+        state == "done" || state == "failed" || state == "cancelled"
+    }
+}
+
 /// Spawns and supervises the Node sidecar; NDJSON over stdio.
 final class SidecarManager {
     private var process: Process?
@@ -180,6 +216,8 @@ final class SidecarManager {
     private func handleTermination(_ code: Int32) {
         stdinHandle = nil
         process = nil
+        documentHandlers.failAll(
+            reason: stopping ? "sidecar stopped" : "sidecar crashed (\(code))")
         if stopping { stopping = false; return } // deliberate stop()
         // Genuine crash: the restarted sidecar has no memory of prior card ids, so
         // any still-researching card can never receive its terminal card_update and
@@ -202,6 +240,8 @@ final class SidecarManager {
     private func handleSpawnFailure(_ error: Error) {
         stdinHandle = nil
         process = nil
+        documentHandlers.failAll(
+            reason: stopping ? "sidecar stopped" : "sidecar failed to start: \(error)")
         if stopping { stopping = false; return } // stopped during the backoff window
         scheduleRestart(reason: "sidecar failed to start: \(error)")
     }
@@ -234,10 +274,12 @@ final class SidecarManager {
         if let lastSessionId { sendSessionStart(lastSessionId, context: lastSessionContext) }
     }
 
+    @MainActor
     func stop() {
         stopping = true
         lastSessionId = nil
         lastSessionContext = ""
+        documentHandlers.failAll(reason: "sidecar stopped")
         // Close on writeQueue so it serialises with in-flight async writes (a
         // close racing a write mid-syscall is an fd-reuse hazard). sidecar exits
         // on stdin close.
@@ -315,7 +357,7 @@ final class SidecarManager {
     /// by `askDocument`, invoked as `document_answer` frames arrive, dropped on a
     /// terminal state. Main-actor confined: `askDocument` and inbound handling
     /// both run on the main actor.
-    @MainActor private var documentHandlers: [String: (String, String) -> Void] = [:]
+    @MainActor private lazy var documentHandlers = DocumentRequestHandlers()
 
     /// Ask a question about a saved transcript (the history browser). `onUpdate`
     /// is called with the streamed answer body and state
@@ -328,12 +370,12 @@ final class SidecarManager {
         question: String, document: String, onUpdate: @escaping (String, String) -> Void
     ) -> String? {
         let id = UUID().uuidString
-        documentHandlers[id] = onUpdate
+        documentHandlers.register(id, handler: onUpdate)
         let sent = send([
             "type": "ask_document", "id": id, "question": question, "document": document,
         ])
         if !sent {
-            documentHandlers[id] = nil
+            documentHandlers.remove(id)
             return nil
         }
         return id
@@ -349,10 +391,10 @@ final class SidecarManager {
         transcript: String, onUpdate: @escaping (String, String) -> Void
     ) -> String? {
         let id = UUID().uuidString
-        documentHandlers[id] = onUpdate
+        documentHandlers.register(id, handler: onUpdate)
         let sent = send(["type": "summarise_document", "id": id, "transcript": transcript])
         if !sent {
-            documentHandlers[id] = nil
+            documentHandlers.remove(id)
             return nil
         }
         return id
@@ -531,13 +573,10 @@ final class SidecarManager {
                 }
             }
         case "document_answer":
-            guard let id = obj["id"] as? String, let handler = documentHandlers[id] else { return }
+            guard let id = obj["id"] as? String else { return }
             let body = obj["body"] as? String ?? ""
             let state = obj["state"] as? String ?? "streaming"
-            handler(body, state)
-            if state == "done" || state == "failed" || state == "cancelled" {
-                documentHandlers[id] = nil
-            }
+            documentHandlers.receive(id: id, body: body, state: state)
         case "error":
             store.status = "sidecar: \(obj["message"] as? String ?? "error")"
         default:
