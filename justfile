@@ -1,12 +1,11 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-alias create-dmg := dmg
-alias cc := commit-check
+alias cc := check
 
 default:
     @just --list
 
-commit-check:
+check:
     cd App && swift package clean
     rm -rf sidecar/dist
     cd App && swift build
