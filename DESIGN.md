@@ -35,7 +35,7 @@ The Swift app owns everything realtime and visual; the sidecar owns everything t
 
 **AudioCapture.** Two concurrent sources: mic via `AVAudioEngine` tap; system audio via `ScreenCaptureKit` (`SCStream` audio-only, macOS 13+). Each resampled to 16 kHz mono PCM into a ring buffer, tagged `me` (mic) / `them` (system). Echo risk (own voice on both channels during calls): suppress `mic` segments that overlap >80 % in time with near-identical `sys` text; revisit if insufficient.
 
-**Transcription.** Apple SpeechAnalyzer/SpeechTranscriber (macOS 26), on-device. True streaming with built-in endpointing — no hand-rolled VAD — one analyzer per source (mic/system). Emits `Utterance{id, source, text, t0, t1}`. (Originally whisper.cpp; see the dated sections below for the switch and removal.)
+**Transcription.** Apple SpeechAnalyzer/SpeechTranscriber (macOS 26), on-device. True streaming with built-in endpointing — no hand-rolled VAD — one analyzer per source (mic/system). Final results drop `um`/`uh`/`er`/`erm` fillers and collapse immediately repeated words before they reach the live feed, saved note or sidecar. Emits `Utterance{id, source, text, t0, t1}`. (Originally whisper.cpp; see the dated sections below for the switch and removal.)
 
 **SidecarManager.** Spawns the Node sidecar and supervises it: on a crash it restarts with exponential backoff (1/2/4/8 s, capped 8 s, ≤5 attempts; a crash that follows a >60 s healthy run resets the budget, so only a tight loop exhausts it), then replays the session context the running conversation depends on — `session_start` plus the lane/auto config (not the utterance history; the classifier session is gone, so new utterances resume in a fresh sidecar session). A deliberate `stop()` is distinguished from a crash and cancels any pending restart. Sends to a dead sidecar surface on the status line rather than failing silently; budget exhausted → status asks the user to stop and start listening again. Transport: newline-delimited JSON over stdin/stdout. Chosen over WebSocket: no port management, lifecycle tied to parent, trivially debuggable. The sidecar's stderr is funnelled into the app's log file (see Logging) rather than left to vanish in a packaged app.
 
@@ -1285,6 +1285,16 @@ geometry re-enables following as soon as the viewport is within 24 pt (roughly
 one transcript line) of the bottom. Following disables only when the visible
 bottom moves upwards while the container size stays fixed, so it does not depend
 on SwiftUI scroll-phase delivery and content growth alone never disables it.
+
+## Transcript disfluency cleanup (2026-07-13, issue #40)
+
+Apple Speech occasionally finalises a single segment with filler words and long
+runs of the same recognised word. `Recorder.cleanedTranscript` removes the narrow
+filler set `um`/`uh`/`er`/`erm` and collapses only immediately repeated words,
+case-insensitively. Non-consecutive repeats remain because they may carry meaning.
+Cleanup runs at the common final-result boundary before echo matching and store
+insertion, so the UI, markdown transcript and sidecar all receive identical text;
+volatile in-progress text remains untouched.
 
 ## Revisit as it grows
 

@@ -294,6 +294,17 @@ private func speechHelperError() -> NSError {
 @Suite(.serialized)
 struct RecorderSTTRecoveryTests {
     @MainActor
+    @Test func finalSpeechIsCleanedBeforeItReachesTheTranscript() async throws {
+        let harness = try makeHarness(sessionGeneration: 18)
+        await startListening(harness, captureSystem: false)
+
+        harness.micEngine.onFinal?("Um, I, I need this, uh, today.", 18)
+
+        #expect(await eventually { harness.store.utterances.count == 1 })
+        #expect(harness.store.utterances.first?.text == "I need this, today.")
+    }
+
+    @MainActor
     @Test func recoveryDrainsSourcesBeforeSinksAndRestartsSinksFirst() async throws {
         let harness = try makeHarness(sessionGeneration: 7)
         await startListening(harness)

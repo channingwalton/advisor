@@ -415,6 +415,7 @@ final class Recorder: @unchecked Sendable {
 
     /// Common post-STT path: junk filter, echo dedup, store. Call on sttQueue.
     private func accept(_ text: String, from source: Source, spokenEnd: Date, gen: Int) {
+        let text = Self.cleanedTranscript(text)
         guard !text.isEmpty, !Self.isJunk(text) else { return }
 
         let tokens = Self.tokens(text)
@@ -460,6 +461,69 @@ final class Recorder: @unchecked Sendable {
         s.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
+    }
+
+    /// Remove speech fillers and collapse immediately repeated words while
+    /// retaining the punctuation between the words that remain. Apple sometimes
+    /// returns long runs such as "I, I, I, uh" in a single final result; cleaning
+    /// here keeps the live feed, saved note and sidecar input consistent.
+    static func cleanedTranscript(_ text: String) -> String {
+        let regex = try! NSRegularExpression(
+            pattern: #"[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*"#)
+        let source = text as NSString
+        let matches = regex.matches(
+            in: text, range: NSRange(location: 0, length: source.length))
+        guard !matches.isEmpty else { return "" }
+
+        let fillers: Set<String> = ["um", "uh", "er", "erm"]
+        var output = ""
+        var previousMatchEnd = 0
+        var lastKeptEnd = 0
+        var lastKeptWord: String?
+        var keptAny = false
+        var lastMatchWasKept = false
+
+        for match in matches {
+            let word = source.substring(with: match.range)
+            let normalised = word.lowercased()
+            let shouldDrop = fillers.contains(normalised) || normalised == lastKeptWord
+
+            if shouldDrop {
+                previousMatchEnd = NSMaxRange(match.range)
+                lastMatchWasKept = false
+                continue
+            }
+
+            if keptAny {
+                let separator = NSRange(
+                    location: previousMatchEnd,
+                    length: match.range.location - previousMatchEnd)
+                output += source.substring(with: separator)
+            } else if let first = matches.first, first.range.location > 0 {
+                output += source.substring(
+                    with: NSRange(location: 0, length: first.range.location))
+            }
+            output += word
+            keptAny = true
+            lastKeptWord = normalised
+            previousMatchEnd = NSMaxRange(match.range)
+            lastKeptEnd = previousMatchEnd
+            lastMatchWasKept = true
+        }
+
+        guard keptAny else { return "" }
+        if lastMatchWasKept, previousMatchEnd < source.length {
+            output += source.substring(from: previousMatchEnd)
+        } else if lastKeptEnd < source.length {
+            let tail = source.substring(from: lastKeptEnd)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let range = tail.range(
+                of: #"[.!?…]+[\"”’')\]]*$"#, options: .regularExpression)
+            {
+                output += tail[range]
+            }
+        }
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Non-speech artefacts: "[BLANK_AUDIO]", "*Bell rings*", "(claps)", lone punctuation.

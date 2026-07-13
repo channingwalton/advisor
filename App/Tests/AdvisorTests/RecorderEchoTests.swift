@@ -24,6 +24,25 @@ import Testing
     #expect(!Recorder.isJunk("chapter (one)")) // alphanumeric, not bracket-wrapped
 }
 
+@Test func transcriptCleanupRemovesFillersAndCollapsesConsecutiveWords() {
+    let raw = "So, I mean, I, I, I, uh, one more, one of the weeks for, I, I, I, I, "
+
+    #expect(Recorder.cleanedTranscript(raw) == "So, I mean, I, one more, one of the weeks for, I")
+}
+
+@Test func transcriptCleanupHandlesFillersAtTheEdges() {
+    #expect(Recorder.cleanedTranscript("Um, this is ready, er.") == "this is ready.")
+    #expect(Recorder.cleanedTranscript("uh, erm, er") == "")
+    #expect(Recorder.cleanedTranscript("Are we done, um?") == "Are we done?")
+    #expect(Recorder.cleanedTranscript("“Um, hello.”") == "“hello.”")
+}
+
+@Test func transcriptCleanupPreservesNonConsecutiveRepeatsAndPunctuation() {
+    #expect(Recorder.cleanedTranscript("I said I would. Very, very useful!") == "I said I would. Very useful!")
+    #expect(Recorder.cleanedTranscript("number 42, 42 times") == "number 42 times")
+    #expect(Recorder.cleanedTranscript("What, what?") == "What?")
+}
+
 @Test func pairMatchNeedsSeventyPercentOverlap() {
     let a: Set<String> = ["effect", "systems", "ocaml", "handlers"] // 4
     #expect(Recorder.pairMatch(a, ["effect", "systems", "ocaml", "monads"]))   // 3/4 = 0.75 ≥ 0.7
