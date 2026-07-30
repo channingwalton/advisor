@@ -505,3 +505,139 @@ private func makeFolderedArchive(
     _ = SessionArchive.move(from: source, to: dest)
     #expect(SessionArchive.folderContext("Work", root: dest) == "Carried over")
 }
+
+// MARK: - Folder tags (issue #76)
+
+@Test func folderTagsRoundTripAndAreInvisibleToListing() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.folderTags("Work", root: dir).isEmpty)
+    #expect(SessionArchive.setFolderTags(
+        [" Work ", "urgent", "work", "a,b\nc"], for: "Work", root: dir))
+    #expect(SessionArchive.folderTags("Work", root: dir) == ["Work", "urgent", "a b c"])
+    #expect(SessionArchive.list(in: dir).count == 1)
+    #expect(SessionArchive.folders(in: dir) == ["Work"])
+}
+
+@Test func setFolderTagsWithEmptyListRemovesFile() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": []])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.setFolderTags(["work"], for: "Work", root: dir))
+    #expect(SessionArchive.setFolderTags([], for: "Work", root: dir))
+    #expect(SessionArchive.folderTags("Work", root: dir).isEmpty)
+    let tagsURL = try #require(SessionArchive.folderTagsURL("Work", root: dir))
+    #expect(!FileManager.default.fileExists(atPath: tagsURL.path))
+}
+
+@Test func setFolderTagsRejectsUnsafeName() throws {
+    let dir = try makeFolderedArchive()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(!SessionArchive.setFolderTags(["work"], for: "a/b", root: dir))
+    #expect(SessionArchive.folderTagsURL("a/b", root: dir) == nil)
+    #expect(SessionArchive.folderTags("a/b", root: dir).isEmpty)
+}
+
+@Test func setFolderTagsReportsWriteFailure() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-folder-tags-blocked-\(UUID().uuidString)")
+    try "not a directory".write(to: root, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(!SessionArchive.setFolderTags(["work"], for: "Team", root: root))
+}
+
+@Test func renameFolderCarriesTags() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": []])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.setFolderTags(["work", "urgent"], for: "Work", root: dir))
+    #expect(SessionArchive.renameFolder(from: "Work", to: "Projects", in: dir))
+    #expect(SessionArchive.folderTags("Projects", root: dir) == ["work", "urgent"])
+    #expect(SessionArchive.folderTags("Work", root: dir).isEmpty)
+}
+
+@Test func deleteFolderRemovesTagsFileAndDirectory() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionArchive.setFolderTags(["work"], for: "Work", root: dir))
+    #expect(SessionArchive.deleteFolder("Work", in: dir))
+    #expect(SessionArchive.folders(in: dir).isEmpty)
+    #expect(SessionArchive.list(in: dir).first?.folder == nil)
+}
+
+@Test func deleteFolderPreservesTagsWhenDeletionAborts() throws {
+    let dir = try makeFolderedArchive(
+        root: ["2026-06-18-170000.md"],
+        folders: ["Work": ["2026-06-18-170000.md"]])
+    defer { try? FileManager.default.removeItem(at: dir) }
+    #expect(SessionArchive.setFolderTags(["keep-me"], for: "Work", root: dir))
+
+    #expect(!SessionArchive.deleteFolder("Work", in: dir))
+    #expect(SessionArchive.folderTags("Work", root: dir) == ["keep-me"])
+}
+
+@Test func moveCarriesFolderTags() throws {
+    let source = try makeFolderedArchive(folders: ["Work": ["2026-06-18-170000.md"]])
+    let dest = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-folder-tags-dest-\(UUID().uuidString)")
+    defer {
+        try? FileManager.default.removeItem(at: source)
+        try? FileManager.default.removeItem(at: dest)
+    }
+    #expect(SessionArchive.setFolderTags(["work", "urgent"], for: "Work", root: source))
+
+    _ = SessionArchive.move(from: source, to: dest)
+    #expect(SessionArchive.folderTags("Work", root: dest) == ["work", "urgent"])
+}
+
+@MainActor
+@Test func folderRecordingDefaultsSeedTheWriterOnlyBeforeStart() throws {
+    let dir = try makeFolderedArchive(folders: ["Work": []])
+    defer { try? FileManager.default.removeItem(at: dir) }
+    #expect(SessionArchive.setFolderContext("Team sync", for: "Work", root: dir))
+    #expect(SessionArchive.setFolderTags(
+        ["work", "deleted", "urgent"], for: "Work", root: dir))
+
+    let library = [
+        SavedTag(name: "work", colorHex: "0x000000"),
+        SavedTag(name: "urgent", colorHex: "0x000000"),
+    ]
+    var draft = RecordingDraft(context: "manual", tags: ["manual"])
+    let seeded = draft.seedFromFolder(
+        pendingFolder: "Work", sessionActive: false,
+        library: library, root: dir)
+    #expect(seeded)
+    #expect(draft == RecordingDraft(context: "Team sync", tags: ["work", "urgent"]))
+
+    let writer = SessionWriter(store: TranscriptStore(), resolveDirectory: { dir })
+    writer.start(context: draft.context, tags: draft.tags, folder: "Work")
+    writer.flush()
+    let note = try #require(SessionArchive.list(in: dir).first)
+    let detail = SessionDetail.parse(
+        contents: SessionArchive.contents(of: note), fallbackTitle: "x")
+    #expect(detail.context == "Team sync")
+    #expect(detail.tags == ["work", "urgent"])
+
+    var unchanged = RecordingDraft(context: "manual", tags: ["manual"])
+    let noFolder = unchanged.seedFromFolder(
+        pendingFolder: nil, sessionActive: false, library: library, root: dir)
+    let alreadyActive = unchanged.seedFromFolder(
+        pendingFolder: "Work", sessionActive: true, library: library, root: dir)
+    #expect(!noFolder)
+    #expect(!alreadyActive)
+    #expect(unchanged == RecordingDraft(context: "manual", tags: ["manual"]))
+}
+
+@Test func recordingDraftDropsDeletedTagsBeforeSessionStart() {
+    var draft = RecordingDraft(context: "Team sync", tags: ["work", "deleted", "urgent"])
+    draft.retainKnownTags(in: [
+        SavedTag(name: "work", colorHex: "0x000000"),
+        SavedTag(name: "urgent", colorHex: "0x000000"),
+    ])
+
+    #expect(draft == RecordingDraft(context: "Team sync", tags: ["work", "urgent"]))
+}

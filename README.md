@@ -254,7 +254,10 @@ fixed once you press Listen; re-file afterwards with **Move to Folder**. Each fo
 can also carry a **default context**: the speech-bubble button beside a folder's
 record button sets context (who's there, what it's about) that every recording
 started in that folder inherits as its starting session context — editable per
-session. The bubble is filled when a folder has a context set.
+session. The bubble is filled when a folder has a context set. The adjacent
+**tag button** sets default tags from your library; every new recording started
+from that folder inherits them, and you can adjust them before or during the
+session. Existing sessions and sessions moved into the folder are unchanged.
 Selecting one shows it on the right: title and meta, the questions you asked, and
 the transcript rendered like the live window (with the cards Advisor surfaced
 inline, as in the live view). The detail header's **Tags** chip applies or

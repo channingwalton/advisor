@@ -284,10 +284,11 @@ enum SessionArchive {
         return settingTags(renamed, in: markdown)
     }
 
-    /// Rename a tag from `old` to `new` across every saved note in `directory`,
-    /// skipping `excluding` (the live note, which is rewritten through its writer
-    /// instead). Returns the number of notes changed. Notes without the tag are
-    /// untouched. Synchronous file I/O — fine for a personal archive of this size.
+    /// Rename a tag from `old` to `new` across every saved note and folder default
+    /// in `directory`, skipping `excluding` (the live note, which is rewritten
+    /// through its writer instead). Returns the number of notes changed; folder
+    /// metadata is deliberately not included in the count. Entries without the tag
+    /// are untouched. Synchronous file I/O — fine for a personal archive of this size.
     @discardableResult
     static func renameTag(
         from old: String, to new: String,
@@ -301,6 +302,38 @@ enum SessionArchive {
             let updated = renamingTag(from: old, to: new, in: original)
             if updated != original,
                 (try? updated.write(to: file.url, atomically: true, encoding: .utf8)) != nil {
+                changed += 1
+            }
+        }
+        let oldName = old.trimmingCharacters(in: .whitespaces)
+        for folder in folders(in: directory) {
+            let original = folderTags(folder, root: directory)
+            let renamed = original.map {
+                $0.caseInsensitiveCompare(oldName) == .orderedSame ? new : $0
+            }
+            if renamed != original {
+                setFolderTags(renamed, for: folder, root: directory)
+            }
+        }
+        return changed
+    }
+
+    /// Remove `name` from every folder's defaults after that library tag is
+    /// deleted (issue #76). Returns the number of folder metadata files changed.
+    /// A folder whose final default is removed loses its `.tags` file entirely.
+    @discardableResult
+    static func removeTagFromFolderDefaults(
+        _ name: String, in directory: URL = SessionArchive.directory
+    ) -> Int {
+        let removedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var changed = 0
+        for folder in folders(in: directory) {
+            let original = folderTags(folder, root: directory)
+            let filtered = original.filter {
+                $0.caseInsensitiveCompare(removedName) != .orderedSame
+            }
+            if filtered != original,
+                setFolderTags(filtered, for: folder, root: directory) {
                 changed += 1
             }
         }
@@ -337,17 +370,24 @@ enum SessionArchive {
                 skipped += 1
             }
         }
-        // Carry each folder's context file (issue #36): `list` doesn't surface the
-        // hidden file, so move it explicitly, or a storage-dir change would strand
-        // folder contexts. Never clobbers a context already at the destination.
+        // Carry each folder's metadata files (context from issue #36, default tags
+        // from issue #76): `list` doesn't surface hidden files, so move them
+        // explicitly, or a storage-dir change would strand the defaults. Never
+        // clobbers metadata already at the destination.
         for folder in folders(in: source) {
-            guard let src = folderContextURL(folder, root: source),
-                let dst = folderContextURL(folder, root: dest),
-                FileManager.default.fileExists(atPath: src.path),
-                !FileManager.default.fileExists(atPath: dst.path) else { continue }
-            try? FileManager.default.createDirectory(
-                at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? FileManager.default.moveItem(at: src, to: dst)
+            let pairs = [
+                (folderContextURL(folder, root: source), folderContextURL(folder, root: dest)),
+                (folderTagsURL(folder, root: source), folderTagsURL(folder, root: dest)),
+            ]
+            for (sourceURL, destinationURL) in pairs {
+                guard let sourceURL, let destinationURL,
+                    FileManager.default.fileExists(atPath: sourceURL.path),
+                    !FileManager.default.fileExists(atPath: destinationURL.path) else { continue }
+                try? FileManager.default.createDirectory(
+                    at: destinationURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+                try? FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+            }
         }
         return (moved, skipped)
     }
@@ -400,6 +440,47 @@ enum SessionArchive {
             try fm.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try trimmed.write(to: url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// The hidden file holding a folder's default tags (issue #76):
+    /// `<root>/<folder>/.tags`. It travels with the directory on rename and is
+    /// ignored by session listing.
+    static func folderTagsURL(_ folder: String, root: URL = SessionArchive.directory) -> URL? {
+        guard let safe = sanitiseFolderName(folder) else { return nil }
+        return root.appendingPathComponent(safe, isDirectory: true)
+            .appendingPathComponent(".tags")
+    }
+
+    /// A folder's default session tags (issue #76), or an empty list when unset.
+    /// Uses the same canonical comma-separated representation as note frontmatter.
+    static func folderTags(_ folder: String, root: URL = SessionArchive.directory) -> [String] {
+        guard let url = folderTagsURL(folder, root: root),
+            let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return parseTags(text)
+    }
+
+    /// Set (or clear) the tags inherited by new recordings started in `folder`
+    /// (issue #76). Empty tags remove the metadata file. Creates an empty folder
+    /// when needed, mirroring `setFolderContext`.
+    @discardableResult
+    static func setFolderTags(
+        _ tags: [String], for folder: String, root: URL = SessionArchive.directory
+    ) -> Bool {
+        guard let url = folderTagsURL(folder, root: root) else { return false }
+        let fm = FileManager.default
+        let line = tagsLine(tags)
+        if line.isEmpty {
+            guard fm.fileExists(atPath: url.path) else { return true }
+            return (try? fm.removeItem(at: url)) != nil
+        }
+        do {
+            try fm.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try line.write(to: url, atomically: true, encoding: .utf8)
             return true
         } catch {
             return false
@@ -479,16 +560,22 @@ enum SessionArchive {
             if fm.fileExists(atPath: dest.path) { continue }
             try? fm.moveItem(at: file.url, to: dest)
         }
-        // Our own folder-context file (issue #36) shouldn't block removal, but it
-        // must not be destroyed if the delete is aborted: ignore it when checking
-        // emptiness, and only remove it once everything else is gone (a same-named
-        // note that couldn't un-file keeps the folder — and its context — intact).
-        let ctx = folderContextURL(safe, root: directory)
+        // Our own folder metadata shouldn't block removal, but it must not be
+        // destroyed if the delete is aborted: ignore it when checking emptiness,
+        // and only remove it once everything else is gone.
+        let metadata = [
+            folderContextURL(safe, root: directory),
+            folderTagsURL(safe, root: directory),
+        ].compactMap { $0 }
         let remaining = ((try? fm.contentsOfDirectory(
             at: folderURL, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.standardizedFileURL != ctx?.standardizedFileURL }
+            .filter { entry in
+                !metadata.contains { $0.standardizedFileURL == entry.standardizedFileURL }
+            }
         guard remaining.isEmpty else { return false }
-        if let ctx, fm.fileExists(atPath: ctx.path) { try? fm.removeItem(at: ctx) }
+        for url in metadata where fm.fileExists(atPath: url.path) {
+            try? fm.removeItem(at: url)
+        }
         return (try? fm.removeItem(at: folderURL)) != nil
     }
 

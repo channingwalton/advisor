@@ -61,6 +61,9 @@ struct SessionsView: View {
     /// header's context button state and is the seed a recording started here
     /// inherits. Refreshed from disk alongside `folders` in `reload`.
     @State private var folderContexts: [String: String] = [:]
+    /// Each folder's default tags (issue #76), keyed by folder name. New recordings
+    /// started from the folder inherit them; existing or moved sessions do not.
+    @State private var folderTags: [String: [String]] = [:]
 
     var body: some View {
         // Native NavigationSplitView: on macOS 26 (Tahoe) the sidebar column
@@ -84,9 +87,15 @@ struct SessionsView: View {
             reload()
         }
         // Tag library edits in Preferences (rename, recolour, delete) must
-        // recolour/hide pills here without a relaunch.
+        // recolour/hide pills and refresh folder defaults without a relaunch.
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
-            tagLibrary = AdvisorConfig.load().tags
+            let library = AdvisorConfig.load().tags
+            tagLibrary = library
+            folderTags = folders.reduce(into: [:]) {
+                $0[$1] = SessionArchive.folderTags($1).filter {
+                    TagLibrary.named($0, in: library) != nil
+                }
+            }
         }
         // When a filter hides the selected session, select the first visible one
         // so the detail and sidebar stay consistent.
@@ -231,7 +240,8 @@ struct SessionsView: View {
     }
 
     /// A collapsible folder section header: disclosure chevron, name, count, and a
-    /// record button that starts a recording filed into this folder (issue #35).
+    /// default controls and a record button that starts a recording filed into
+    /// this folder (issues #35/#36/#76).
     /// Tapping the row toggles expansion; right-click renames/deletes the folder.
     /// A plain row with `.onTapGesture`, not a `Button`, so the nested record
     /// `Button` keeps its own tap target rather than being swallowed by an outer one.
@@ -251,6 +261,13 @@ struct SessionsView: View {
             Text("\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textMuted)
             FolderContextButton(folder: folder, context: folderContexts[folder] ?? "") { text in
                 saveFolderContext(text, for: folder)
+            }
+            FolderTagsButton(
+                folder: folder,
+                tags: folderTags[folder] ?? [],
+                library: tagLibrary
+            ) { tags in
+                saveFolderTags(tags, for: folder)
             }
             folderRecordButton(folder)
         }
@@ -587,6 +604,11 @@ struct SessionsView: View {
         tagLibrary = AdvisorConfig.load().tags
         folders = SessionArchive.folders()
         folderContexts = folders.reduce(into: [:]) { $0[$1] = SessionArchive.folderContext($1) }
+        folderTags = folders.reduce(into: [:]) {
+            $0[$1] = SessionArchive.folderTags($1).filter {
+                TagLibrary.named($0, in: tagLibrary) != nil
+            }
+        }
         sessions = SessionArchive.list().map { file in
             let contents = SessionArchive.contents(of: file)
             let detail = SessionDetail.parse(
@@ -643,6 +665,14 @@ struct SessionsView: View {
     private func saveFolderContext(_ text: String, for folder: String) {
         SessionArchive.setFolderContext(text, for: folder)
         folderContexts[folder] = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Save the tags inherited by recordings started from this folder (issue #76).
+    /// Canonicalise through the archive formatter so the button immediately shows
+    /// the same de-duplicated list that will be read back from disk.
+    private func saveFolderTags(_ tags: [String], for folder: String) {
+        guard SessionArchive.setFolderTags(tags, for: folder) else { return }
+        folderTags[folder] = SessionArchive.parseTags(SessionArchive.tagsLine(tags))
     }
 
     /// Delete a folder; its sessions are un-filed back to the root, not deleted.
@@ -780,6 +810,40 @@ private struct FolderContextButton: View {
                 }
             }
             .padding(14)
+        }
+    }
+}
+
+// MARK: - Folder tags button (issue #76)
+
+/// A folder header's tag button: edits the defaults inherited by new recordings
+/// started in the folder. Existing sessions and sessions moved into it are unchanged.
+private struct FolderTagsButton: View {
+    let folder: String
+    let tags: [String]
+    let library: [SavedTag]
+    let onChange: ([String]) -> Void
+    @State private var show = false
+
+    private var hasTags: Bool { !tags.isEmpty }
+
+    var body: some View {
+        Button { show.toggle() } label: {
+            HStack(spacing: 2) {
+                Image(systemName: hasTags ? "tag.fill" : "tag")
+                    .font(.system(size: 11))
+                if hasTags {
+                    Text("\(tags.count)")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+            }
+            .foregroundStyle(hasTags ? Theme.accent : Theme.textMuted)
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help(hasTags ? "Edit tags for “\(folder)”" : "Set tags for “\(folder)”")
+        .popover(isPresented: $show, arrowEdge: .bottom) {
+            SessionTagsEditor(tags: tags, library: library, onChange: onChange)
         }
     }
 }

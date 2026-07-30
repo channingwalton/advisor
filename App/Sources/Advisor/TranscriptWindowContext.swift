@@ -1,5 +1,61 @@
 import Foundation
 
+/// The context and known-library tags inherited by a recording targeted at a
+/// folder (issues #36/#76). Kept as a pure loader so the pre-session gating and
+/// complete seed are regression-testable outside SwiftUI.
+struct FolderRecordingDefaults: Equatable {
+    let context: String
+    let tags: [String]
+
+    static func load(
+        pendingFolder: String?,
+        sessionActive: Bool,
+        library: [SavedTag],
+        root: URL = SessionArchive.directory
+    ) -> FolderRecordingDefaults? {
+        guard !sessionActive, let folder = pendingFolder else { return nil }
+        let tags = SessionArchive.folderTags(folder, root: root).filter {
+            TagLibrary.named($0, in: library) != nil
+        }
+        return FolderRecordingDefaults(
+            context: SessionArchive.folderContext(folder, root: root),
+            tags: tags)
+    }
+}
+
+/// The editable pre/live-session values that folder defaults seed and
+/// `SessionWriter.start` consumes. Keeping them together makes the inheritance
+/// mutation testable as recording state, not only as an archive read.
+struct RecordingDraft: Equatable {
+    var context = ""
+    var tags: [String] = []
+
+    @discardableResult
+    mutating func seedFromFolder(
+        pendingFolder: String?,
+        sessionActive: Bool,
+        library: [SavedTag],
+        root: URL = SessionArchive.directory
+    ) -> Bool {
+        guard let defaults = FolderRecordingDefaults.load(
+            pendingFolder: pendingFolder,
+            sessionActive: sessionActive,
+            library: library,
+            root: root)
+        else { return false }
+        context = defaults.context
+        tags = defaults.tags
+        return true
+    }
+
+    /// Drop defaults whose library entries were deleted while the recording
+    /// window was open but not yet started. Live sessions deliberately keep their
+    /// note tags, matching existing session-tag deletion semantics.
+    mutating func retainKnownTags(in library: [SavedTag]) {
+        tags = tags.filter { TagLibrary.named($0, in: library) != nil }
+    }
+}
+
 /// Shared handles the past-transcript window needs but can't receive as params:
 /// it is a sibling `WindowGroup` scene, not a child of `TranscriptView`, so the
 /// live `sidecar` and the note the live writer still owns are passed through a

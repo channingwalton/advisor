@@ -1296,6 +1296,25 @@ Cleanup runs at the common final-result boundary before echo matching and store
 insertion, so the UI, markdown transcript and sidecar all receive identical text;
 volatile in-progress text remains untouched.
 
+## Folder tag defaults (2026-07-30, issue #76)
+
+A folder can hold default tags from the existing tag library. Its header gains a
+tag button beside the context and record buttons; the same `SessionTagsEditor`
+used by session surfaces edits the defaults. Starting a recording through that
+folder seeds the live window's editable `sessionTags`, then the existing
+`SessionWriter.start(tags:)` path writes them to note frontmatter. Filing an
+existing session into the folder does not change its tags.
+
+Defaults live in `<root>/<folder>/.tags` as the canonical comma-separated value
+from `SessionArchive.tagsLine`, alongside the folder-owned `.context.md`. This
+preserves the real-directory model: rename carries defaults automatically,
+storage relocation moves both hidden metadata files, and delete ignores them
+for the emptiness check but removes them only once deletion can complete.
+Renaming a library tag also rewrites folder defaults so future recordings do not
+inherit an orphaned name. Deleting one removes it from folder defaults; the
+recording seed also filters against the current library so a failed/stale metadata
+cleanup cannot put an unknown tag onto a new note.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

@@ -439,6 +439,7 @@ struct SavedTagsView: View {
                     .buttonStyle(.borderless)
                     .help("Edit")
                 Button(role: .destructive) {
+                    SessionArchive.removeTagFromFolderDefaults(tag.name)
                     tags = TagLibrary.removing(tags, id: tag.id)
                 } label: { Image(systemName: "trash") }
                     .buttonStyle(.borderless)

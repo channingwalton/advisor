@@ -38,6 +38,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F15. Show live transcript (collapsible).
 - F16. Session history: transcripts and surfaced items reviewable afterwards, stored as app-managed local markdown files. No writing to the Obsidian Vault (read-only source).
 - F17. Session tags (issue #15): a user-managed library of coloured tags (Preferences), applied to a session from the live toolbar or the browser, shown as coloured pills on session rows and searchable. Stored by name in the note's frontmatter.
+- F17a. Folder tag defaults (issue #76): folders can hold tags from the library; a new recording started from that folder inherits them, with per-session editing still available. Existing sessions and sessions moved into the folder are unchanged.
 
 ## Non-functional requirements
 

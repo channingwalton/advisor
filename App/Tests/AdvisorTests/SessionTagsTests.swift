@@ -119,6 +119,30 @@ import Testing
     #expect(tags(live) == ["work"]) // untouched (renamed via its writer instead)
 }
 
+@Test func renameTagUpdatesFolderDefaults() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-folder-tags-rename-test-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    #expect(SessionArchive.setFolderTags(["work", "urgent"], for: "Team", root: dir))
+
+    #expect(SessionArchive.renameTag(from: "WORK", to: "Project X", in: dir) == 0)
+    #expect(SessionArchive.folderTags("Team", root: dir) == ["Project X", "urgent"])
+}
+
+@Test func removingLibraryTagClearsItFromFolderDefaults() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-folder-tags-delete-test-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    #expect(SessionArchive.setFolderTags(["work", "urgent"], for: "Team", root: dir))
+    #expect(SessionArchive.setFolderTags(["WORK"], for: "Solo", root: dir))
+
+    #expect(SessionArchive.removeTagFromFolderDefaults("Work", in: dir) == 2)
+    #expect(SessionArchive.folderTags("Team", root: dir) == ["urgent"])
+    #expect(SessionArchive.folderTags("Solo", root: dir).isEmpty)
+    let soloURL = try #require(SessionArchive.folderTagsURL("Solo", root: dir))
+    #expect(!FileManager.default.fileExists(atPath: soloURL.path))
+}
+
 @Test func setTagsRoundTripsThroughDisk() throws {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("advisor-tags-test-\(UUID().uuidString)")

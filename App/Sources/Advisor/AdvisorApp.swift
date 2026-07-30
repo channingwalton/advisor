@@ -140,7 +140,7 @@ struct TranscriptView: View {
     /// The session prompt: optional free-text context. Filled before Listen
     /// (sent on session_start) or edited live during the session (pushed via
     /// onChange). Cleared when the session stops.
-    @State private var sessionContext = ""
+    @State private var recordingDraft = RecordingDraft()
     /// The optional session name: a short label, distinct from the research
     /// context. Filled before Listen (seeded into the writer at start) or edited
     /// live; titles the session in the browser. Cleared when the session stops.
@@ -148,7 +148,6 @@ struct TranscriptView: View {
     /// The session's tags (issue #15). Staged before Listen (seeded into the
     /// writer at start) or edited live via the toolbar's Tags chip; rendered as
     /// coloured pills in the browser. Cleared when the session stops.
-    @State private var sessionTags: [String] = []
     /// The user's tag library, for the toolbar's Tags chip autocomplete. Kept in
     /// sync with Preferences via `advisorConfigChanged`.
     @State private var tagLibrary: [SavedTag] = []
@@ -258,7 +257,7 @@ struct TranscriptView: View {
             store.volatile = [:]
         }
         .onChange(of: selectedDevice) { _, d in if let d { micDeviceName = d.name } }
-        .onChange(of: sessionContext) { _, new in
+        .onChange(of: recordingDraft.context) { _, new in
             // Push live edits to the running agents; pre-session text rides along
             // on session_start instead. Also keep the note's title in sync. Fires
             // for the whole session (including while stopped), not just recording.
@@ -277,16 +276,16 @@ struct TranscriptView: View {
                 services.writer.noteChanged()
             }
         }
-        .onChange(of: sessionTags) { _, new in
+        .onChange(of: recordingDraft.tags) { _, new in
             // Tags ride along on session_start before a session; once started,
             // they go straight through the writer (which flushes), so the change
             // lands in the note even when a late card rewrite would otherwise win.
             if sessionStart != nil { services.writer.setOwnedNoteTags(new) }
         }
         // A folder's record button retargets an already-open recording window; pick
-        // up that folder's context for the next session (issue #36). nil (the global
-        // record button / window close) leaves the current text untouched.
-        .onChange(of: winCtx.pendingFolder) { _, _ in seedContextFromPendingFolder() }
+        // up that folder's context and tags for the next session (issues #36/#76).
+        // nil (the global record button / window close) leaves staged values untouched.
+        .onChange(of: winCtx.pendingFolder) { _, _ in seedDefaultsFromPendingFolder() }
         .onChange(of: autoCards) { _, on in services.sidecar.sendAuto(on) }
         .onChange(of: pinned) { _, on in
             // Prefer the key window (the recording window, since its toolbar holds
@@ -304,24 +303,27 @@ struct TranscriptView: View {
             triggers = cfg.triggers
             savedContexts = cfg.contexts
             tagLibrary = cfg.tags
+            if sessionStart == nil {
+                recordingDraft.retainKnownTags(in: cfg.tags)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .advisorTagRenamed)) { note in
             // A tag renamed in Preferences: remap it on the live note's staged
-            // tags. The on-disk rename skipped this note, so the sessionTags
+            // tags. The on-disk rename skipped this note, so the recording draft
             // onChange below (re)writes it through the writer with the new name.
             guard let from = note.userInfo?["from"] as? String,
                 let to = note.userInfo?["to"] as? String
             else { return }
-            let remapped = sessionTags.map {
+            let remapped = recordingDraft.tags.map {
                 $0.caseInsensitiveCompare(from) == .orderedSame ? to : $0
             }
-            if remapped != sessionTags { sessionTags = remapped }
+            if remapped != recordingDraft.tags { recordingDraft.tags = remapped }
         }
         .onReceive(NotificationCenter.default.publisher(for: .advisorLiveTagsChanged)) { note in
             // The Sessions browser tagged the live note; adopt its tags so a later
             // toolbar edit builds on them rather than clobbering them.
             guard let tags = note.userInfo?["tags"] as? [String] else { return }
-            if tags != sessionTags { sessionTags = tags }
+            if tags != recordingDraft.tags { recordingDraft.tags = tags }
         }
         .onChange(of: store.utterances) { _, _ in services.writer.noteChanged() }
         // An added or deleted editorial note changes the persisted note (issue #34).
@@ -357,8 +359,8 @@ struct TranscriptView: View {
                 devices: devices,
                 captureSystem: captureSystem,
                 sessionName: $sessionName,
-                sessionContext: $sessionContext,
-                sessionTags: $sessionTags,
+                sessionContext: $recordingDraft.context,
+                sessionTags: $recordingDraft.tags,
                 savedContexts: savedContexts,
                 tagLibrary: tagLibrary,
                 onSaveContext: saveContext(named:),
@@ -813,10 +815,9 @@ struct TranscriptView: View {
         // window only builds the audio recorder.
         rebuildRecorder()
         // A window opened via a folder's record button inherits that folder's
-        // context (issue #35/#36); the pending target is already set before the
-        // window appears, so seed here. An already-open window reseeds via the
-        // `pendingFolder` onChange instead.
-        seedContextFromPendingFolder()
+        // defaults (issues #35/#36/#76); the pending target is already set before
+        // the window appears, so seed here. An open window reseeds on change.
+        seedDefaultsFromPendingFolder()
     }
 
     private func rebuildRecorder() {
@@ -942,7 +943,8 @@ struct TranscriptView: View {
     /// (issue #10), persisting to config.json and posting the config-changed
     /// notification so Preferences (if open) and this view reflect it.
     private func saveContext(named name: String) {
-        savedContexts = ContextLibrary.saving(savedContexts, name: name, text: sessionContext)
+        savedContexts = ContextLibrary.saving(
+            savedContexts, name: name, text: recordingDraft.context)
         AdvisorConfig.persistContexts(savedContexts)
         NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
     }
@@ -1012,9 +1014,9 @@ struct TranscriptView: View {
         // session already ended, that would flush empty tags over the saved note.
         sessionStart = nil
         stoppedAt = nil
-        sessionContext = "" // blank slate for the next session
+        recordingDraft.context = "" // blank slate for the next session
         sessionName = ""
-        sessionTags = []
+        recordingDraft.tags = []
         recordingFolder = nil
     }
 
@@ -1071,14 +1073,14 @@ struct TranscriptView: View {
         poll()
     }
 
-    /// Start a fresh session from idle: a new STT generation, a new note and a new
-    /// Seed the session context from a folder's saved context (issue #36) when the
-    /// recording window is opened via a folder's record button. The folder context
-    /// is a starting point the user can edit per session, not a locked prefix.
-    /// Skipped once a session is live — its context belongs to the running session.
-    private func seedContextFromPendingFolder() {
-        guard sessionStart == nil, let folder = winCtx.pendingFolder else { return }
-        sessionContext = SessionArchive.folderContext(folder)
+    /// Seed the session context and tags from folder defaults (issues #36/#76)
+    /// when opened via a folder's record button. Both remain editable per session.
+    /// Skipped once live — the running session owns its values.
+    private func seedDefaultsFromPendingFolder() {
+        recordingDraft.seedFromFolder(
+            pendingFolder: winCtx.pendingFolder,
+            sessionActive: sessionStart != nil,
+            library: tagLibrary)
     }
 
     /// Start a fresh session from idle: a new STT generation, a new note and a new
@@ -1102,7 +1104,7 @@ struct TranscriptView: View {
         store.notes = []
         sessionStart = Date()
         stoppedAt = nil
-        let ctx = sessionContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ctx = recordingDraft.context.trimmingCharacters(in: .whitespacesAndNewlines)
         let nm = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
         // Consume the pending folder target: this session files into it, and it's
         // cleared so it can't leak to a later un-foldered recording (issue #35).
@@ -1110,7 +1112,8 @@ struct TranscriptView: View {
         recordingFolder = folder
         winCtx.pendingFolder = nil
         services.sidecar.sendSessionStart(UUID().uuidString, context: ctx)
-        services.writer.start(context: ctx, name: nm, tags: sessionTags, folder: folder)
+        services.writer.start(
+            context: ctx, name: nm, tags: recordingDraft.tags, folder: folder)
         // A transcript window opened on this note must disable asking until
         // the live writer is done with it.
         TranscriptWindowContext.shared.liveFileURL = services.writer.currentFileURL
