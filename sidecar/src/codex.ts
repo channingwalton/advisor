@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { Codex, type CodexOptions, type Thread, type ThreadOptions } from "@openai/codex-sdk";
 import type { Agent, AgentSessionOptions, TaskResult } from "./agent.js";
+import { codexSandboxWrapper } from "./codexSandbox.js";
 import { log } from "./protocol.js";
 
 /// Codex client auth. With an explicit `apiKey` the SDK talks to the OpenAI API
@@ -10,20 +11,28 @@ import { log } from "./protocol.js";
 /// signal to use it — passing it explicitly beats a stale ChatGPT login that
 /// would otherwise win. `env` is left unset so the Codex CLI still inherits
 /// `process.env` (MCP servers, PATH, …).
-export function codexConstructorOptions(env: NodeJS.ProcessEnv): CodexOptions {
+export function codexConstructorOptions(
+  env: NodeJS.ProcessEnv,
+  codexPathOverride?: string
+): CodexOptions {
   const apiKey = env.OPENAI_API_KEY;
-  return apiKey ? { apiKey } : {};
+  return {
+    ...(apiKey ? { apiKey } : {}),
+    ...(codexPathOverride ? { codexPathOverride } : {}),
+  };
 }
 
 /// Map an Advisor agent spec onto Codex thread options.
 ///
-/// Sandbox: "read-only" + "never" approval means the agent cannot write, edit,
-/// run network-mutating commands, or escalate — it can only read and (when the
-/// component uses web tools) search the web. Note this is coarser than the
-/// Claude backend's per-path `canUseTool`: a read-only shell command could in
-/// principle read sensitive dotfiles, and MCP servers come from the user's
-/// ~/.codex/config.toml rather than being gated by `allowMcpActions`. See
-/// DESIGN.md.
+/// Sandbox: "read-only" + "never" approval is the CLI's own bound, kept as a
+/// first layer but not relied on. It restricts modification, not reading (see
+/// DESIGN.md), and MCP tools bypass it entirely (openai/codex#4152). The
+/// enforced boundary is the Seatbelt profile the CLI runs under — see
+/// codexSandbox.ts — which denies the same paths as the Claude backend's
+/// `canUseTool` and confines writes, for the CLI and every process it spawns.
+/// This is still coarser than `canUseTool`: MCP servers come from the user's
+/// ~/.codex/config.toml and are not gated by `allowMcpActions`, so a connector
+/// read the Claude backend would refuse can still happen here.
 export function codexThreadOptions(opts: AgentSessionOptions): ThreadOptions {
   const web = opts.allowedTools.some((t) => t.startsWith("Web"));
   return {
@@ -71,7 +80,14 @@ export class CodexAgentSession implements Agent {
       if (this.threadFactory) {
         this.thread = this.threadFactory(codexThreadOptions(this.opts));
       } else {
-        if (!this.codex) this.codex = new Codex(codexConstructorOptions(process.env));
+        // Spawn the CLI through Advisor's Seatbelt wrapper. Throws if the
+        // sandbox cannot be installed — guardedRun turns that into a visible
+        // error card, which is the right outcome: an unsandboxed Codex would
+        // read every secret in $HOME and, via MCP tools that bypass its own
+        // `read-only` mode (openai/codex#4152), write anywhere too.
+        if (!this.codex) {
+          this.codex = new Codex(codexConstructorOptions(process.env, codexSandboxWrapper()));
+        }
         this.thread = this.codex.startThread(codexThreadOptions(this.opts));
       }
     }

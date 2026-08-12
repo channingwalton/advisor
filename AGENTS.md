@@ -79,9 +79,13 @@ drove the #21 rework and #12 churn).
   MCP read/search + non-sensitive `$HOME` reads only (symlinks resolved before
   the denylist check); MCP tools fail closed — anything not recognised as a
   read/search is gated by the `allowMcpActions` preference. Do not weaken this
-  silently. Codex (`sidecar/src/codex.ts`) has no per-call hook, so it uses a
-  coarser `sandboxMode: "read-only"` and bypasses `canUseTool` entirely — see
-  DESIGN.md.
+  silently. Codex (`sidecar/src/codex.ts`) has no per-call hook, so it is
+  sandboxed at the process boundary instead: `sidecar/src/codexSandbox.ts`
+  builds a Seatbelt profile from the same `deniedPaths()` list and the CLI runs
+  under `sandbox-exec` via `codexPathOverride`. Its own `sandboxMode:
+  "read-only"` is kept but not relied on — it bounds writes only, and MCP tools
+  bypass it (openai/codex#4152). Residual: Codex can read its own `~/.codex`
+  credentials, which the profile must leave readable for login. See DESIGN.md.
 - User preferences: `~/Library/Application Support/Advisor/config.json`
   (mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts` —
   change both together; `sttLocale` is App-side only, deliberately absent from

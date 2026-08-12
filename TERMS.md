@@ -32,9 +32,21 @@ can:
 
 - search and fetch content from the web;
 - read from and search connectors (MCP servers) you have configured;
-- read non-sensitive files in your home folder;
+- read non-sensitive files in your home folder — agents are blocked from
+  credential and key locations such as `~/.ssh`, `~/.aws`, `~/.gnupg` and your
+  keychains, and cannot write to or delete anything outside their own working
+  state;
 - perform connector actions (send / create / update / …) — but only if you
   enable "Allow MCP actions" in Preferences, which is off by default.
+
+On the Codex backend two of those bounds are enforced differently and one is
+weaker. Advisor runs the Codex CLI inside a macOS sandbox that applies the same
+blocked locations and the same write restriction to the CLI and to everything it
+starts. However, connectors configured in your own `~/.codex/config.toml` are
+not gated by the "Allow MCP actions" preference, and the Codex agent can read
+its own stored provider credentials in `~/.codex`, which must stay readable for
+it to sign in. If either matters to you, use the Claude backend, which applies
+every restriction in-process and per tool call.
 
 You decide which connectors Advisor can reach and which permissions are
 enabled, and you are responsible for those choices and for the consequences of

@@ -1315,6 +1315,43 @@ inherit an orphaned name. Deleting one removes it from folder defaults; the
 recording seed also filters against the current library so a failed/stale metadata
 cleanup cannot put an unknown tag onto a new note.
 
+## Codex runs under a Seatbelt profile (2026-08-10)
+
+The Codex backend used to rely solely on the CLI's own `sandboxMode:
+"read-only"` plus `approvalPolicy: "never"`. That is weaker than it reads.
+Codex's read-only mode is a *modification* boundary, not a read boundary — its
+documentation says the agent "can inspect files", and there is no CLI or SDK
+option to deny reads of particular paths (`ThreadOptions` has none;
+openai/codex#4410 asks for one). So on that backend the whole home directory,
+`~/.ssh` included, was readable, while `networkAccessEnabled` was true whenever
+a component used web tools. Read plus egress is exfiltration. Separately,
+openai/codex#4152 reports MCP tools bypassing both the sandbox mode and the
+approval policy, so a user with a filesystem-writing MCP server in
+`~/.codex/config.toml` had an agent that could write and delete too.
+
+None of that is reachable from the SDK, so the fix moves to the process
+boundary. `codexSandbox.ts` generates a macOS Seatbelt profile from the same
+`deniedPaths()` list the Claude backend's `canUseTool` enforces, writes a small
+wrapper that `exec`s the vendored CLI under `sandbox-exec -f`, and passes that
+wrapper as `codexPathOverride`. Children inherit the profile, so MCP servers and
+any shell command the agent runs are covered by construction rather than by the
+CLI honouring a flag. Writes are denied outright except to Codex's own state,
+the temp roots and `/dev`.
+
+Two things worth keeping in mind. Codex's own state (`~/.codex`,
+`~/.codex-global-state.json`) must stay readable and writable or the CLI cannot
+authenticate or persist threads, so the agent can still read its own provider
+credentials — the one residual the Claude backend's in-process denylist covers
+and this one cannot. And Seatbelt matches *resolved* paths: on a dotfiles-managed
+machine where `~/.codex` symlinks into `~/dotfiles`, a rule naming the link
+matches nothing. That bit during development in the harmless direction (Codex
+could not log in); the same miss on `~/.ssh` would have left the keys readable.
+`sandboxPolicy()` resolves both lists, and `codexSandbox.test.ts` covers the
+symlinked layout alongside the plain one.
+
+Installation failure throws rather than falling back: an unsandboxed Codex is
+the defect this closes, so it must fail the backend, not silently widen it.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
