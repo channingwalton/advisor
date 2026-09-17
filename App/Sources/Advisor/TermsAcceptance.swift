@@ -20,8 +20,7 @@ enum TermsAcceptance {
         needsAcceptance(accepted: AdvisorConfig.load().acceptedTermsVersion)
     }
 
-    /// The blocked-action notice, or nil once accepted — same shape as
-    /// `BetaExpiry.notice` so the gates read alike.
+    /// The blocked-action notice, or nil once accepted.
     static var notice: String? {
         needed ? "Please accept the terms of use first." : nil
     }

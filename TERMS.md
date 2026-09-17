@@ -17,12 +17,9 @@ expressly permits.
 
 ## 2. Beta software
 
-Advisor is currently a free beta. Beta builds are time-limited: each build
-stops recording and answering about one month after release, and you will need
-to download a newer build to continue. Beta features may change or be removed,
-and beta builds may contain defects. Paid subscriptions, when introduced, will
-be covered by an updated version of these terms presented before you
-subscribe.
+Advisor is currently a free beta. Beta features may change or be removed, and
+beta builds may contain defects. Paid subscriptions, when introduced, will be
+covered by an updated version of these terms presented before you subscribe.
 
 ## 3. AI agents act on your Mac, under your control
 

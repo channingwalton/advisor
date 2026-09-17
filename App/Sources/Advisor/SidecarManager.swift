@@ -142,13 +142,6 @@ final class SidecarManager {
     }
 
     private func spawn() {
-        // Beta expiry (issue #67): an expired beta never gets an agent process,
-        // so no path — including crash-restart replay — can reach the AI.
-        if let notice = BetaExpiry.notice {
-            appLog.write("sidecar not started: \(notice)")
-            setStatus(notice)
-            return
-        }
         // Drop any partial NDJSON frame left by a crashed sidecar: otherwise the
         // stale bytes would prefix (and corrupt) the first frame from the new one.
         buffer = Data()
@@ -447,28 +440,13 @@ final class SidecarManager {
         send(["type": "config", "lanes": count])
     }
 
-    /// Message types still deliverable after beta expiry (issue #67): they stop
-    /// or configure existing work rather than initiating or feeding AI —
-    /// blocking `cancel`, in particular, would leave in-flight agents running
-    /// past the limit when a session crosses the expiry boundary.
-    static func allowedAfterExpiry(_ type: String) -> Bool {
-        ["session_end", "cancel", "config"].contains(type)
-    }
-
     /// Returns whether the message was accepted (sidecar up and JSON encodable).
     /// The write itself happens asynchronously on `writeQueue`; a write failure
     /// surfaces on the status line rather than in the return value.
     @discardableResult
     private func send(_ message: [String: Any]) -> Bool {
-        if let notice = BetaExpiry.notice,
-            !Self.allowedAfterExpiry(message["type"] as? String ?? "") {
-            setStatus(notice)
-            return false
-        }
         guard let stdinHandle else {
-            // When the sidecar was deliberately never spawned (beta expired),
-            // keep the expiry notice rather than a confusing "not running".
-            setStatus(BetaExpiry.notice ?? "sidecar not running — message dropped")
+            setStatus("sidecar not running — message dropped")
             return false
         }
         guard var data = try? JSONSerialization.data(withJSONObject: message) else { return false }

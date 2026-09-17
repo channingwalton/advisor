@@ -874,9 +874,8 @@ struct TranscriptView: View {
     /// `session_start`/note). The frozen-timer state holds until audio is live.
     private func resumeRecording() {
         guard let recorder, let stoppedAt, !resuming else { return }
-        // Beta expiry (issue #67): resuming is more recording — same block.
-        // Terms gate likewise — ⌘N can open this window behind the sheet.
-        if let notice = TermsAcceptance.notice ?? BetaExpiry.notice {
+        // Terms gate — ⌘N can open this window behind the sheet.
+        if let notice = TermsAcceptance.notice {
             store.status = notice
             return
         }
@@ -952,9 +951,9 @@ struct TranscriptView: View {
     private func submitQuery() {
         let text = queryText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
-        // Beta expiry (issue #67) and the terms gate: keep the typed question
-        // rather than clearing it into a query that must be refused.
-        if let notice = TermsAcceptance.notice ?? BetaExpiry.notice {
+        // Terms gate: keep the typed question rather than clearing it into a
+        // query that must be refused.
+        if let notice = TermsAcceptance.notice {
             store.status = notice
             return
         }
@@ -1089,9 +1088,8 @@ struct TranscriptView: View {
     /// window and opening a new one from the Sessions browser.
     private func startSession() {
         guard let recorder, sessionStart == nil else { return }
-        // Beta expiry (issue #67): no new recordings past the limit. Terms
-        // gate likewise: no recording before first-run acceptance.
-        if let notice = TermsAcceptance.notice ?? BetaExpiry.notice {
+        // Terms gate: no recording before first-run acceptance.
+        if let notice = TermsAcceptance.notice {
             store.status = notice
             return
         }

@@ -40,13 +40,6 @@ echo "==> stamp version $VERSION ($BUILD)"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$BUILD" "$APP/Contents/Info.plist"
 
-# Beta time limit (issue #67): packaged betas stop recording and all AI
-# interaction one month after packaging (BetaExpiry.swift reads this key).
-# Remove this stamp when cutting the real (non-beta) release.
-BETA_EXPIRY=$(date -u -v+1m +%Y-%m-%d)
-echo "==> stamp beta expiry $BETA_EXPIRY"
-plutil -replace AdvisorBetaExpiry -string "$BETA_EXPIRY" "$APP/Contents/Info.plist"
-
 echo "==> compile app icon"
 # AppIcon.iconset (the PNG source) -> AppIcon.icns in the bundle. Info.plist
 # points at it via CFBundleIconFile/CFBundleIconName = AppIcon.
