@@ -154,7 +154,7 @@ final class AppleSpeechEngine: SpeechEngineProtocol, @unchecked Sendable {
     }
 
     /// Idempotent teardown of the running engine: finish input, finalise+finish
-    /// the analyzer, cancel the results task, and drop analyzer/transcriber/
+    /// the analyzer, drain the results task, and drop analyzer/transcriber/
     /// converter. All optional-chained, so on a fresh engine it's a cheap no-op.
     /// Shared by stop() and the top of start() — a re-entrant start (issue #48)
     /// must dispose the prior engine first, else the orphaned resultsTask keeps
@@ -162,8 +162,15 @@ final class AppleSpeechEngine: SpeechEngineProtocol, @unchecked Sendable {
     private func teardown() async {
         input?.finish()
         input = nil
-        try? await analyzer?.finalizeAndFinishThroughEndOfInput()
-        resultsTask?.cancel()
+        do {
+            try await analyzer?.finalizeAndFinishThroughEndOfInput()
+        } catch {
+            // A failed finalisation may not finish the results sequence.
+            resultsTask?.cancel()
+        }
+        // Finalisation can return before the consumer delivers its last finals.
+        // Cancelling it here used to discard those results during window close.
+        await resultsTask?.value
         resultsTask = nil
         analyzer = nil
         transcriber = nil

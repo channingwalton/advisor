@@ -85,12 +85,19 @@ final class DocumentRequestHandlers {
 }
 
 /// Spawns and supervises the Node sidecar; NDJSON over stdio.
+@MainActor
 final class SidecarManager {
     private var process: Process?
     private var stdinHandle: FileHandle?
     private var buffer = Data()
     private let store: TranscriptStore
     private let sidecarDir = AppResources.sidecarDir
+    private let loadConfig: () -> AdvisorConfig
+    private let readKey: (Keychain.Key) -> String?
+    private let launchProcess: (Process) throws -> Void
+    private let baseEnvironment: [String: String]
+    private var spawnedAuth: [String: String]?
+    private var generation = 0
     /// stdin writes run here, off the main thread: a hung sidecar that stops
     /// draining its stdin must not block the UI on a full-pipe `write`.
     private let writeQueue = DispatchQueue(label: "advisor.sidecar.write")
@@ -112,8 +119,18 @@ final class SidecarManager {
     private var lastLanes: Int?
     private var lastAuto: Bool?
 
-    init(store: TranscriptStore) {
+    init(
+        store: TranscriptStore,
+        loadConfig: @escaping () -> AdvisorConfig = { AdvisorConfig.load() },
+        readKey: @escaping (Keychain.Key) -> String? = { Keychain.read($0) },
+        launchProcess: @escaping (Process) throws -> Void = { try $0.run() },
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
         self.store = store
+        self.loadConfig = loadConfig
+        self.readKey = readKey
+        self.launchProcess = launchProcess
+        baseEnvironment = environment
         // Writing to a sidecar that has died closes its read end → SIGPIPE, which
         // would kill the app. Ignore it; the write throws EPIPE instead, handled
         // below. (Process-global, set once.)
@@ -121,6 +138,7 @@ final class SidecarManager {
     }
 
     func start() {
+        guard process == nil else { return }
         restartAttempts = 0
         stopping = false
         spawn()
@@ -129,19 +147,22 @@ final class SidecarManager {
     /// Environment additions carrying the active provider's API key, read fresh
     /// from config + Keychain at each spawn. Empty for subscription auth (the
     /// default) or when no key is stored, leaving the SDKs on their CLI login.
-    private static func apiKeyEnv() -> [String: String] {
-        let config = AdvisorConfig.load()
+    private func apiKeyEnv() -> [String: String] {
+        let config = loadConfig()
         guard config.authMode == "apiKey" else { return [:] }
         switch config.provider {
         case "codex":
-            if let key = Keychain.read(.openai) { return ["OPENAI_API_KEY": key] }
+            if let key = readKey(.openai) { return ["OPENAI_API_KEY": key] }
         default:
-            if let key = Keychain.read(.anthropic) { return ["ANTHROPIC_API_KEY": key] }
+            if let key = readKey(.anthropic) { return ["ANTHROPIC_API_KEY": key] }
         }
         return [:]
     }
 
-    private func spawn() {
+    private func spawn(auth: [String: String]? = nil) {
+        generation += 1
+        let generation = generation
+        let auth = auth ?? apiKeyEnv()
         // Drop any partial NDJSON frame left by a crashed sidecar: otherwise the
         // stale bytes would prefix (and corrupt) the first frame from the new one.
         buffer = Data()
@@ -149,8 +170,12 @@ final class SidecarManager {
         // Base env + any provider API key (empty unless "API key" auth is selected
         // and a key is stored). The key reaches the SDKs purely through the
         // environment — the sidecar code never sees config secrets.
-        var env = ProcessInfo.processInfo.environment
-        for (key, value) in Self.apiKeyEnv() { env[key] = value }
+        var env = baseEnvironment
+        env["ANTHROPIC_API_KEY"] = nil
+        env["OPENAI_API_KEY"] = nil
+        env["ADVISOR_CHILD_API_KEY"] = nil
+        env["ADVISOR_CHILD_API_KEY_NAME"] = nil
+        for (key, value) in auth { env[key] = value }
         if let node = AppResources.bundledNode {
             // Packaged app: run the bundled Node directly; no system Node needed.
             // Child processes the Agent SDK spawns reuse this via process.execPath.
@@ -159,10 +184,22 @@ final class SidecarManager {
             let nodeDir = URL(fileURLWithPath: node).deletingLastPathComponent().path
             env["PATH"] = nodeDir + ":" + (env["PATH"] ?? "/usr/bin:/bin")
         } else {
-            // Dev checkout: resolve `node` from the login shell PATH (zsh -l
-            // re-sources the profile, so an explicit env here doesn't lose PATH).
+            // The login profile supplies Node's PATH but may also export API
+            // keys. Restore the selected authentication after it runs, without
+            // putting a secret in command arguments or the NDJSON protocol.
+            if let (name, key) = auth.first {
+                env["ADVISOR_CHILD_API_KEY_NAME"] = name
+                env["ADVISOR_CHILD_API_KEY"] = key
+            }
             p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            p.arguments = ["-lc", "exec node dist/main.js"]
+            p.arguments = ["-lc", """
+                unset ANTHROPIC_API_KEY OPENAI_API_KEY
+                if [[ -n "$ADVISOR_CHILD_API_KEY_NAME" ]]; then
+                    export "$ADVISOR_CHILD_API_KEY_NAME=$ADVISOR_CHILD_API_KEY"
+                fi
+                unset ADVISOR_CHILD_API_KEY ADVISOR_CHILD_API_KEY_NAME
+                exec node dist/main.js
+                """]
         }
         p.environment = env
         p.currentDirectoryURL = URL(fileURLWithPath: sidecarDir)
@@ -176,7 +213,10 @@ final class SidecarManager {
         outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            self?.consume(data)
+            Task { @MainActor in
+                guard let self, self.generation == generation else { return }
+                self.consume(data)
+            }
         }
         errPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
@@ -188,12 +228,15 @@ final class SidecarManager {
             outPipe.fileHandleForReading.readabilityHandler = nil
             errPipe.fileHandleForReading.readabilityHandler = nil
             appLog.flushSidecar()   // emit any buffered partial stderr line
-            Task { @MainActor in self?.handleTermination(proc.terminationStatus) }
+            Task { @MainActor in
+                self?.handleTermination(proc.terminationStatus, generation: generation)
+            }
         }
         do {
-            try p.run()
+            try launchProcess(p)
             process = p
             stdinHandle = inPipe.fileHandleForWriting
+            spawnedAuth = auth
             lastSpawn = Date()
         } catch {
             // The process never started, so its terminationHandler will never fire.
@@ -201,14 +244,18 @@ final class SidecarManager {
             // during restart() strands the sidecar with no recovery (issue #63).
             outPipe.fileHandleForReading.readabilityHandler = nil
             errPipe.fileHandleForReading.readabilityHandler = nil
-            Task { @MainActor [weak self] in self?.handleSpawnFailure(error) }
+            Task { @MainActor [weak self] in
+                self?.handleSpawnFailure(error, generation: generation)
+            }
         }
     }
 
     @MainActor
-    private func handleTermination(_ code: Int32) {
+    private func handleTermination(_ code: Int32, generation: Int) {
+        guard self.generation == generation else { return }
         stdinHandle = nil
         process = nil
+        spawnedAuth = nil
         documentHandlers.failAll(
             reason: stopping ? "sidecar stopped" : "sidecar crashed (\(code))")
         if stopping { stopping = false; return } // deliberate stop()
@@ -230,9 +277,11 @@ final class SidecarManager {
     /// terminationHandler will fire, so drive recovery from here on the same
     /// backoff budget rather than leaving the sidecar stranded.
     @MainActor
-    private func handleSpawnFailure(_ error: Error) {
+    private func handleSpawnFailure(_ error: Error, generation: Int) {
+        guard self.generation == generation else { return }
         stdinHandle = nil
         process = nil
+        spawnedAuth = nil
         documentHandlers.failAll(
             reason: stopping ? "sidecar stopped" : "sidecar failed to start: \(error)")
         if stopping { stopping = false; return } // stopped during the backoff window
@@ -251,7 +300,9 @@ final class SidecarManager {
         let attempt = restartAttempts
         let delay = min(8.0, pow(2.0, Double(attempt - 1))) // 1, 2, 4, 8, 8 s
         store.status = "\(reason); restarting (\(attempt)/\(maxRestarts))…"
+        let generation = generation
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard self?.generation == generation else { return }
             self?.restart()
         }
     }
@@ -264,7 +315,7 @@ final class SidecarManager {
         // Replay the session context the running conversation depends on.
         if let lastLanes { sendLanes(lastLanes) }
         if let lastAuto { sendAuto(lastAuto) }
-        if let lastSessionId { sendSessionStart(lastSessionId, context: lastSessionContext) }
+        if let lastSessionId { sendSessionStartFrame(lastSessionId, context: lastSessionContext) }
     }
 
     @MainActor
@@ -272,7 +323,14 @@ final class SidecarManager {
         stopping = true
         lastSessionId = nil
         lastSessionContext = ""
+        discardProcess()
         documentHandlers.failAll(reason: "sidecar stopped")
+    }
+
+    private func discardProcess() {
+        // Invalidate callbacks before requesting exit. Old termination/output
+        // and backoff callbacks must never clear or restart the replacement.
+        generation += 1
         // Close on writeQueue so it serialises with in-flight async writes (a
         // close racing a write mid-syscall is an fd-reuse hazard). sidecar exits
         // on stdin close.
@@ -280,6 +338,7 @@ final class SidecarManager {
         stdinHandle = nil
         if let process, process.isRunning { process.terminate() } // backstop: no orphan
         process = nil
+        spawnedAuth = nil
     }
 
     // MARK: outbound
@@ -287,6 +346,21 @@ final class SidecarManager {
     func sendSessionStart(_ id: String, context: String = "") {
         lastSessionId = id
         lastSessionContext = context // replayed verbatim if the sidecar restarts
+        let auth = apiKeyEnv()
+        if process == nil || spawnedAuth != auth {
+            discardProcess()
+            documentHandlers.failAll(reason: "authentication changed — request cancelled")
+            stopping = false
+            restartAttempts = 0
+            spawn(auth: auth)
+            guard process != nil else { return } // recovery replays session_start
+            if let lastLanes { sendLanes(lastLanes) }
+            if let lastAuto { sendAuto(lastAuto) }
+        }
+        sendSessionStartFrame(id, context: context)
+    }
+
+    private func sendSessionStartFrame(_ id: String, context: String) {
         var msg: [String: Any] = [
             "type": "session_start", "sessionId": id, "ts": Date().timeIntervalSince1970,
         ]
@@ -451,19 +525,22 @@ final class SidecarManager {
         }
         guard var data = try? JSONSerialization.data(withJSONObject: message) else { return false }
         data.append(0x0A)
+        let generation = generation
         writeQueue.async { [weak self] in
             do {
                 try stdinHandle.write(contentsOf: data)
             } catch {
-                self?.setStatus("sidecar write failed: \(error.localizedDescription)")
+                Task { @MainActor in
+                    guard let self, self.generation == generation else { return }
+                    self.store.status = "sidecar write failed: \(error.localizedDescription)"
+                }
             }
         }
         return true
     }
 
-    /// store is @MainActor; send() may be called off the main thread.
     private func setStatus(_ s: String) {
-        Task { @MainActor in self.store.status = s }
+        store.status = s
     }
 
     // MARK: inbound
@@ -487,7 +564,7 @@ final class SidecarManager {
                 let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                 let type = obj["type"] as? String
             else { continue }
-            Task { @MainActor in self.handle(type: type, obj) }
+            handle(type: type, obj)
         }
     }
 
@@ -495,7 +572,7 @@ final class SidecarManager {
     /// trailing partial line. Pure so the NDJSON framing — partial-line assembly
     /// across chunks, multiple frames per chunk — is testable without the live
     /// pipe (issue #65). The caller keeps `remainder` as the next chunk's prefix.
-    static func ndjsonFrames(_ buffer: Data) -> (frames: [Data], remainder: Data) {
+    nonisolated static func ndjsonFrames(_ buffer: Data) -> (frames: [Data], remainder: Data) {
         var frames: [Data] = []
         var rest = buffer
         while let nl = rest.firstIndex(of: 0x0A) {

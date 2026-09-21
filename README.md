@@ -193,7 +193,9 @@ In the recording window, click **Listen**. Words appear live in grey as they're
 spoken, replaced by
 finalised sentences; cards appear inline when the assistant decides something
 is worth answering, checking, or explaining — or when you ask via the query
-box. The feed reads as a stack of cards: each run of conversation between two
+box. If microphone permission or speech startup fails, fix the reported problem
+and press **Resume**; failed speech recovery also leaves Resume available and
+keeps the existing transcript. The feed reads as a stack of cards: each run of conversation between two
 cards sits in its own recessed transcript card, so transcript and answer cards
 are visually distinct. The **Context** button (before or during a session) holds an optional
 **name** — a short label that titles the session in the browser — and a context
@@ -240,7 +242,10 @@ a session by dragging its row onto a folder, or via its **right-click** menu →
 **New Folder…**). Right-click a folder header to rename or delete it — deleting a
 folder moves its sessions back out and keeps them. Folders are real
 sub-directories under the storage folder, so they show in Finder too. The session
-currently being recorded can't be filed until it has finished — but you can
+owned by the Recording window cannot be re-filed until that window closes.
+Its containing folder cannot be renamed or deleted either, including while stopped.
+Closing drains the last speech results before saving and releasing the note;
+a reopened Recording window waits for that save. You can
 **start** a recording already in a folder: the red **record button** on a folder
 header opens the recording window filed into that folder, so its note is saved
 there straight away (the recording window shows the target folder). The folder is
@@ -306,12 +311,16 @@ have the `codex` CLI logged in.
 Codex CLI). On a machine with no CLI login, switch **Authentication** to *API
 key* in Preferences and paste an Anthropic or OpenAI key (whichever matches the
 selected provider). The key is stored in your macOS Keychain — never in
-`config.json` — and injected into the sidecar's environment at launch
-(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). Preferences validates the key directly
+`config.json` — and injected into the sidecar's environment
+(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). Authentication mode, key replacements
+and provider changes apply when the next recording session starts: Advisor
+reloads the selected key and replaces the sidecar only when its authentication
+changes. Returning to subscription removes both provider API-key overrides.
+Preferences validates the key directly
 against the provider's models endpoint when you enter it, showing inline status
 and an alert on rejection, so an invalid key surfaces immediately rather than as
 a mid-session research error. Note that API-key usage is billed to
-that key, not your subscription. Changing it applies on the next Listen.
+that key, not your subscription.
 
 Advisor itself knows nothing about your notes: the research agents load your
 own Claude configuration (`~/.claude/CLAUDE.md`), which is where vault

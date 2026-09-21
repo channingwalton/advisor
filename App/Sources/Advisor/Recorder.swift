@@ -158,6 +158,9 @@ final class Recorder: @unchecked Sendable {
     private let requestMicPermission: @Sendable () async -> Bool
     private let requestSystemAccess: @MainActor @Sendable () -> Bool
     private let sttQueue = DispatchQueue(label: "advisor.stt")
+    /// Counts a final from its engine callback through echo delay and the
+    /// main-actor store write, so stop cannot finish with unsaved text queued.
+    private let pendingAcceptance = DispatchGroup()
     // These flags are read on the realtime audio/sysaudio capture threads and
     // written from the control path (start/stop/mute), so they are atomic to
     // avoid a data race. Relaxed ordering: each is independent, no flag guards
@@ -402,6 +405,7 @@ final class Recorder: @unchecked Sendable {
     /// produced under; it rides through to the store write, which drops it if the
     /// session has since moved on.
     private func acceptAsync(_ text: String, from source: Source, gen: Int) {
+        pendingAcceptance.enter()
         let spokenEnd = Date()
         appLog.write("[advisor] apple(\(source)): \"\(text)\"")
         Task { @MainActor in
@@ -416,7 +420,10 @@ final class Recorder: @unchecked Sendable {
     /// Common post-STT path: junk filter, echo dedup, store. Call on sttQueue.
     private func accept(_ text: String, from source: Source, spokenEnd: Date, gen: Int) {
         let text = Self.cleanedTranscript(text)
-        guard !text.isEmpty, !Self.isJunk(text) else { return }
+        guard !text.isEmpty, !Self.isJunk(text) else {
+            pendingAcceptance.leave()
+            return
+        }
 
         let tokens = Self.tokens(text)
         switch source {
@@ -429,6 +436,7 @@ final class Recorder: @unchecked Sendable {
         case .me:
             if systemActive.load(ordering: .relaxed), isEcho(tokens) {
                 appLog.write("[advisor] echo suppressed: \"\(text)\"")
+                pendingAcceptance.leave()
                 return
             }
         }
@@ -436,6 +444,7 @@ final class Recorder: @unchecked Sendable {
         let latency = Int(Date().timeIntervalSince(spokenEnd) * 1000)
         let distinctiveSet = Set(Self.distinctive(tokens))
         Task { @MainActor in
+            defer { self.pendingAcceptance.leave() }
             // Drop the write if the session moved on while this was queued (the
             // me-delay, or the engine's post-stop flush) — the gate that keeps the
             // previous conversation out of the next session.
@@ -554,9 +563,11 @@ final class Recorder: @unchecked Sendable {
     /// True when the utterance substantially overlaps a recent `them` utterance.
     private func isEcho(_ tokens: [String]) -> Bool {
         let mine = Set(Self.distinctive(tokens))
-        guard !mine.isEmpty else { return true } // nothing distinctive — junk
         let now = Date()
         recentThem.removeAll { now.timeIntervalSince($0.time) > 15 }
+        // Short replies carry meaning even without a long word. Only an exact
+        // recent system utterance provides enough evidence to call them echoes.
+        if mine.isEmpty { return recentThem.contains { $0.tokens == tokens } }
         return recentThem.contains { entry in
             Self.pairMatch(mine, Set(Self.distinctive(entry.tokens)))
         }
@@ -684,7 +695,7 @@ final class Recorder: @unchecked Sendable {
             store.micMuted = false
             store.volatile = [:]
             store.status = status
-            return Task { @MainActor in }
+            return enqueueLifecycle { await self.drainTranscripts() }
         }
 
         desiredRunning = false
@@ -713,6 +724,7 @@ final class Recorder: @unchecked Sendable {
         // system source before touching either plain-state speech sink.
         await stopSystem()
         await stopSinksIfNeeded()
+        await drainTranscripts()
         stopQueued = false
         guard !desiredRunning else { return }
         store.status = pendingStopStatus
@@ -731,6 +743,14 @@ final class Recorder: @unchecked Sendable {
         await appleMic.stop()
         await appleSys.stop()
         sinksMayBeActive = false
+    }
+
+    /// Call after both result streams finish: no new finals can enter the group.
+    /// notify suspends without blocking the main actor needed by pending writes.
+    func drainTranscripts() async {
+        await withCheckedContinuation { continuation in
+            pendingAcceptance.notify(queue: sttQueue) { continuation.resume() }
+        }
     }
 
     /// Mute/unmute the local mic. System audio keeps being captured and

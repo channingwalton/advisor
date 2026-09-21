@@ -46,6 +46,13 @@ export function codexThreadOptions(opts: AgentSessionOptions): ThreadOptions {
   };
 }
 
+interface PendingTask {
+  task: string;
+  onText?: (accumulated: string) => void;
+  timeoutMs: number;
+  resolve: (result: TaskResult) => void;
+}
+
 /**
  * A long-lived Codex thread fed one task at a time. Mirrors AgentSession's
  * contract: run() resolves with the answer text (or "" on failure) and never
@@ -58,7 +65,8 @@ export class CodexAgentSession implements Agent {
   private codex?: Codex;
   private thread?: Thread;
   private firstTurn = true;
-  private controller?: AbortController;
+  private pending: PendingTask[] = [];
+  private active?: { stop: (error?: string) => void };
 
   constructor(
     private readonly opts: AgentSessionOptions,
@@ -66,13 +74,23 @@ export class CodexAgentSession implements Agent {
   ) {}
 
   reset(): void {
-    this.controller?.abort();
+    // Detach queued tasks before stopping the active turn can drain the queue.
+    const pending = this.pending.splice(0);
     this.thread = undefined;
     this.firstTurn = true;
+    this.active?.stop("agent session reset");
+    for (const task of pending) {
+      task.resolve({ text: "", error: "agent session reset" });
+    }
   }
 
   async interrupt(): Promise<void> {
-    this.controller?.abort();
+    // A lane assigns its card before run(), so that card can still be queued
+    // behind a warm-up. Explicit cancellation must discard that queued work,
+    // whereas an internal warm-up timeout may advance it.
+    const pending = this.pending.splice(0);
+    this.active?.stop();
+    for (const task of pending) task.resolve({ text: "" });
   }
 
   private ensure(): Thread {
@@ -94,17 +112,23 @@ export class CodexAgentSession implements Agent {
     return this.thread;
   }
 
-  async run(
+  run(
     task: string,
     onText?: (accumulated: string) => void,
     timeoutMs = 180_000
   ): Promise<TaskResult> {
-    const thread = this.ensure();
-    const input = this.firstTurn ? `${this.opts.systemPrompt}\n\n${task}` : task;
-    this.firstTurn = false;
+    return new Promise((resolve) => {
+      this.pending.push({ task, onText, timeoutMs, resolve });
+      this.drain();
+    });
+  }
+
+  private drain(): void {
+    if (this.active) return;
+    const task = this.pending.shift();
+    if (!task) return;
 
     const controller = new AbortController();
-    this.controller = controller;
     // Accumulate agent_message items by id: a turn can emit more than one, and
     // each item.updated carries that item's full text so far. Keying by id means
     // streaming updates overwrite their own item while distinct items concatenate
@@ -112,63 +136,63 @@ export class CodexAgentSession implements Agent {
     const messages = new Map<string, string>();
     const joined = (): string => [...messages.values()].join("\n\n");
     let settled = false;
-    const finish = (resolve: (r: TaskResult) => void, error?: string): void => {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const finish = (error?: string): void => {
       if (settled) return;
       settled = true;
-      resolve({ text: joined(), error });
+      clearTimeout(timeoutHandle);
+      this.active = undefined;
+      task.resolve({ text: joined(), error });
+      this.drain();
     };
-
-    const turn = new Promise<TaskResult>((resolve) => {
-      void (async () => {
-        try {
-          const { events } = await thread.runStreamed(input, { signal: controller.signal });
-          for await (const ev of events) {
-            if (ev.type === "item.updated" || ev.type === "item.completed") {
-              if (ev.item.type === "agent_message") {
-                messages.set(ev.item.id, ev.item.text);
-                onText?.(joined());
-              }
-            } else if (ev.type === "turn.failed") {
-              throw new Error(ev.error.message);
-            } else if (ev.type === "error") {
-              throw new Error(ev.message);
-            }
-          }
-          finish(resolve);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          if (!controller.signal.aborted) {
-            log(`${this.opts.name}: codex turn failed: ${err}`);
-            // Drop the (possibly dead) thread so the next task starts fresh and
-            // re-sends the system prompt, mirroring the Claude backend.
-            this.thread = undefined;
-            this.firstTurn = true;
-            finish(resolve, message);
-          } else {
-            finish(resolve);
-          }
-        }
-      })();
-    });
-
-    let timeoutHandle!: NodeJS.Timeout;
-    const timeout = new Promise<TaskResult>((resolve) => {
-      timeoutHandle = setTimeout(() => {
-        if (!settled) {
-          log(`${this.opts.name}: codex task timed out`);
-          controller.abort();
-          finish(resolve, "timed out");
-        }
-      }, timeoutMs);
-    });
+    const dropThread = (): void => {
+      this.thread = undefined;
+      this.firstTurn = true;
+    };
+    this.active = {
+      stop: (error) => {
+        controller.abort();
+        // An aborted CLI may still yield events or persist its last input.
+        // Never resume that thread while the abandoned stream is draining.
+        dropThread();
+        finish(error);
+      },
+    };
+    timeoutHandle = setTimeout(() => {
+      log(`${this.opts.name}: codex task timed out`);
+      this.active?.stop("timed out");
+    }, task.timeoutMs);
     timeoutHandle.unref();
 
-    try {
-      return await Promise.race([turn, timeout]);
-    } finally {
-      // Do not retain this run or let a later reset abort its completed process.
-      clearTimeout(timeoutHandle);
-      if (this.controller === controller) this.controller = undefined;
-    }
+    void (async () => {
+      try {
+        // Do not select a thread or consume its first-turn prompt until this
+        // task owns the session. The SDK only gets its ID at thread.started.
+        const thread = this.ensure();
+        const input = this.firstTurn ? `${this.opts.systemPrompt}\n\n${task.task}` : task.task;
+        this.firstTurn = false;
+        const { events } = await thread.runStreamed(input, { signal: controller.signal });
+        for await (const ev of events) {
+          if (settled) break;
+          if (ev.type === "item.updated" || ev.type === "item.completed") {
+            if (ev.item.type === "agent_message") {
+              messages.set(ev.item.id, ev.item.text);
+              task.onText?.(joined());
+            }
+          } else if (ev.type === "turn.failed") {
+            throw new Error(ev.error.message);
+          } else if (ev.type === "error") {
+            throw new Error(ev.message);
+          }
+        }
+        finish();
+      } catch (err) {
+        if (settled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        log(`${this.opts.name}: codex turn failed: ${err}`);
+        dropThread();
+        finish(message);
+      }
+    })();
   }
 }

@@ -523,16 +523,30 @@ enum SessionArchive {
         }
     }
 
+    /// A folder mutation must not move a note still owned by the live writer.
+    /// Resolve aliases and include the separator so `Workshops` is not `Work`.
+    static func folderContains(
+        _ note: URL?, folder: String, in directory: URL = SessionArchive.directory
+    ) -> Bool {
+        guard let note, let safe = sanitiseFolderName(folder) else { return false }
+        let parent = directory.appendingPathComponent(safe, isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL.path.lowercased()
+        let path = note.resolvingSymlinksInPath().standardizedFileURL.path.lowercased()
+        return path.hasPrefix(parent + "/")
+    }
+
     /// Rename folder `old` to `new` under `directory` (issue #25) by moving the
     /// directory — its notes travel with it. Returns false for an unusable `new`
     /// name, a missing source, or a collision with a *different* existing folder. A
     /// case-only rename (`work` → `Work`) on a case-insensitive volume is allowed.
     @discardableResult
     static func renameFolder(
-        from old: String, to new: String, in directory: URL = SessionArchive.directory
+        from old: String, to new: String, in directory: URL = SessionArchive.directory,
+        excluding ownedNote: URL? = nil
     ) -> Bool {
         guard let newName = sanitiseFolderName(new),
             let oldName = sanitiseFolderName(old) else { return false }
+        guard !folderContains(ownedNote, folder: oldName, in: directory) else { return false }
         let fm = FileManager.default
         let src = directory.appendingPathComponent(oldName, isDirectory: true)
         let dst = directory.appendingPathComponent(newName, isDirectory: true)
@@ -551,8 +565,12 @@ enum SessionArchive {
     /// removed only if nothing remains in it — so unknown non-session files there
     /// are never destroyed. Returns true when the directory was removed.
     @discardableResult
-    static func deleteFolder(_ name: String, in directory: URL = SessionArchive.directory) -> Bool {
+    static func deleteFolder(
+        _ name: String, in directory: URL = SessionArchive.directory,
+        excluding ownedNote: URL? = nil
+    ) -> Bool {
         guard let safe = sanitiseFolderName(name) else { return false }
+        guard !folderContains(ownedNote, folder: safe, in: directory) else { return false }
         let fm = FileManager.default
         let folderURL = directory.appendingPathComponent(safe, isDirectory: true)
         for file in list(in: folderURL) {

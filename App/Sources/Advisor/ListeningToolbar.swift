@@ -8,6 +8,7 @@ import SwiftUI
 /// collapse to icon-only (ViewThatFits) rather than letting their text wrap/squash.
 struct ListeningToolbar: View {
     @ObservedObject var store: TranscriptStore
+    let recordingState: RecordControl.State
     let sessionStart: Date?
     /// When stopped, the moment capture stopped — freezes the timer display until
     /// the session is resumed. Nil while recording or idle.
@@ -53,7 +54,7 @@ struct ListeningToolbar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            switch RecordControl.state(listening: store.listening, stopped: stoppedAt != nil) {
+            switch recordingState {
             case .recording: recordCluster
             case .stopped: resumeCluster
             case .idle: listenButton

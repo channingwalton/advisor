@@ -137,6 +137,45 @@ Apple SpeechAnalyzer/SpeechTranscriber (macOS 26) added as the **default** engin
 
 Volatile results are enabled: in-progress words render grey/italic at the feed tail and are replaced by the finalised sentence (live-captioning feel). Mic echo delay is 1.5 s on Apple (vs 4 s for whisper) since both streams finalise near-simultaneously.
 
+### Recording ownership and finalisation (2026-09-21, issues #78/#79)
+
+The writer owns its note until the Recording window closes, including while
+stopped or waiting for agent cards. Folder rename/delete commands reject any
+folder containing that note, and their menus are disabled. The command rechecks
+ownership when an open confirmation is submitted.
+
+Window disappearance starts an app-owned close task. It stops capture, awaits
+both speech-result consumers, then drains pending transcript acceptance through
+the microphone echo delay and the main-actor store writes. Only then does it
+save, release the note and advance the session generation. Reopening awaits this
+task before rebuilding the recorder; late old-generation callbacks remain gated.
+The Wait close path drains speech first and retains the writer while existing
+agent cards finish. Draining finals does not start new agent work.
+
+### Short replies and recording retries (2026-09-21, issues #80/#83)
+
+Absence of distinctive words is not evidence of echo. Short microphone replies
+are suppressed only when their token sequence exactly matches recent system
+speech; longer utterances retain the existing distinctive-word overlap rule.
+
+The recording view delegates start/stop/resume state and timer bookkeeping to
+`RecordingControl`, shared by the toolbar and Space shortcut. Failed starts
+become stopped sessions when the start operation completes; a failed automatic
+recovery observes capture stopping. Both expose Resume with the existing note,
+context and generation intact. A start in progress remains latched against
+duplicate retries, and closing cancels its completion bookkeeping.
+
+### Codex session ordering (2026-09-21, issue #81)
+
+Each Codex session queues warm-ups and real requests, selecting its SDK thread
+and first-turn instructions only when the request reaches the head. The next
+turn waits for completion, not merely `thread.started`. Execution timeouts start
+when the turn begins. Reset and explicit cancellation settle active and queued
+work without dispatching queued requests. An internal timeout advances the queue.
+Both cancellation and timeout retire the active thread so the next request receives fresh instructions.
+Late events from abandoned streams cannot replace context or update cards.
+Independent sessions still run concurrently.
+
 ## Agent sandboxing (2026-06-13)
 
 Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: web tools auto-allowed; Read/Grep/Glob restricted to non-sensitive paths under `$HOME` (denylist: .ssh, .aws, .claude, .codex, keychains, …); Bash/Write/Edit/etc. denied and disallowed. Verified: `/etc/passwd` read denied, notes queries unaffected. A hard OS boundary (OrbStack/Docker container, app spawning `docker run -i`) remains a future option — note the OAuth credentials sit inside any such boundary.
@@ -249,6 +288,30 @@ mid-session. `AuthValidator` now tests a key directly against the provider's
 models endpoint (Anthropic `x-api-key`, OpenAI bearer) when entered in
 Preferences, showing inline status and an alert on rejection. The key field is a
 visible rounded-border input.
+
+### Authentication refresh at session start (2026-09-21, issue #82)
+
+The sidecar outlives individual recordings, so reading authentication only at
+app launch left mode changes, replacement keys and provider changes unapplied.
+`sendSessionStart` now reads the selected provider's current Keychain key and
+compares the effective API-key overrides with those used at spawn. Unchanged
+authentication keeps the process; changed authentication replaces it before
+sending the new session, replaying lane and auto settings first. A required
+replacement cancels any in-flight saved-document request.
+
+Both provider API-key variables are removed from the inherited environment
+before applying the selected key. Subscription mode therefore leaves neither
+override. The developer launch still uses a login shell to find Node, but
+reapplies the selection after loading the shell profile, which may itself
+export keys. Temporary environment variables carry the selection through that
+step and are removed before Node starts. Keys remain in Keychain and process
+environment, never command arguments, config or NDJSON messages.
+
+Process state and incoming frames are confined to the main actor. Each spawn
+has a generation: termination, spawn-failure, output, write-error and delayed
+restart callbacks from retired generations cannot disturb the replacement.
+Tests exercise real harmless child processes and pipes with placeholder keys,
+including a developer login profile that exports conflicting keys.
 
 ## Listening view redesign (2026-06-14)
 

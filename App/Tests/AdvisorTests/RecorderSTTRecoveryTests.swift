@@ -34,6 +34,7 @@ private final class FakeSpeechEngine: SpeechEngineProtocol, @unchecked Sendable 
         var nextStartError: Error?
         var startDelayNanos: UInt64 = 0
         var stopDelayNanos: UInt64 = 0
+        var finalOnStop: String?
     }
 
     private let state = Mutex(State())
@@ -103,6 +104,12 @@ private final class FakeSpeechEngine: SpeechEngineProtocol, @unchecked Sendable 
         if delay > 0 {
             try? await Task.sleep(nanoseconds: delay)
         }
+        let final = state.withLock { state -> (String, Int)? in
+            guard let text = state.finalOnStop, let token = state.startTokens.last else { return nil }
+            state.finalOnStop = nil
+            return (text, token.session)
+        }
+        if let (text, token) = final { onFinal?(text, token) }
         state.withLock {
             $0.activeStops -= 1
             $0.activeTransitions -= 1
@@ -127,6 +134,10 @@ private final class FakeSpeechEngine: SpeechEngineProtocol, @unchecked Sendable 
 
     func setStopDelay(nanoseconds: UInt64) {
         state.withLock { $0.stopDelayNanos = nanoseconds }
+    }
+
+    func finaliseOnStop(_ text: String) {
+        state.withLock { $0.finalOnStop = text }
     }
 }
 
@@ -242,8 +253,11 @@ private struct RecorderHarness {
 }
 
 @MainActor
-private func makeHarness(sessionGeneration: Int) throws -> RecorderHarness {
-    let store = TranscriptStore()
+private func makeHarness(
+    sessionGeneration: Int, store suppliedStore: TranscriptStore? = nil,
+    requestMicPermission: @escaping @Sendable () async -> Bool = { true }
+) throws -> RecorderHarness {
+    let store = suppliedStore ?? TranscriptStore()
     store.sessionGeneration = sessionGeneration
     let events = EventLog()
     let micEngine = FakeSpeechEngine(name: "mic", events: events)
@@ -256,7 +270,7 @@ private func makeHarness(sessionGeneration: Int) throws -> RecorderHarness {
         sysEngine: sysEngine,
         capture: micCapture,
         systemCapture: systemCapture,
-        requestMicPermission: { true },
+        requestMicPermission: requestMicPermission,
         requestSystemAccess: { true })
     return RecorderHarness(
         store: store,
@@ -266,6 +280,214 @@ private func makeHarness(sessionGeneration: Int) throws -> RecorderHarness {
         micCapture: micCapture,
         systemCapture: systemCapture,
         events: events)
+}
+
+@Suite(.serialized)
+struct RecordingPersistenceTests {
+    @MainActor
+    @Test func req_recording_retry_permission() async throws {
+        let permission = Mutex(false)
+        let harness = try makeHarness(
+            sessionGeneration: 40, requestMicPermission: { permission.withLock { $0 } })
+        let control = RecordingControl(store: harness.store)
+        await control.start(recorder: harness.recorder, device: nil, captureSystem: false)?.value
+        #expect(harness.store.status == "microphone permission denied")
+        #expect(control.state == .stopped)
+        #expect(control.stoppedAt != nil)
+        #expect(!control.isStarting)
+
+        permission.withLock { $0 = true }
+        let retry = try #require(control.resume(
+            recorder: harness.recorder, device: nil, captureSystem: false))
+        await retry.value
+        #expect(control.state == .recording)
+        #expect(control.stoppedAt == nil)
+        #expect(harness.store.sessionGeneration == 40)
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func req_recording_retry_start() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-retry-start-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let harness = try makeHarness(sessionGeneration: 41)
+        let writer = SessionWriter(store: harness.store, resolveDirectory: { root })
+        let control = RecordingControl(store: harness.store)
+        writer.start(context: "Preserved session context")
+        let url = try #require(writer.currentFileURL)
+        harness.micEngine.failNextStart(speechHelperError())
+        await control.start(recorder: harness.recorder, device: nil, captureSystem: false)?.value
+        #expect(control.state == .stopped)
+        let retry = try #require(control.resume(
+            recorder: harness.recorder, device: nil, captureSystem: false))
+        await retry.value
+        #expect(control.state == .recording)
+        #expect(writer.currentFileURL == url)
+        #expect(harness.store.sessionGeneration == 41)
+        harness.micEngine.onFinal?("Retry records into the original note", 41)
+        await harness.recorder.stop().value
+        writer.end()
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("Preserved session context"))
+        #expect(saved.contains("Retry records into the original note"))
+    }
+
+    @MainActor
+    @Test func req_recording_retry_recovery() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-retry-recovery-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let harness = try makeHarness(sessionGeneration: 42)
+        let writer = SessionWriter(store: harness.store, resolveDirectory: { root })
+        let control = RecordingControl(store: harness.store)
+        writer.start()
+        let url = try #require(writer.currentFileURL)
+        await control.start(recorder: harness.recorder, device: nil, captureSystem: false)?.value
+        harness.micEngine.onFinal?("Transcript before recovery failed", 42)
+        await harness.recorder.drainTranscripts()
+        let before = harness.store.utterances
+        let run = try #require(harness.micEngine.starts.last?.run)
+        harness.micEngine.failNextStart(speechHelperError())
+        harness.micEngine.endUnexpectedly(speechHelperError(), gen: 42, runToken: run)
+        #expect(await eventually { harness.store.status.contains("failed after restart") })
+        #expect(control.state == .stopped)
+
+        let retry = try #require(control.resume(
+            recorder: harness.recorder, device: nil, captureSystem: false))
+        await retry.value
+        #expect(control.state == .recording)
+        #expect(harness.store.utterances == before)
+        #expect(harness.store.sessionGeneration == 42)
+        #expect(writer.currentFileURL == url)
+        harness.micEngine.onFinal?("Transcript after the successful retry", 42)
+        await harness.recorder.stop().value
+        writer.end()
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("Transcript before recovery failed"))
+        #expect(saved.contains("Transcript after the successful retry"))
+    }
+
+    @MainActor
+    @Test func req_echo_short_replies() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-short-replies-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let harness = try makeHarness(sessionGeneration: 19)
+        let writer = SessionWriter(store: harness.store, resolveDirectory: { root })
+        writer.start()
+        let url = try #require(writer.currentFileURL)
+        var forwarded: [String] = []
+        harness.recorder.onUtterance = { forwarded.append($0.text) }
+        await startListening(harness)
+        let replies = ["No.", "Yes.", "I can do it.", "Can you do it?", "Please proceed."]
+        for reply in replies { harness.micEngine.onFinal?(reply, 19) }
+        await harness.recorder.drainTranscripts()
+        #expect(harness.store.utterances.map(\.text) == replies)
+        #expect(forwarded == replies)
+        writer.end()
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        for reply in replies { #expect(saved.contains(reply)) }
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func req_echo_matching_speech() async throws {
+        let harness = try makeHarness(sessionGeneration: 20)
+        await startListening(harness)
+        let echoes = ["No.", "Yes.", "I can do it.", "Please continue the conversation."]
+        for echo in echoes {
+            harness.sysEngine.onFinal?(echo, 20)
+            harness.micEngine.onFinal?(echo, 20)
+        }
+        await harness.recorder.drainTranscripts()
+        #expect(harness.store.utterances.map(\.text) == echoes)
+        #expect(harness.store.utterances.allSatisfy { $0.source == .them })
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func req_close_mic_delay() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-close-delay-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let services = AppServices(resolveDirectory: { root })
+        let harness = try makeHarness(sessionGeneration: 23, store: services.store)
+        services.recorder = harness.recorder
+        services.writer.start()
+        let url = try #require(services.writer.currentFileURL)
+        await startListening(harness)
+
+        harness.micEngine.onFinal?("The last microphone sentence", 23)
+        await services.releaseRecording().value
+
+        #expect(try String(contentsOf: url, encoding: .utf8).contains("The last microphone sentence"))
+        #expect(services.writer.currentFileURL == nil)
+        #expect(services.store.utterances.isEmpty)
+        #expect(services.store.sessionGeneration == 24)
+    }
+
+    @MainActor
+    @Test func req_close_speech_finals() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-close-finals-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let services = AppServices(resolveDirectory: { root })
+        let harness = try makeHarness(sessionGeneration: 25, store: services.store)
+        services.recorder = harness.recorder
+        services.writer.start()
+        let url = try #require(services.writer.currentFileURL)
+        await startListening(harness)
+        harness.micEngine.setStopDelay(nanoseconds: 100_000_000)
+        harness.micEngine.finaliseOnStop("Local final during speech teardown")
+        harness.sysEngine.finaliseOnStop("Remote concluding remarks")
+
+        let close = services.releaseRecording()
+        #expect(await eventually { harness.micEngine.stopCount == 1 })
+        #expect(services.isClosingRecording)
+        #expect(services.writer.currentFileURL == url)
+        #expect(services.store.sessionGeneration == 25)
+        await close.value
+
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("Local final during speech teardown"))
+        #expect(saved.contains("Remote concluding remarks"))
+        #expect(!services.isClosingRecording)
+    }
+
+    @MainActor
+    @Test func req_close_generation_isolation() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-close-reopen-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let services = AppServices(resolveDirectory: { root })
+        let old = try makeHarness(sessionGeneration: 31, store: services.store)
+        services.recorder = old.recorder
+        services.writer.start(folder: "Old")
+        let oldURL = try #require(services.writer.currentFileURL)
+        await startListening(old)
+        old.micEngine.onFinal?("Saved with the previous conversation", 31)
+        services.releaseRecording()
+        // This is the same barrier the reopened Recording view awaits.
+        await services.recordingCloseTask?.value
+
+        let fresh = try makeHarness(sessionGeneration: 33, store: services.store)
+        services.recorder = fresh.recorder
+        services.writer.start(folder: "New")
+        let newURL = try #require(services.writer.currentFileURL)
+        await startListening(fresh, captureSystem: false)
+        old.sysEngine.onFinal?("Stale result must not cross the boundary", 31)
+        await old.recorder.stop().value
+        fresh.micEngine.onFinal?("Only the new conversation belongs here", 33)
+        await services.releaseRecording().value
+
+        let oldSaved = try String(contentsOf: oldURL, encoding: .utf8)
+        let newSaved = try String(contentsOf: newURL, encoding: .utf8)
+        #expect(oldSaved.contains("Saved with the previous conversation"))
+        #expect(newSaved.contains("Only the new conversation belongs here"))
+        #expect(!newSaved.contains("previous conversation"))
+        #expect(!newSaved.contains("Stale result"))
+    }
 }
 
 @MainActor

@@ -362,6 +362,7 @@ struct SessionsView: View {
             folderRenameText = folder
             renamingFolder = folder
         }
+        .disabled(SessionArchive.folderContains(ctx.liveFileURL, folder: folder))
         Button("New Folder…") {
             newFolderName = ""
             fileIntoNewFolder = nil
@@ -369,6 +370,7 @@ struct SessionsView: View {
         }
         Divider()
         Button("Delete Folder", role: .destructive) { deletingFolder = folder }
+            .disabled(SessionArchive.folderContains(ctx.liveFileURL, folder: folder))
     }
 
     /// Primary action: open (or bring forward) the single recording window. The
@@ -653,7 +655,8 @@ struct SessionsView: View {
     /// to the first visible session if it pointed inside the folder, since those
     /// notes' URLs change — reload reconciles it.
     private func renameFolder(_ old: String, to new: String) {
-        SessionArchive.renameFolder(from: old, to: new)
+        guard SessionArchive.renameFolder(from: old, to: new, excluding: ctx.liveFileURL)
+        else { return }
         collapsedFolders.remove(old)
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
@@ -677,7 +680,7 @@ struct SessionsView: View {
 
     /// Delete a folder; its sessions are un-filed back to the root, not deleted.
     private func deleteFolder(_ folder: String) {
-        SessionArchive.deleteFolder(folder)
+        guard SessionArchive.deleteFolder(folder, excluding: ctx.liveFileURL) else { return }
         collapsedFolders.remove(folder)
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }

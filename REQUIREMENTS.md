@@ -14,9 +14,14 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F2. Capture system audio (Zoom/Meet/Teams or anything else playing) without a meeting bot.
 - F3. Run both simultaneously, distinguishing "me" (mic) from "them" (system audio).
 - F4. Start/stop listening with one action; clear visual indicator when live.
+  - A microphone permission denial leaves a working retry in the same Recording window (issue #83). `#recording-retry-permission`
+  - An initial speech-engine failure leaves a working retry without replacing the session note. `#recording-retry-start`
+  - Failed speech recovery leaves Resume available and preserves existing transcript and note ownership. `#recording-retry-recovery`
 
 ### Understanding
 - F5. Stream speech to text continuously with low latency.
+  - Meaningful short microphone replies survive when system capture is enabled but has no matching speech (issue #80). `#echo-short-replies`
+  - Matching system speech still suppresses microphone echoes, including exact short replies. `#echo-matching-speech`
 - F6. Detect, in the transcript stream:
   - questions asked aloud,
   - entities/topics warranting background context (projects, people, tickets, technologies),
@@ -39,6 +44,13 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F16. Session history: transcripts and surfaced items reviewable afterwards, stored as app-managed local markdown files. No writing to the Obsidian Vault (read-only source).
 - F17. Session tags (issue #15): a user-managed library of coloured tags (Preferences), applied to a session from the live toolbar or the browser, shown as coloured pills on session rows and searchable. Stored by name in the note's frontmatter.
 - F17a. Folder tag defaults (issue #76): folders can hold tags from the library; a new recording started from that folder inherits them, with per-session editing still available. Existing sessions and sessions moved into the folder are unchanged.
+- F17b. Owned session folders (issue #78):
+  - Rename and delete are blocked while a folder contains a recording's owned note, including while stopped; subsequent transcript and cards remain saved. `#folder-owned-preserved`
+  - Other folders remain editable, and the protected folder becomes editable once the writer releases its note. `#folder-owned-released`
+- F18. Closing Recording (issue #79):
+  - Save final microphone text already waiting for echo detection before releasing the note. `#close-mic-delay`
+  - Save finals emitted while speech engines finish, retaining note ownership until the final save. `#close-speech-finals`
+  - Retire the old generation only after saving; late old results cannot enter a reopened session. `#close-generation-isolation`
 
 ## Non-functional requirements
 
@@ -52,6 +64,16 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - Denied credential paths remain unreadable through both symlink aliases and their resolved targets. `#sandbox-symlink-read`
   - Recursive searches reject roots containing a resolved denied path. `#sandbox-symlink-search`
   - Ordinary files remain readable, and scoped searches without denied descendants remain permitted. `#sandbox-symlink-permitted`
+- N8. **Codex session ordering (issue #81):**
+  - Warm-ups and requests execute FIFO per session, preserving initial instructions and the conversation thread on later requests. `#codex-session-fifo`
+  - Reset cancels active and queued work; subsequent requests start fresh and ignore late events from abandoned turns. `#codex-session-reset`
+  - Explicit cancellation settles active and queued work without dispatching queued requests; abandoned output cannot reach later cards. `#codex-session-cancel`
+  - Failed startup or turns release the queue and retry with configured instructions. `#codex-session-recovery`
+- N9. **Sidecar authentication (issue #82):**
+  - The next recording session applies the selected authentication mode and current provider key, including key replacements and provider changes. `#sidecar-auth-refresh`
+  - Subscription mode removes both provider API-key overrides from the child environment. `#sidecar-auth-subscription`
+  - Unchanged effective authentication reuses the existing sidecar. `#sidecar-auth-stable`
+  - Late termination, output and retry callbacks from a replaced sidecar cannot affect its replacement. `#sidecar-auth-generation`
 
 ## Architecture decision: MCP server vs standalone
 
