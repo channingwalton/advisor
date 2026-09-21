@@ -48,6 +48,10 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - N4. **Cost:** STT is local (free); LLM cost per listening-hour must be tolerable for daily personal use.
 - N5. **Single user:** no auth, multi-tenancy, or deployment concerns.
 - N6. **Reliability:** capture pipeline must not drop audio during long sessions (1 h+).
+- N7. **Claude credential sandbox (issue #77):**
+  - Denied credential paths remain unreadable through both symlink aliases and their resolved targets. `#sandbox-symlink-read`
+  - Recursive searches reject roots containing a resolved denied path. `#sandbox-symlink-search`
+  - Ordinary files remain readable, and scoped searches without denied descendants remain permitted. `#sandbox-symlink-permitted`
 
 ## Architecture decision: MCP server vs standalone
 

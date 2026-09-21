@@ -1,5 +1,8 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { readPathAllowed, searchRootAllowed, mcpPermission } from "./agent.js";
 
 const HOME = "/home/u";
@@ -86,6 +89,61 @@ test("Read still allows a symlink resolving to a non-sensitive location", () => 
   const okFs = (p: string): string =>
     p === "/home/u/Documents/alias" ? "/home/u/Documents/real" : p;
   assert.equal(readPathAllowed(HOME, HOME, "/home/u/Documents/alias", okFs), true);
+});
+
+// Real symlinks in a synthetic home: credentials may be directories, files,
+// or beneath a symlinked parent. Never touch the user's actual credentials.
+function symlinkedHome(t: TestContext): string {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-claude-sb-")));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  for (const dir of ["dotfiles/.ssh", "dotfiles/cli/gh", "dotfiles/.ssh-notes", "Documents"]) {
+    fs.mkdirSync(path.join(home, dir), { recursive: true });
+  }
+  for (const file of ["dotfiles/.ssh/synthetic-key", "dotfiles/npm-token", "dotfiles/cli/gh/hosts.yml"]) {
+    fs.writeFileSync(path.join(home, file), "synthetic credential");
+  }
+  for (const file of ["Documents/notes.txt", "dotfiles/.ssh-notes/todo.txt"]) {
+    fs.writeFileSync(path.join(home, file), "ordinary notes");
+  }
+  for (const [alias, target] of [
+    [".ssh", "dotfiles/.ssh"],
+    [".npmrc", "dotfiles/npm-token"],
+    [".config", "dotfiles/cli"],
+    ["keys", ".ssh"],
+    ["notes", "Documents"],
+  ]) {
+    fs.symlinkSync(target, path.join(home, alias));
+  }
+  return home;
+}
+
+test("#sandbox-symlink-read denies credential aliases and resolved targets", (t) => {
+  const home = symlinkedHome(t);
+  const denied = [
+    ".ssh", ".ssh/synthetic-key", "dotfiles/.ssh/synthetic-key", "keys/synthetic-key",
+    ".ssh/missing/key", "dotfiles/.ssh/missing/key",
+    ".npmrc", "dotfiles/npm-token", ".config/gh/hosts.yml", "dotfiles/cli/gh/hosts.yml",
+  ];
+  assert.deepEqual(denied.filter((p) => readPathAllowed(home, home, path.join(home, p))), []);
+  assert.deepEqual(denied.filter((p) => readPathAllowed(home, home, p)), []);
+});
+
+test("#sandbox-symlink-search denies roots containing resolved credentials", (t) => {
+  const home = symlinkedHome(t);
+  const denied = [".", ".ssh", "keys", "dotfiles/.ssh", "dotfiles", ".config", "dotfiles/cli"];
+  assert.deepEqual(denied.filter((p) => searchRootAllowed(home, home, path.join(home, p))), []);
+  assert.deepEqual(denied.filter((p) => searchRootAllowed(home, home, p)), []);
+});
+
+test("#sandbox-symlink-permitted keeps ordinary files and scoped searches accessible", (t) => {
+  const home = symlinkedHome(t);
+  for (const dir of ["Documents", "notes", "dotfiles/.ssh-notes"]) {
+    const file = path.join(dir, dir.endsWith(".ssh-notes") ? "todo.txt" : "notes.txt");
+    assert.equal(readPathAllowed(home, home, path.join(home, file)), true, file);
+    assert.equal(readPathAllowed(home, home, file), true, file);
+    assert.equal(searchRootAllowed(home, home, path.join(home, dir)), true, dir);
+    assert.equal(searchRootAllowed(home, home, dir), true, dir);
+  }
 });
 
 test("MCP gate denies action tools when actions are disabled", () => {

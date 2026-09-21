@@ -324,11 +324,13 @@ search, the user's MCP connectors (Slack, Jira, … — read/search only unless
 "Allow connector actions" is enabled), and read-only access to non-sensitive
 files in the home directory. No shell, no writes; credential paths (~/.ssh,
 ~/.aws, ~/.claude, ~/.codex, keychains, …) are denied (case-insensitively, with
-symlinks resolved so a link can't point past the denylist). Connector tools fail
+both requested paths and denied roots resolved through symlinks, so symlinked
+credential directories stay denied at their targets too). Connector tools fail
 closed — anything not recognised as a read/search is treated as an action and
 gated. File search (Grep/Glob) must be scoped to a specific subdirectory — an
-unscoped home-wide search is refused so a recursive pattern can't reach a denied
-path. On **Codex** the sandbox is coarser (see above) — no per-call policy.
+unscoped home-wide search, or a subtree containing a resolved credential path,
+is refused so a recursive pattern can't reach a denied path. On **Codex** the
+sandbox is coarser (see above) — no per-call policy.
 
 ## Logs
 

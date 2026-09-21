@@ -72,6 +72,8 @@ function realResolve(abs: string, realpath: (p: string) => string): string {
 }
 
 /// Read policy: any non-sensitive file at or under $HOME; nothing outside.
+/// Keep both lexical and resolved denied roots: a credential directory may
+/// itself be a symlink (e.g. ~/.ssh -> ~/dotfiles/.ssh).
 /// `realpath` is injectable for tests; production uses the real filesystem.
 export function readPathAllowed(
   home: string,
@@ -83,7 +85,9 @@ export function readPathAllowed(
   if (r0 === null) return false;
   const r = realResolve(r0, realpath);
   if (!isUnder(r, home)) return false;
-  return !deniedPaths(home).some((d) => isUnder(r, d));
+  return !deniedPaths(home).some((d) =>
+    isUnder(r, d) || isUnder(r, realResolve(d, realpath))
+  );
 }
 
 /// Search (Grep/Glob) policy: stricter than Read because these recurse — a
@@ -100,7 +104,9 @@ export function searchRootAllowed(
 ): boolean {
   if (!readPathAllowed(home, cwd, p, realpath)) return false;
   const r = realResolve(resolveRoot(cwd, p)!, realpath);
-  return !deniedPaths(home).some((d) => isUnder(d, r));
+  return !deniedPaths(home).some((d) =>
+    isUnder(d, r) || isUnder(realResolve(d, realpath), r)
+  );
 }
 
 /** Unbounded async queue usable as the SDK's streaming prompt input. */

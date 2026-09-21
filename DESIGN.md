@@ -143,6 +143,18 @@ Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: w
 
 Two refinements after review (`sandbox.test.ts` pins them): **Grep/Glob are gated more tightly than Read** because they recurse — validating only the root path lets a recursive pattern (`Glob {path:$HOME, pattern:".ssh/**"}`, `Grep {path:$HOME, pattern:"PRIVATE KEY"}`) reach secrets in a denied descendant. So a search root may not sit *at or above* any denied path; an unscoped `$HOME` search is illegal and the agent must target a specific subtree. **Comparisons are case-folded** — macOS's default filesystem is case-insensitive, so `~/.SSH/id_rsa` reaches the same file as `~/.ssh`; a case-sensitive denylist check would let the variant through. The path-separator guard still keeps distinct siblings (e.g. `.ssh-notes`) allowed.
 
+### Symlinked credential roots (2026-09-21, issue #77)
+
+Resolving only the requested path left symlinked credential roots unprotected:
+if `~/.ssh` points to `~/dotfiles/.ssh`, neither the alias nor the target matched
+the lexical denylist. Claude's read and search policies now compare against
+both the original denied roots and their resolved targets, using the same
+deepest-existing-ancestor resolution as requested paths. Searches rooted at
+`~/dotfiles` are therefore refused too. The shared `deniedPaths()` list remains
+lexical; Codex already resolves its own policy paths. Regression tests use real
+symlinks and synthetic credentials, including credential files, symlinked
+parents, missing leaves, and ordinary permitted siblings.
+
 ## Connector tools (2026-06-13)
 
 User-configured MCP connectors (loaded via the user's Claude settings) pass the sandbox: read/search tools always allowed; tools matching an action pattern (send/create/update/delete/…) denied unless `allowMcpActions` is enabled in preferences (default off — a prompt-injected agent must not post to Slack mid-meeting). The research prompt names connected tools as legitimate sources. Toolbar slimmed to in-session controls (Listen, mic, Auto cards, Float); engine/system-audio/agent-count moved to preferences, engine changes applying when listening stops.
