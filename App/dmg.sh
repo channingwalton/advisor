@@ -8,13 +8,18 @@
 #     --apple-id you@example.com --team-id TEAMID --password <app-specific-pw>
 # NOTARY_PROFILE overrides the profile name (default: advisor-notary).
 #
-# Output: App/dist/Advisor-<version>.dmg (version from the repo-root VERSION file)
+# Output: App/dist/Advisor-<version>.dmg (version from the repo-root VERSION file),
+# present only if every step passed: the image is built, notarised and checked
+# under a .partial.dmg name and renamed at the end. The EXIT trap deletes the
+# partial; a run killed outright (SIGKILL, power loss) can leave it behind, but
+# never under the release name.
 set -e
 cd "$(dirname "$0")"            # App/
 
 APP=dist/Advisor.app
 VERSION=$(tr -d '[:space:]' < ../VERSION)
 DMG=dist/Advisor-$VERSION.dmg
+PARTIAL=dist/Advisor-$VERSION.partial.dmg
 STAGE=dist/dmg-stage
 VOLNAME=Advisor
 NOTARY_PROFILE="${NOTARY_PROFILE:-advisor-notary}"
@@ -33,6 +38,7 @@ SUBMISSION_PLIST=
 
 cleanup() {
   rm -rf "$STAGE"
+  rm -f "$PARTIAL"
   if [ -n "$SUBMISSION_PLIST" ]; then
     rm -f "$SUBMISSION_PLIST"
   fi
@@ -43,7 +49,7 @@ echo "==> build and sign app"
 SIGN_IDENTITY="$SIGN_IDENTITY" sh sign.sh
 
 echo "==> stage image contents"
-rm -f "$DMG"
+rm -f "$DMG" "$PARTIAL"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/Advisor.app"
@@ -51,18 +57,18 @@ ln -s /Applications "$STAGE/Applications"
 
 # APFS volume, LZFSE-compressed (ULFO). Replaces the deprecated
 # `hdiutil create -size` + `hdiutil convert -format` pair.
-echo "==> create $DMG"
-diskutil image create from --format ULFO --volumeName "$VOLNAME" "$STAGE" "$DMG" >/dev/null
+echo "==> create $PARTIAL"
+diskutil image create from --format ULFO --volumeName "$VOLNAME" "$STAGE" "$PARTIAL" >/dev/null
 
-echo "==> sign $DMG"
-codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
+echo "==> sign $PARTIAL"
+codesign --force --timestamp --sign "$SIGN_IDENTITY" "$PARTIAL"
 
 echo "==> verify DMG signature"
-codesign --verify --verbose=2 "$DMG"
+codesign --verify --verbose=2 "$PARTIAL"
 
 echo "==> notarise DMG (this can take a few minutes)"
 SUBMISSION_PLIST=$(mktemp "${TMPDIR:-/tmp}/advisor-dmg-notary.XXXXXX")
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait \
+xcrun notarytool submit "$PARTIAL" --keychain-profile "$NOTARY_PROFILE" --wait \
   --output-format plist >"$SUBMISSION_PLIST"
 STATUS=$(plutil -extract status raw -o - "$SUBMISSION_PLIST")
 SUBMISSION_ID=$(plutil -extract id raw -o - "$SUBMISSION_PLIST")
@@ -73,12 +79,13 @@ if [ "$STATUS" != "Accepted" ]; then
 fi
 
 echo "==> staple DMG ticket"
-xcrun stapler staple "$DMG"
+xcrun stapler staple "$PARTIAL"
 
 echo "==> validate stapled DMG"
-xcrun stapler validate "$DMG"
+xcrun stapler validate "$PARTIAL"
 
 echo "==> Gatekeeper assessment"
-spctl -a -vvv -t open --context context:primary-signature "$DMG"
+spctl -a -vvv -t open --context context:primary-signature "$PARTIAL"
 
+mv "$PARTIAL" "$DMG"
 echo "==> done: $DMG (Developer ID signed, notarised and stapled)"
