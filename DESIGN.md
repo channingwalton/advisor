@@ -228,7 +228,7 @@ Decisions (single-user, few-machine distribution — not the App Store): **bundl
 
 ## DMG distribution (2026-06-24)
 
-The shared artefact is `App/dist/Advisor-<version>.dmg` (version from the repo-root `VERSION` file, stamped into the bundle by `package.sh`), not a raw local `.app`. `App/dmg.sh` first runs `notarize.sh` so the app is Developer-ID-signed, hardened-runtime, notarised and stapled. It then builds the compressed DMG with an Applications link, signs the DMG, submits the DMG to Apple's notary service, staples the DMG ticket, validates the staple and runs `spctl -t open --context context:primary-signature` against the image. This avoids the Gatekeeper failure shown to recipients of the old local-only DMG: "Apple could not verify \"Advisor\" is free of malware that may harm your Mac or compromise your privacy."
+The shared artefact is `App/dist/Advisor-<version>.dmg` (version from the repo-root `VERSION` file, stamped into the bundle by `package.sh`), not a raw local `.app`. `App/dmg.sh` first runs `sign.sh` so the app is Developer-ID-signed with the hardened runtime; the app gets no notary round of its own (see "Notarisation: nested entitlements + one notary round" below). It then builds the compressed DMG with an Applications link, signs the DMG, submits the DMG to Apple's notary service, staples the DMG ticket, validates the staple and runs `spctl -t open --context context:primary-signature` against the image. This avoids the Gatekeeper failure shown to recipients of the old local-only DMG: "Apple could not verify \"Advisor\" is free of malware that may harm your Mac or compromise your privacy."
 
 ## Codex as an alternative provider (2026-06-13)
 
@@ -900,7 +900,8 @@ app and drops the grant, while still *showing* it enabled in System Settings.
 Fix: `package.sh`/`install.sh` sign with a stable identity (a self-signed
 **`Advisor Dev`** cert, or a Developer ID if present), keeping the Designated
 Requirement constant so grants persist. See README. Distribution-grade sharing
-is `dmg.sh`; `notarize.sh` remains the app-level signing/notary helper.
+is `dmg.sh`; `sign.sh` (formerly `notarize.sh`) is the app-level Developer ID
+signing helper it runs.
 
 ## System-audio permission preflight (2026-06-23)
 
