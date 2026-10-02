@@ -1417,6 +1417,19 @@ symlinked layout alongside the plain one.
 Installation failure throws rather than falling back: an unsandboxed Codex is
 the defect this closes, so it must fail the backend, not silently widen it.
 
+## DMG built with `diskutil image` (2026-10-02)
+
+On macOS 27, `hdiutil` warns that `create -size … -volname` and `convert
+-format` are deprecated in favour of `diskutil image`. `dmg.sh` used both to
+make a blank HFS+ image, mount it, copy the app in, and convert it to UDZO
+(zlib-9). The script now stages `Advisor.app` and the
+Applications link in a folder and builds the compressed image in one step with
+`diskutil image create from --format ULFO`. Two consequences: `diskutil` cannot
+make HFS+ images, so the volume is APFS (readable on macOS 10.13+, well below
+the app's macOS 26 floor), and it has no compression-level knob, so the image is
+LZFSE rather than zlib-9 — about 2% smaller in practice. The staging folder also
+removes the size estimate the blank image needed.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

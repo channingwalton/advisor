@@ -15,8 +15,7 @@ cd "$(dirname "$0")"            # App/
 APP=dist/Advisor.app
 VERSION=$(tr -d '[:space:]' < ../VERSION)
 DMG=dist/Advisor-$VERSION.dmg
-RW_DMG=dist/Advisor-rw.dmg
-MOUNT=dist/dmg-mount
+STAGE=dist/dmg-stage
 VOLNAME=Advisor
 NOTARY_PROFILE="${NOTARY_PROFILE:-advisor-notary}"
 
@@ -33,32 +32,27 @@ echo "==> identity: $SIGN_IDENTITY"
 SUBMISSION_PLIST=
 
 cleanup() {
-  hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true
-  rm -f "$RW_DMG"
+  rm -rf "$STAGE"
   if [ -n "$SUBMISSION_PLIST" ]; then
     rm -f "$SUBMISSION_PLIST"
   fi
-  rmdir "$MOUNT" 2>/dev/null || true
 }
 trap cleanup EXIT HUP INT TERM
 
 echo "==> build and sign app"
 SIGN_IDENTITY="$SIGN_IDENTITY" sh sign.sh
 
-echo "==> create writable image"
-rm -f "$DMG" "$RW_DMG"
-mkdir -p "$MOUNT"
-SIZE_KB=$(du -sk "$APP" | awk '{ print int(($1 * 12 / 10) + 262144) }')
-hdiutil create -size "${SIZE_KB}k" -fs HFS+ -volname "$VOLNAME" "$RW_DMG" >/dev/null
+echo "==> stage image contents"
+rm -f "$DMG"
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
+ditto "$APP" "$STAGE/Advisor.app"
+ln -s /Applications "$STAGE/Applications"
 
-echo "==> copy app into image"
-hdiutil attach "$RW_DMG" -mountpoint "$MOUNT" -nobrowse -quiet
-ditto "$APP" "$MOUNT/Advisor.app"
-ln -s /Applications "$MOUNT/Applications"
-hdiutil detach "$MOUNT" -quiet
-
+# APFS volume, LZFSE-compressed (ULFO). Replaces the deprecated
+# `hdiutil create -size` + `hdiutil convert -format` pair.
 echo "==> create $DMG"
-hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG" >/dev/null
+diskutil image create from --format ULFO --volumeName "$VOLNAME" "$STAGE" "$DMG" >/dev/null
 
 echo "==> sign $DMG"
 codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
