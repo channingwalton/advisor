@@ -899,7 +899,7 @@ duplicate dev-binary / installed-`.app`, which share the bundle id) as a differe
 app and drops the grant, while still *showing* it enabled in System Settings.
 Fix: `package.sh`/`install.sh` sign with a stable identity (a self-signed
 **`Advisor Dev`** cert, or a Developer ID if present), keeping the Designated
-Requirement constant so grants persist. See README. Distribution-grade sharing
+Requirement constant so grants persist. See docs/development.md. Distribution-grade sharing
 is `dmg.sh`; `sign.sh` (formerly `notarize.sh`) is the app-level Developer ID
 signing helper it runs.
 

@@ -5,10 +5,12 @@ on-device, and proactively surfaces answer/context/fact-check cards using
 Claude agents. It uses whatever connectors are present to search for content,
 including the web. Single user (Channing), runs locally, no server.
 
-Read [README.md](README.md) for setup/use, [DESIGN.md](DESIGN.md) for
-architecture and decision history, [REQUIREMENTS.md](REQUIREMENTS.md) for
-scope. DESIGN.md's dated sections record why things are the way they are —
-check them before re-litigating a decision.
+Read [docs/guide.md](docs/guide.md) for app behaviour,
+[docs/development.md](docs/development.md) for packaging and releases,
+[DESIGN.md](DESIGN.md) for architecture and decision history,
+[REQUIREMENTS.md](REQUIREMENTS.md) for scope. DESIGN.md's dated sections
+record why things are the way they are — check them before re-litigating a
+decision.
 
 ## Layout
 

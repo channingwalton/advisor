@@ -110,7 +110,7 @@ The app opens on a master/detail browser of your past sessions:
   as a hidden `.context.md` that travels with renames and storage-dir moves).
   Re-file existing sessions later via *Move to Folder*.
 - **Tags** — a user-managed library of coloured tags. Apply them from the live
-  toolbar or the browser; they show as coloured pills on session rows and are
+  toolbar or the browser; they show as coloured dots on session rows and are
   searchable (type `#tag` to filter). Renaming a tag updates it everywhere.
 - **Saved contexts** — pre-canned context prompts you can pick from instead of
   retyping common setups to use to guide a recording session.
