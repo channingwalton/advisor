@@ -85,6 +85,9 @@ struct AdvisorApp: App {
                 }
         }
         .windowStyle(.hiddenTitleBar)
+        // Compact: smaller toolbar buttons and a shorter traffic-light row, so
+        // the chrome recedes behind the sessions themselves.
+        .windowToolbarStyle(.unifiedCompact)
         .defaultLaunchBehavior(.presented)
         // The recording window — single-instance by virtue of being a `Window`
         // (not a `WindowGroup`): the Sessions "New" button opens it, and

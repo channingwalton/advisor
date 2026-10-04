@@ -87,9 +87,9 @@ surfaces a card inline, anchored to the moment it relates to:
 The app opens on a master/detail browser of your past sessions:
 
 - **Grouped & searchable list** — sessions grouped by day (Today / Yesterday /
-  Earlier this week / …), with search, an All / This week filter, and a
-  recent / oldest sort toggle. Each row shows a title, a gist, duration, and
-  card count.
+  Earlier this week / …), with search and a filter menu (all / this week,
+  newest / oldest first). Each row shows a title, a gist, duration, card count
+  and a dot per tag.
 - **Full session detail** — title and meta, the questions you asked, and the
   transcript rendered just like the live window, with the surfaced cards
   inline.

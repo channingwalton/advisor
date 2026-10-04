@@ -64,6 +64,10 @@ struct SessionsView: View {
     /// Each folder's default tags (issue #76), keyed by folder name. New recordings
     /// started from the folder inherit them; existing or moved sessions do not.
     @State private var folderTags: [String: [String]] = [:]
+    /// The folder row under the pointer, which reveals its actions; and whether
+    /// the pointer is over the Folders label, which reveals its +.
+    @State private var hoveredFolder: String?
+    @State private var hoveringFoldersBar = false
 
     var body: some View {
         // Native NavigationSplitView: on macOS 26 (Tahoe) the sidebar column
@@ -156,13 +160,10 @@ struct SessionsView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                searchField
-                filterRow
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
+            searchField
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 4)
             // A real `.sidebar` List, not a custom ScrollView — this is what
             // makes macOS 26 render the column as a floating Liquid-Glass panel.
             // Rows keep their bespoke look via cleared row insets/separators/
@@ -170,10 +171,10 @@ struct SessionsView: View {
             List {
                 if filtered.isEmpty && visibleFolders.isEmpty {
                     Text(query.isEmpty ? "No previous sessions yet." : "No matches.")
-                        .font(.system(size: 12))
+                        .font(.system(size: 12.5))
                         .foregroundStyle(Theme.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14).padding(.top, 16)
+                        .padding(.horizontal, 18).padding(.top, 16)
                         .plainSidebarRow()
                 }
                 if showFoldersBar { foldersBar.plainSidebarRow() }
@@ -215,16 +216,17 @@ struct SessionsView: View {
         }
     }
 
-    /// The "FOLDERS" bar with a + to create one. Shown whenever there are folders
-    /// to list, or the list is unfiltered (so the first folder can be created).
+    /// The "Folders" label with a + to create one (shown on hover). Shown whenever
+    /// there are folders to list, or the list is unfiltered (so the first folder
+    /// can be created).
     private var showFoldersBar: Bool {
         !visibleFolders.isEmpty || query.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private var foldersBar: some View {
         HStack {
-            Text("FOLDERS").font(.system(size: 10.5, weight: .bold)).kerning(0.4)
-                .foregroundStyle(Theme.textMuted)
+            Text("Folders").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
             Spacer()
             Button {
                 newFolderName = ""
@@ -235,13 +237,16 @@ struct SessionsView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
             .buttonStyle(.plain).focusEffectDisabled().help("New folder")
+            .opacity(hoveringFoldersBar ? 1 : 0)
         }
-        .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 2)
+        .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 4)
+        .contentShape(Rectangle())
+        .onHover { hoveringFoldersBar = $0 }
     }
 
-    /// A collapsible folder section header: disclosure chevron, name, count, and a
-    /// default controls and a record button that starts a recording filed into
-    /// this folder (issues #35/#36/#76).
+    /// A collapsible folder section header: disclosure chevron, name and count.
+    /// On hover the count gives way to the folder's default controls and a record
+    /// button that starts a recording filed into this folder (issues #35/#36/#76).
     /// Tapping the row toggles expansion; right-click renames/deletes the folder.
     /// A plain row with `.onTapGesture`, not a `Button`, so the nested record
     /// `Button` keeps its own tap target rather than being swallowed by an outer one.
@@ -249,39 +254,57 @@ struct SessionsView: View {
         let collapsed = collapsedFolders.contains(folder)
         let count = sessions(in: folder).count
         let targeted = dropTargetFolder == folder
+        let hovered = hoveredFolder == folder
         return HStack(spacing: 6) {
             Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                .font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textMuted)
+                .font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.textTertiary)
                 .frame(width: 10)
             Image(systemName: targeted ? "folder.fill" : "folder")
-                .font(.system(size: 11)).foregroundStyle(targeted ? Theme.accent : Theme.textSecondary)
-            Text(folder).font(.system(size: 11.5, weight: .bold)).kerning(0.2)
-                .foregroundStyle(targeted ? Theme.accent : Theme.textSecondary).lineLimit(1)
+                .font(.system(size: 12)).foregroundStyle(targeted ? Theme.accent : Theme.textSecondary)
+            Text(folder).font(.system(size: 13))
+                .foregroundStyle(targeted ? Theme.accent : Theme.textStrong).lineLimit(1)
             Spacer(minLength: 6)
-            Text("\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.textMuted)
-            FolderContextButton(folder: folder, context: folderContexts[folder] ?? "") { text in
-                saveFolderContext(text, for: folder)
+            // Opacity, not removal: an open context/tags popover stays anchored
+            // to its button after the pointer leaves the row.
+            ZStack(alignment: .trailing) {
+                Text("\(count)").font(.system(size: 11.5)).monospacedDigit()
+                    .foregroundStyle(Theme.textTertiary)
+                    .opacity(hovered ? 0 : 1)
+                HStack(spacing: 9) {
+                    FolderContextButton(folder: folder, context: folderContexts[folder] ?? "") { text in
+                        saveFolderContext(text, for: folder)
+                    }
+                    FolderTagsButton(
+                        folder: folder,
+                        tags: folderTags[folder] ?? [],
+                        library: tagLibrary
+                    ) { tags in
+                        saveFolderTags(tags, for: folder)
+                    }
+                    folderRecordButton(folder)
+                }
+                .opacity(hovered ? 1 : 0)
+                .allowsHitTesting(hovered)
             }
-            FolderTagsButton(
-                folder: folder,
-                tags: folderTags[folder] ?? [],
-                library: tagLibrary
-            ) { tags in
-                saveFolderTags(tags, for: folder)
-            }
-            folderRecordButton(folder)
         }
-        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
+        .padding(.horizontal, 10)
+        .frame(height: 28)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         // Tint the row and outline it while a session is dragged over, so the
         // drop target is unmistakable.
-        .background(targeted ? Theme.accent.opacity(0.12) : Theme.surfaceTitlebar)
+        .background(
+            targeted ? Theme.accent.opacity(0.12) : (hovered ? Theme.hoverFill : .clear),
+            in: RoundedRectangle(cornerRadius: 7))
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: 7)
                 .stroke(Theme.accent, lineWidth: 1.5)
-                .padding(.horizontal, 6)
                 .opacity(targeted ? 1 : 0))
+        .padding(.horizontal, 8)
+        .padding(.top, 2)
+        .onHover { inside in
+            hoveredFolder = inside ? folder : (hoveredFolder == folder ? nil : hoveredFolder)
+        }
         .onTapGesture {
             if collapsed { collapsedFolders.remove(folder) } else { collapsedFolders.insert(folder) }
         }
@@ -349,12 +372,11 @@ struct SessionsView: View {
 
     private func dateHeader(_ label: String) -> some View {
         Text(label)
-            .font(.system(size: 10.5, weight: .bold)).kerning(0.4)
-            .foregroundStyle(Theme.textMuted)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Theme.textTertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.top, 14).padding(.bottom, 4)
-            .background(Theme.surfaceTitlebar)
+            .padding(.horizontal, 18)
+            .padding(.top, 16).padding(.bottom, 4)
     }
 
     @ViewBuilder private func folderMenu(_ folder: String) -> some View {
@@ -383,12 +405,10 @@ struct SessionsView: View {
             TranscriptWindowContext.shared.pendingFolder = nil
             openWindow(id: "recording")
         } label: {
-            Image(systemName: "record.circle.fill")
-                .font(.system(size: 17))
+            Label("New Recording", systemImage: "record.circle.fill")
+                .labelStyle(.iconOnly)
                 .foregroundStyle(Theme.recordRed)
-                .frame(width: 30, height: 30)
         }
-        .buttonStyle(.plain)
         .focusEffectDisabled()
         .help("Start a new recording (⌘N)")
     }
@@ -410,49 +430,57 @@ struct SessionsView: View {
         .help("Start a new recording in “\(folder)”")
     }
 
+    /// A plain search field (a `#tag` term filters by tag — see the tooltip), with
+    /// the date filter and sort order in a menu at its trailing end.
     private var searchField: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             Image(systemName: "magnifyingglass").font(.system(size: 12))
                 .foregroundStyle(Theme.textTertiary)
-            TextField("Search sessions… (#tag to filter by tag)", text: $query)
+            TextField("Search", text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 34)
-        .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline, lineWidth: 0.5))
-    }
-
-    private var filterRow: some View {
-        HStack(spacing: 6) {
-            chip("All", on: !thisWeekOnly) { thisWeekOnly = false }
-            chip("This week", on: thisWeekOnly) { thisWeekOnly = true }
-            Spacer()
-            Button { oldestFirst.toggle() } label: {
-                HStack(spacing: 3) {
-                    Text(oldestFirst ? "Oldest" : "Recent").font(.system(size: 11.5))
-                    Image(systemName: "chevron.down").font(.system(size: 8))
+                .font(.system(size: 13))
+                .help("Search titles, transcripts and cards. Type #tag to filter by tag.")
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
                 }
-                .foregroundStyle(Theme.textSecondary)
+                .buttonStyle(.plain).focusEffectDisabled().help("Clear search")
             }
-            .buttonStyle(.plain)
-            .help("Sort order")
+            filterMenu
         }
+        .padding(.leading, 10).padding(.trailing, 4)
+        .frame(height: 30)
+        .background(Theme.fieldFill, in: Capsule())
     }
 
-    private func chip(_ label: String, on: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label).font(.system(size: 11.5, weight: on ? .semibold : .regular))
-                .foregroundStyle(on ? Color.white : Theme.textBody)
-                .padding(.horizontal, 11)
-                .frame(height: 24)
-                .background(
-                    on ? Theme.accent : Theme.surfaceCard,
-                    in: Capsule())
-                .overlay(Capsule().stroke(on ? .clear : Theme.hairline, lineWidth: 0.5))
+    /// All / This week and newest / oldest first. The glyph takes the accent while
+    /// "This week" hides older sessions, so a filtered list is never mistaken for
+    /// the full one.
+    private var filterMenu: some View {
+        Menu {
+            Picker("Show", selection: $thisWeekOnly) {
+                Text("All Sessions").tag(false)
+                Text("This Week").tag(true)
+            }
+            .pickerStyle(.inline)
+            Picker("Sort", selection: $oldestFirst) {
+                Text("Newest First").tag(false)
+                Text("Oldest First").tag(true)
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(thisWeekOnly ? Theme.accent : Theme.textSecondary)
+                .frame(width: 24, height: 22)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .focusEffectDisabled()
+        .help(thisWeekOnly ? "Showing this week only" : "Filter and sort")
     }
 
     @ViewBuilder private func sessionRow(_ session: LoadedSession) -> some View {
@@ -475,50 +503,35 @@ struct SessionsView: View {
         // A plain tappable row, not a `Button`: inside a `List` a Button's press
         // gesture swallows the drag so the row won't lift (issue #28). A bare
         // `.onTapGesture` coexists with `.onDrag`.
-        return HStack(alignment: .top, spacing: 9) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(d.title)
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(Theme.textStrong)
-                        .lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(Self.rowTime(d.started ?? session.file.date))
-                        .font(.system(size: 11)).foregroundStyle(Theme.textMuted)
-                }
-                if !d.gist.isEmpty {
-                    Text(d.gist).font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textTertiary).lineLimit(1)
-                }
-                HStack(spacing: 8) {
-                    if let m = d.durationMinutes {
-                        Text("\(m) min").font(.system(size: 11)).foregroundStyle(Theme.textMuted)
-                    }
-                    HStack(spacing: 4) {
-                        Circle().fill(Theme.accent).frame(width: 4, height: 4)
-                        Text("\(d.cards.count) cards").font(.system(size: 11))
-                            .foregroundStyle(Theme.accent)
-                    }
-                }
-                tagPills(for: d)
+        let meta = ([d.durationMinutes.map { "\($0) min" }, SessionDetail.cardCount(d.cards.count)] as [String?])
+            .compactMap { $0 }.joined(separator: " · ")
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(d.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textStrong)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text(Self.rowTime(d.started ?? session.file.date))
+                    .font(.system(size: 11.5)).monospacedDigit()
+                    .foregroundStyle(Theme.textTertiary)
             }
+            if !d.gist.isEmpty {
+                Text(d.gist).font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary).lineLimit(1)
+            }
+            HStack(spacing: 5) {
+                tagDots(for: d)
+                Text(meta).font(.system(size: 11)).monospacedDigit()
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .padding(.top, 1)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(selected ? Theme.surfaceCard : .clear)
-                .shadow(color: selected ? Theme.cardShadow : .clear, radius: 4, y: 1))
-        .overlay(alignment: .leading) {
-            if selected {
-                RoundedRectangle(cornerRadius: 2).fill(Theme.accent)
-                    .frame(width: 3).padding(.vertical, 4)
-            }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(selected ? Theme.accent.opacity(0.22) : .clear, lineWidth: 1))
+        .background(selected ? Theme.selectionFill : .clear, in: RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
         .onTapGesture { selection = session.id }
@@ -568,19 +581,20 @@ struct SessionsView: View {
         .disabled(session.file.url == ctx.liveFileURL)
     }
 
-    /// Coloured pills for a row's tags. Only tags still in the library render —
-    /// a tag deleted in Preferences disappears here without rewriting the note.
-    @ViewBuilder private func tagPills(for d: SessionDetail) -> some View {
+    /// A coloured dot per tag on a row, named in the tooltip. Only tags still in
+    /// the library render — a tag deleted in Preferences disappears here without
+    /// rewriting the note.
+    @ViewBuilder private func tagDots(for d: SessionDetail) -> some View {
         let known = d.tags.compactMap { name in
             TagLibrary.named(name, in: tagLibrary).map { (name, $0.colorHex) }
         }
         if !known.isEmpty {
-            FlowLayout(spacing: 5) {
-                ForEach(known, id: \.0) { name, hex in
-                    TagPill(name: name, colorHex: hex)
+            HStack(spacing: 3) {
+                ForEach(known, id: \.0) { _, hex in
+                    Circle().fill(Color(tagHex: hex)).frame(width: 7, height: 7)
                 }
             }
-            .padding(.top, 1)
+            .help(known.map(\.0).joined(separator: ", "))
         }
     }
 
@@ -691,8 +705,8 @@ struct SessionsView: View {
         let cal = Calendar.current
         return sessions
             .filter { SessionSearch.matches(query: q, tags: $0.detail.tags, haystack: $0.haystack) }
-            // Calendar week, matching the sidebar's TODAY / YESTERDAY / EARLIER
-            // THIS WEEK grouping — not a rolling 7 days, which would disagree
+            // Calendar week, matching the sidebar's Today / Yesterday / Earlier
+            // this week grouping — not a rolling 7 days, which would disagree
             // with those labels near the start of the week.
             .filter {
                 !thisWeekOnly
@@ -737,12 +751,12 @@ struct SessionsView: View {
 
     private static func bucket(_ date: Date) -> String {
         let cal = Calendar.current
-        if cal.isDateInToday(date) { return "TODAY" }
-        if cal.isDateInYesterday(date) { return "YESTERDAY" }
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
         let now = Date()
-        if cal.isDate(date, equalTo: now, toGranularity: .weekOfYear) { return "EARLIER THIS WEEK" }
-        if cal.isDate(date, equalTo: now, toGranularity: .month) { return "THIS MONTH" }
-        return "EARLIER"
+        if cal.isDate(date, equalTo: now, toGranularity: .weekOfYear) { return "Earlier this week" }
+        if cal.isDate(date, equalTo: now, toGranularity: .month) { return "This month" }
+        return "Earlier"
     }
 
     /// Right-aligned row time: today → time, this week → weekday, else date.
@@ -767,7 +781,7 @@ struct SessionsView: View {
 
 /// A folder header's context button, left of the record button: opens a popover to
 /// edit the folder's context — the seed every recording started in this folder
-/// inherits. Tinted when a context is set so a glance shows which folders carry one.
+/// inherits. The filled glyph shows a context is set.
 /// Owns its popover/draft state so each folder row gets an independent editor.
 private struct FolderContextButton: View {
     let folder: String
@@ -786,7 +800,7 @@ private struct FolderContextButton: View {
         } label: {
             Image(systemName: hasContext ? "text.bubble.fill" : "text.bubble")
                 .font(.system(size: 12))
-                .foregroundStyle(hasContext ? Theme.accent : Theme.textMuted)
+                .foregroundStyle(Theme.textSecondary)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -840,7 +854,7 @@ private struct FolderTagsButton: View {
                         .font(.system(size: 9, weight: .semibold))
                 }
             }
-            .foregroundStyle(hasTags ? Theme.accent : Theme.textMuted)
+            .foregroundStyle(Theme.textSecondary)
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
@@ -940,71 +954,50 @@ private struct SessionDetailPane: View {
     // Delete confirmation.
     @State private var confirmingDelete = false
 
+    @State private var editingTags = false
+
     private var isAsking: Bool { answerState == "pending" || answerState == "streaming" }
     /// Asking the still-being-written live note is disabled (the writer's
     /// debounced rewrite would clobber an appended follow-up).
     private var isLive: Bool { file.url == ctx.liveFileURL }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    header
-                    if !detail.questions.isEmpty { youAsked }
-                    transcript
-                }
-                .frame(maxWidth: Theme.Metric.contentMaxWidth, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 30)
-                .padding(.vertical, 26)
+        // A centred reading column; the ask field floats over the bottom of it,
+        // with the content scrolling underneath.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 30) {
+                header
+                if !detail.questions.isEmpty { youAsked }
+                transcript
             }
-            if !answerBody.isEmpty {
-                Divider()
-                liveAnswer
+            .frame(maxWidth: Theme.Metric.readingWidth, alignment: .leading)
+            .padding(.horizontal, Theme.Metric.readingMargin)
+            .padding(.top, 20)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                hideTranscriptButton
+                summariseButton
+                tagsButton
+                moreMenu
             }
-            Divider()
-            askBar
         }
     }
 
     // MARK: header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                Text(detail.title)
-                    .font(.system(size: 23, weight: .bold))
-                    .foregroundStyle(Theme.textStrong)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 12)
-                hideTranscriptButton
-                summariseButton
-                TagsChip(tags: detail.tags, library: library, onChange: applyTags)
-                Menu {
-                    Button("Rename…") {
-                        renameText = detail.name
-                        renaming = true
-                    }
-                    Button("Export…") { exportSession(file) }
-                    ShareLink("Share…", item: file.url, preview: SharePreview(detail.title))
-                    Button("Reveal in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([file.url])
-                    }
-                    Divider()
-                    // The live note is exempt: its writer would just recreate any
-                    // file deleted out from under it.
-                    Button("Delete…", role: .destructive) { confirmingDelete = true }
-                        .disabled(isLive)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
-                        .frame(width: 32, height: 30)
-                        .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: 9))
-                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline, lineWidth: 0.5))
-                }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            }
-            Text(metaLine).font(.system(size: 12.5)).foregroundStyle(Theme.textSecondary)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(detail.title)
+                .font(.system(size: 24, weight: .semibold))
+                .kerning(-0.3)
+                .foregroundStyle(Theme.textStrong)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(metaLine).font(.system(size: 12.5)).monospacedDigit()
+                .foregroundStyle(Theme.textSecondary)
             tagRow
         }
         .alert("Rename session", isPresented: $renaming) {
@@ -1024,7 +1017,7 @@ private struct SessionDetailPane: View {
     }
 
     /// At-a-glance pills for the session's tags (library-known only), under the
-    /// meta line. Editing is via the header's Tags chip.
+    /// meta line. Editing is via the toolbar's Tags button.
     @ViewBuilder private var tagRow: some View {
         let known = detail.tags.compactMap { name in
             TagLibrary.named(name, in: library).map { (name, $0.colorHex) }
@@ -1042,18 +1035,48 @@ private struct SessionDetailPane: View {
     /// Toggle the transcript off so the detail shows only cards (experiment).
     private var hideTranscriptButton: some View {
         Button { hideTranscript.toggle() } label: {
-            Image(systemName: hideTranscript ? "eye.slash" : "eye")
-                .font(.system(size: 13))
-                .foregroundStyle(hideTranscript ? Theme.accent : Theme.textSecondary)
-                .frame(width: 32, height: 30)
-                .background(
-                    hideTranscript ? Theme.accentTint : Theme.surfaceCard,
-                    in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline, lineWidth: 0.5))
+            Label(
+                hideTranscript ? "Show Transcript" : "Hide Transcript",
+                systemImage: hideTranscript ? "eye.slash" : "eye")
         }
-        .buttonStyle(.plain)
         .focusEffectDisabled()
         .help(hideTranscript ? "Show transcript" : "Hide transcript (cards only)")
+    }
+
+    /// Edit the session's tags in a popover anchored to the toolbar.
+    private var tagsButton: some View {
+        Button { editingTags.toggle() } label: {
+            Label("Tags", systemImage: detail.tags.isEmpty ? "tag" : "tag.fill")
+        }
+        .focusEffectDisabled()
+        .help("Session tags")
+        .popover(isPresented: $editingTags, arrowEdge: .bottom) {
+            SessionTagsEditor(tags: detail.tags, library: library, onChange: applyTags)
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button("Rename…") {
+                renameText = detail.name
+                renaming = true
+            }
+            Button("Export…") { exportSession(file) }
+            ShareLink("Share…", item: file.url, preview: SharePreview(detail.title))
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([file.url])
+            }
+            Divider()
+            // The live note is exempt: its writer would just recreate any
+            // file deleted out from under it.
+            Button("Delete…", role: .destructive) { confirmingDelete = true }
+                .disabled(isLive)
+        } label: {
+            Label("More", systemImage: "ellipsis")
+        }
+        .menuIndicator(.hidden)
+        .focusEffectDisabled()
+        .help("Rename, export, share or delete")
     }
 
     /// Add or update this session's Summary card (issue #30). Disabled while the
@@ -1061,13 +1084,8 @@ private struct SessionDetailPane: View {
     /// an ask/summary is already streaming — mirrors the ask bar's gating.
     private var summariseButton: some View {
         Button(action: submitSummarise) {
-            Image(systemName: "list.bullet.rectangle")
-                .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
-                .frame(width: 32, height: 30)
-                .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline, lineWidth: 0.5))
+            Label("Summarise", systemImage: "list.bullet.rectangle")
         }
-        .buttonStyle(.plain)
         .focusEffectDisabled()
         .disabled(isLive || isAsking)
         .help(isLive
@@ -1153,19 +1171,21 @@ private struct SessionDetailPane: View {
             }
         }
         if let m = detail.durationMinutes { parts.append("\(m) min") }
-        return parts.joined(separator: "  ·  ")
+        return parts.joined(separator: " · ")
     }
 
     // MARK: you asked
 
     private var youAsked: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionLabel("YOU ASKED", count: "\(detail.questions.count) questions")
+            sectionLabel(
+                "You asked",
+                count: detail.questions.count == 1 ? "1 question" : "\(detail.questions.count) questions")
             ForEach(Array(detail.questions.enumerated()), id: \.offset) { _, q in
                 HStack(alignment: .top, spacing: 10) {
-                    Text("Y").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    Text("Y").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.textSecondary)
                         .frame(width: 24, height: 24)
-                        .background(Theme.accent, in: Circle())
+                        .background(Theme.fieldFill, in: Circle())
                     VStack(alignment: .leading, spacing: 2) {
                         Text(q.question).font(.system(size: 13)).foregroundStyle(Theme.textBody)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1218,22 +1238,28 @@ private struct SessionDetailPane: View {
     }
 
     private var transcript: some View {
-        VStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
-            sectionLabel(hideTranscript ? "CARDS" : "TRANSCRIPT", count: nil)
+        VStack(alignment: .leading, spacing: 14) {
+            sectionLabel(hideTranscript ? "Cards" : "Transcript", count: nil)
             ForEach(displayBlocks) { item in
                 switch item {
                 case .transcript(let paragraphs) where !hideTranscript:
-                    transcriptCard(paragraphs)
+                    transcriptRun(paragraphs)
                 case .transcript:
                     EmptyView()
                 case .card(_, let markdown):
-                    cardBlock(markdown)
+                    let parts = SessionDetail.cardParts(markdown)
+                    SessionCardView(
+                        kind: parts.label.isEmpty ? nil : parts.kindName,
+                        kindColour: Self.kindColour(parts.label),
+                        title: parts.title, markdown: parts.body, copyText: markdown)
+                        .padding(.vertical, 6)
                 case .note(_, let text):
-                    noteBlock(text)
+                    SessionCardView(
+                        kind: "Note", kindColour: Theme.factGreen, title: "", markdown: text,
+                        fill: Theme.factGreenTint.opacity(0.5))
+                        .padding(.vertical, 6)
                 case .heading(_, let title) where title != "Transcript" && !hideTranscript:
-                    Text(title).font(.system(size: 11, weight: .semibold)).kerning(0.5)
-                        .foregroundStyle(Theme.textMuted)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+                    sectionLabel(title, count: nil).padding(.top, 10)
                 case .heading:
                     EmptyView()
                 }
@@ -1241,11 +1267,11 @@ private struct SessionDetailPane: View {
         }
     }
 
-    /// A run of transcript between cards, wrapped in card chrome to match the
-    /// live feed. Each paragraph keeps its own selectable text view so a
-    /// correction maps back to the right paragraph index.
-    private func transcriptCard(_ paragraphs: [(offset: Int, text: String)]) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
+    /// A run of transcript between cards, as plain text with each paragraph's
+    /// time hanging in the left margin. Each paragraph keeps its own selectable
+    /// text view so a correction maps back to the right paragraph index.
+    private func transcriptRun(_ paragraphs: [(offset: Int, text: String)]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(paragraphs, id: \.offset) { para in
                 SelectableTranscriptText(
                     text: para.text, toolTip: "", actions: [], onAction: { _, _ in },
@@ -1254,55 +1280,33 @@ private struct SessionDetailPane: View {
                     onCorrect: isLive
                         ? nil
                         : { request in apply(request, toParagraph: paragraphOrdinal(before: para.offset)) })
+                    .overlay(alignment: .topLeading) {
+                        if let time = detail.blockTimes.indices.contains(para.offset)
+                            ? detail.blockTimes[para.offset] : nil
+                        {
+                            Text(time).font(.system(size: 11.5)).monospacedDigit()
+                                .foregroundStyle(Theme.textTertiary)
+                                .fixedSize()
+                                .offset(x: -Theme.Metric.timeGutter, y: 3)
+                                .allowsHitTesting(false)
+                        }
+                    }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Theme.surfaceCardInset, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
-                .stroke(Theme.hairline, lineWidth: 0.5))
     }
 
-    private func cardBlock(_ markdown: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Spacer(minLength: 0)
-                CardIconButton(system: "doc.on.doc", help: "Copy", action: { copyCard(markdown) })
-            }
-            MarkdownText(markdown: markdown, style: .saved)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    /// The colour of a saved card's kind label, by its header label.
+    private static func kindColour(_ label: String) -> Color {
+        switch label {
+        case "CONTEXT": Theme.contextViolet
+        case "SUMMARY": Theme.summaryTeal
+        case "VERIFIED": Theme.factGreen
+        case "NEEDS CONTEXT": Theme.factAmber
+        case "MISLEADING": Theme.factRed
+        case "FACT-CHECK": Theme.textSecondary
+        default: Theme.accent
         }
-        .padding(14)
-        .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
-                .stroke(Theme.hairline, lineWidth: 0.5))
-        .padding(.vertical, 4)
-    }
-
-    /// An editorial note the user injected (issue #34), in distinct green chrome
-    /// so it reads as the user's own context rather than transcript or an answer.
-    private func noteBlock(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TypePill(label: "NOTE", colour: Theme.factGreen, tint: Theme.factGreenTint, dot: true)
-            MarkdownText(markdown: text, style: .saved)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(14)
-        .background(Theme.factGreenTint.opacity(0.4), in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
-                .stroke(Theme.factGreen.opacity(0.5), lineWidth: 1))
-        .padding(.vertical, 4)
-    }
-
-    /// Copy a saved card to the clipboard. The block's inner markdown (header,
-    /// body and footer, blockquote markers already stripped by `TranscriptDoc`)
-    /// is a faithful text snapshot of what's shown, so it's copied verbatim.
-    private func copyCard(_ markdown: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(markdown, forType: .string)
     }
 
     /// The 0-based index of the paragraph at block `offset` among paragraph blocks
@@ -1335,15 +1339,41 @@ private struct SessionDetailPane: View {
 
     private func sectionLabel(_ title: String, count: String?) -> some View {
         HStack(spacing: 8) {
-            Text(title).font(.system(size: 11, weight: .bold)).kerning(0.5)
+            Text(title).font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.textSecondary)
             if let count {
-                Text(count).font(.system(size: 11)).foregroundStyle(Theme.textMuted)
+                Text(count).font(.system(size: 12)).foregroundStyle(Theme.textTertiary)
             }
         }
     }
 
     // MARK: ask
+
+    /// The streaming answer (or summary) card, the ask field, and any error,
+    /// floating over the bottom of the reading column. The page fades out under
+    /// it so scrolled text doesn't collide with the field.
+    private var bottomBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !answerBody.isEmpty { liveAnswer }
+            askField
+            if !askNote.isEmpty {
+                Text(askNote).font(.system(size: 11.5)).foregroundStyle(Theme.factRed)
+                    .padding(.leading, 18)
+            }
+        }
+        .frame(maxWidth: Theme.Metric.readingWidth)
+        .padding(.horizontal, Theme.Metric.readingMargin)
+        .padding(.top, 24)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(
+                stops: [
+                    .init(color: Theme.surfaceWindow.opacity(0), location: 0),
+                    .init(color: Theme.surfaceWindow, location: 0.45),
+                ],
+                startPoint: .top, endPoint: .bottom))
+    }
 
     private var liveAnswer: some View {
         ScrollView {
@@ -1353,7 +1383,7 @@ private struct SessionDetailPane: View {
                     Text(answerState == "failed"
                         ? (summarising ? "Couldn't summarise" : "Couldn't answer")
                         : (summarising ? "Summary" : "Answer"))
-                        .font(.system(size: 11, weight: .bold)).kerning(0.5)
+                        .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(answerState == "failed"
                             ? Theme.factRed
                             : (summarising ? Theme.summaryTeal : Theme.accent))
@@ -1362,40 +1392,48 @@ private struct SessionDetailPane: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
         }
-        .frame(maxHeight: 200)
-        .background(Theme.surfaceCard)
+        .frame(maxHeight: 220)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
+        .shadow(color: Theme.cardShadow, radius: 12, y: 4)
     }
 
-    private var askBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
-                TextField(
-                    isLive
-                        ? "Advisor is still writing this session — ask once it has fully saved…"
-                        : "Ask a question about this transcript…",
-                    text: $question)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
-                    .padding(.horizontal, 10)
-                    .frame(height: 34)
-                    .background(Theme.surfaceCardInset, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.hairline, lineWidth: 0.5))
-                    .onSubmit(submitQuestion)
-                    .disabled(isLive || isAsking)
-                Button("Ask", action: submitQuestion)
-                    .buttonStyle(SendButtonStyle(accent: Theme.accent))
-                    .disabled(isLive || isAsking
-                        || question.trimmingCharacters(in: .whitespaces).isEmpty)
+    private var canAsk: Bool {
+        !isLive && !isAsking && !question.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// One rounded glass field with an inline send arrow that takes the accent
+    /// once there's a question to send.
+    private var askField: some View {
+        HStack(spacing: 8) {
+            TextField(
+                isLive
+                    ? "Advisor is still writing this session — ask once it has fully saved"
+                    : "Ask about this session",
+                text: $question)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .onSubmit(submitQuestion)
+                .disabled(isLive || isAsking)
+            Button(action: submitQuestion) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(canAsk ? Theme.onAccent : Theme.textTertiary)
+                    .frame(width: 28, height: 28)
+                    .background(canAsk ? Theme.accent : Theme.fieldFill, in: Circle())
             }
-            if !askNote.isEmpty {
-                Text(askNote).font(.system(size: 11)).foregroundStyle(Theme.factRed)
-            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .disabled(!canAsk)
+            .help("Ask (↩)")
         }
-        .padding(.horizontal, 30)
-        .padding(.vertical, 10)
-        .background(Theme.surfaceTitlebar)
+        .padding(.leading, 18)
+        .padding(.trailing, 7)
+        .frame(height: 42)
+        .glassEffect(.regular, in: Capsule())
     }
 
     private func submitQuestion() {
@@ -1436,5 +1474,71 @@ private struct SessionDetailPane: View {
             return
         }
         question = ""
+    }
+}
+
+// MARK: - Saved card
+
+/// A saved card (or editorial note) in the Sessions detail: a coloured kind label
+/// over its title, then the body, on a faint fill with no outline. Copy appears
+/// while the pointer is over the card.
+private struct SessionCardView: View {
+    /// "Context", "Answer", "Note", … — nil for a card without a header.
+    let kind: String?
+    let kindColour: Color
+    let title: String
+    let markdown: String
+    /// What Copy puts on the clipboard (the card's full inner markdown); nil
+    /// hides Copy.
+    var copyText: String? = nil
+    var fill: Color = Theme.surfaceCardSubtle
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if kind != nil || !title.isEmpty || copyText != nil {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        if let kind {
+                            HStack(spacing: 6) {
+                                Circle().frame(width: 6, height: 6)
+                                Text(kind)
+                            }
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(kindColour)
+                        }
+                        if !title.isEmpty {
+                            Text(title)
+                                .font(.system(size: 15.5, weight: .semibold))
+                                .foregroundStyle(Theme.textStrong)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if let copyText {
+                        CardIconButton(system: "doc.on.doc", help: "Copy", action: { copy(copyText) })
+                            .opacity(hovering ? 1 : 0)
+                    }
+                }
+            }
+            if !markdown.isEmpty {
+                MarkdownText(markdown: markdown, style: .saved)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 18)
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(fill, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
+        .onHover { hovering = $0 }
+    }
+
+    /// The card's inner markdown (header, body and footer, blockquote markers
+    /// already stripped by `TranscriptDoc`) is a faithful text snapshot of what's
+    /// shown, so it's copied verbatim.
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }

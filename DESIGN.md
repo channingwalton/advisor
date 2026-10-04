@@ -1431,6 +1431,58 @@ the app's macOS 26 floor), and it has no compression-level knob, so the image is
 LZFSE rather than zlib-9 — about 2% smaller in practice. The staging folder also
 removes the size estimate the blank image needed.
 
+## Sessions window restyle (2026-10-04)
+
+The Sessions window read as dated: outlines around every element, bold and
+upper-case labels everywhere, blue on chips, counts and selection, and card bodies
+that ran as a wall of text. Approved from an HTML mockup, the restyle keeps every
+feature and removes signals rather than adding them:
+
+- **Space instead of outlines.** The transcript is plain text in a centred
+  reading column (`Theme.Metric.readingWidth`), with each paragraph's start
+  time hanging in the left margin. `TranscriptDoc.timedBlocks` keeps the first
+  stamp of each paragraph alongside the blocks (`SessionDetail.blockTimes`), so
+  `blocks(from:)` and its callers are unchanged. Cards and notes
+  (`SessionCardView`) lose their borders and keep a faint fill
+  (`surfaceCardSubtle`).
+- **Two weights, no capitals.** Section labels (Folders, date buckets,
+  Transcript, You asked) are title-case semibold in grey; the session title is
+  semibold 24pt. The date-bucket strings themselves are now title case.
+- **Card text layout.** `MarkdownText.lines(from:)` lays a card body out into
+  prose, lead lines (a bold line directly above a list, or a line that is bold
+  end to end), list items with nesting level from their indentation, headings
+  and rules; `render` hangs item text past the marker on a tab stop, puts list
+  items closer together than blocks, gives leads and headings room above, sets
+  strong runs semibold, and uses 14pt at about 1.5 line height. This replaces the
+  inline-first renderer's flattened lists (the 2026-06-21 section) and applies to
+  the Recording window's cards too, which share it. Saved cards split their
+  `**LABEL · Title**` header (`SessionDetail.cardParts`) into a coloured kind
+  label over the title; Copy shows on hover.
+- **One accent, used rarely.** `Theme.accent` and its tints follow the macOS
+  accent colour (`NSColor.controlAccentColor`) instead of a fixed periwinkle, in
+  both windows. Card counts and metadata are grey, row tags are coloured dots
+  (names in the tooltip), and "1 cards" is now "1 card".
+- **Native sidebar.** A plain Search field (the `#tag` hint moved to its tooltip)
+  with All / This week and Newest / Oldest first in a filter menu at its end;
+  the glyph takes the accent while "This week" hides sessions. Selection is one
+  soft fill (`selectionFill`) in place of fill, outline, shadow and accent bar.
+  The opaque strips behind folder and date headers — left over from when headers
+  were pinned — are gone, so the glass shows through. Folder rows show their
+  count, and swap it for the context, tags and record buttons on hover (by
+  opacity, so an open popover stays anchored); the filled glyphs, not the
+  accent, now show a folder has context or tags.
+- **Quieter chrome.** The detail's Hide Transcript, Summarise, Tags and `…`
+  actions moved from boxed buttons beside the title into one toolbar group, and
+  the window uses `.unifiedCompact`, which shrinks the toolbar buttons — Record
+  among them, still beside the window controls.
+- **Ask field.** One glass capsule with an inline send arrow that takes the
+  accent once there's a question, floating over the bottom of the reading column
+  with the page fading out beneath it; a streaming answer shows as a card above
+  it.
+
+The Recording window was out of scope beyond the shared card renderer and accent
+colour; its toolbar, AskBar and card chrome keep their earlier look.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

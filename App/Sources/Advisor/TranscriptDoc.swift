@@ -26,28 +26,42 @@ enum TranscriptBlock: Equatable {
 /// blank line, so consecutive utterances are always blank-line-separated — only
 /// the 2s gap or an interrupting card/heading starts a new paragraph.
 enum TranscriptDoc {
+    /// A display block with the `HH:mm` its first transcript line was spoken —
+    /// set for paragraphs with a stamped line, nil for everything else.
+    struct TimedBlock: Equatable {
+        let block: TranscriptBlock
+        let time: String?
+    }
+
     /// `body` must already have frontmatter stripped
     /// (`SessionArchive.strippingFrontmatter`).
     static func blocks(from body: String) -> [TranscriptBlock] {
-        var blocks: [TranscriptBlock] = []
+        timedBlocks(from: body).map(\.block)
+    }
+
+    /// `blocks(from:)`, keeping each paragraph's start time for display.
+    static func timedBlocks(from body: String) -> [TimedBlock] {
+        var blocks: [TimedBlock] = []
         var para: [String] = []
+        var paraTime: String?
         var prevSecs: Int?
         var quote: [String] = []
 
         func flushPara() {
             if !para.isEmpty {
-                blocks.append(.paragraph(para.joined(separator: " ")))
+                blocks.append(TimedBlock(block: .paragraph(para.joined(separator: " ")), time: paraTime))
                 para = []
             }
+            paraTime = nil
             prevSecs = nil
         }
         func flushQuote() {
             if !quote.isEmpty {
                 let inner = quote.joined(separator: "\n")
                 if let noteBody = noteBody(from: inner) {
-                    blocks.append(.note(noteBody))
+                    blocks.append(TimedBlock(block: .note(noteBody), time: nil))
                 } else {
-                    blocks.append(.card(inner))
+                    blocks.append(TimedBlock(block: .card(inner), time: nil))
                 }
                 quote = []
             }
@@ -69,7 +83,7 @@ enum TranscriptDoc {
             if line.isEmpty { continue }
             if line.hasPrefix("# ") {
                 flushPara()
-                blocks.append(.heading(String(line.dropFirst(2))))
+                blocks.append(TimedBlock(block: .heading(String(line.dropFirst(2))), time: nil))
                 continue
             }
             if line.hasPrefix("- ") {
@@ -82,7 +96,10 @@ enum TranscriptDoc {
                     if delta > 2 { flushPara() }
                 }
                 if !text.isEmpty { para.append(text) }
-                if let secs { prevSecs = secs }
+                if let secs {
+                    prevSecs = secs
+                    if paraTime == nil { paraTime = String(format: "%02d:%02d", secs / 3600, secs % 3600 / 60) }
+                }
                 continue
             }
             // Any other prose line folds into the current paragraph.

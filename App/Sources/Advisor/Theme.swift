@@ -41,6 +41,14 @@ enum Theme {
     static let surfaceCardInset = dyn(0xF7F7FA, 0x202024)
     /// Toolbar control fill (record cluster, source button, float).
     static let surfaceControl = dyn(0xFFFFFF, 0x323237)
+    /// A faint fill that sets a card off from the page without an outline.
+    static let surfaceCardSubtle = dyn(0x000000, 0xFFFFFF, lightAlpha: 0.032, darkAlpha: 0.045)
+    /// Search and input fields drawn without a border.
+    static let fieldFill = dyn(0x000000, 0xFFFFFF, lightAlpha: 0.05, darkAlpha: 0.075)
+    /// The selected sidebar row: one soft fill, no outline or bar.
+    static let selectionFill = dyn(0x000000, 0xFFFFFF, lightAlpha: 0.075, darkAlpha: 0.09)
+    /// A row under the pointer.
+    static let hoverFill = dyn(0x000000, 0xFFFFFF, lightAlpha: 0.035, darkAlpha: 0.045)
 
     // MARK: borders
     static let hairline = dyn(0x000000, 0xFFFFFF, lightAlpha: 0.10, darkAlpha: 0.13)
@@ -54,21 +62,25 @@ enum Theme {
     static let textMuted = dyn(0xAEAFB8, 0x6F7079)
     /// NSColor twin of `textBody`, for the AppKit-backed transcript text view.
     static let nsTextBody = NSColor.dynamic(NSColor(rgb: 0x3A3B44), NSColor(rgb: 0xDCDDE3))
+    static let nsTextStrong = NSColor.dynamic(NSColor(rgb: 0x2A2B33), NSColor(rgb: 0xF2F2F6))
+    static let nsTextTertiary = NSColor.dynamic(NSColor(rgb: 0x8A8B95), NSColor(rgb: 0x8C8D97))
     /// NSColor twins for the AppKit-backed card text view (`MarkdownText`).
     /// Explicit twins (not `NSColor(Color)`) so light/dark resolves correctly.
     static let nsTextMuted = NSColor.dynamic(NSColor(rgb: 0xAEAFB8), NSColor(rgb: 0x6F7079))
-    static let nsAccent = NSColor.dynamic(NSColor(rgb: 0x3A5CE0), NSColor(rgb: 0x6E8BFF))
+    static let nsAccent = NSColor.controlAccentColor
     static let nsAccentTint = NSColor.dynamic(
-        NSColor(rgb: 0xEEF1FB), NSColor(rgb: 0x6E8BFF, alpha: 0.16))
+        NSColor.controlAccentColor.withAlphaComponent(0.10), NSColor.controlAccentColor.withAlphaComponent(0.16))
     static let nsContextCodeText = NSColor.dynamic(NSColor(rgb: 0x6E54B8), NSColor(rgb: 0xCCBEFF))
     static let nsContextCodeBg = NSColor.dynamic(
         NSColor(rgb: 0xF1F0F6), NSColor(rgb: 0xB9A4FF, alpha: 0.14))
 
-    // MARK: accent (blue)
-    static let accent = dyn(0x3A5CE0, 0x6E8BFF)
-    static let accentHover = dyn(0x3350CF, 0x829BFF)
-    static let accentTint = dyn(0xEEF1FB, 0x6E8BFF, darkAlpha: 0.16)
-    static let accentTintStrong = dyn(0xE7ECFD, 0x6E8BFF, darkAlpha: 0.20)
+    // MARK: accent — the user's macOS accent colour (System Settings →
+    // Appearance), kept for links, selection focus and primary actions.
+    static let accent = Color(nsColor: .controlAccentColor)
+    static let accentHover = Color(nsColor: NSColor.controlAccentColor.withSystemEffect(.rollover))
+    static let accentTint = Color(nsColor: nsAccentTint)
+    static let accentTintStrong = Color(nsColor: .dynamic(
+        NSColor.controlAccentColor.withAlphaComponent(0.14), NSColor.controlAccentColor.withAlphaComponent(0.20)))
     /// White glyphs/text on a filled accent button stay white in both modes.
     static let onAccent = Color.white
 
@@ -103,6 +115,11 @@ enum Theme {
     enum Metric {
         static let toolbarHeight: CGFloat = 60
         static let contentMaxWidth: CGFloat = 812
+        /// The Sessions detail's centred reading column, its side margin, and
+        /// how far paragraph times hang into that margin.
+        static let readingWidth: CGFloat = 680
+        static let readingMargin: CGFloat = 60
+        static let timeGutter: CGFloat = 50
         static let contentTopPad: CGFloat = 26
         static let contentSidePad: CGFloat = 28
         static let contentBottomPad: CGFloat = 40
@@ -116,7 +133,17 @@ enum Theme {
         static let paragraphSpacing: CGFloat = 6
         static let transcriptSize: CGFloat = 14.5
         static let transcriptLineSpacing: CGFloat = 14.5 * 0.2  // line-height 1.2
-        static let cardBodySize: CGFloat = 13.5
+        static let cardBodySize: CGFloat = 14
+
+        // Card text layout (`MarkdownText`): line height ≈ 1.5, list items
+        // closer together than blocks, items hanging past their marker.
+        static let cardLineSpacingRatio: CGFloat = 0.3
+        static let cardBlockSpacing: CGFloat = 10
+        static let cardItemSpacing: CGFloat = 3
+        static let cardLeadSpacingBefore: CGFloat = 6
+        static let cardListIndent: CGFloat = 18
+        static let cardBulletColumn: CGFloat = 14
+        static let cardOrdinalColumn: CGFloat = 22
     }
 
     /// Card ambient shadow. Near-invisible in dark mode, where the elevated

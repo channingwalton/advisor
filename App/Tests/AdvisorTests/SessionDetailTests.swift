@@ -116,3 +116,45 @@ context: x
     // Multi-line context collapses to one frontmatter scalar.
     #expect(md.contains("context: Q3 board review second line\n"))
 }
+
+// MARK: card display parts
+
+@Test func cardPartsSplitHeaderLabelTitleAndBody() {
+    let parts = SessionDetail.cardParts("**CONTEXT · Jefferson agent work**\n\nBody line.\n\n_↳ quote_")
+    #expect(parts.label == "CONTEXT")
+    #expect(parts.title == "Jefferson agent work")
+    #expect(parts.body == "Body line.\n\n_↳ quote_")
+}
+
+@Test func cardPartsLabelOnlyHeader() {
+    let parts = SessionDetail.cardParts("**SUMMARY**\n\nThe gist.")
+    #expect(parts.label == "SUMMARY")
+    #expect(parts.title == "")
+    #expect(parts.body == "The gist.")
+}
+
+@Test func cardPartsWithoutHeaderKeepWholeBody() {
+    let parts = SessionDetail.cardParts("Just a body.\n- item")
+    #expect(parts.label == "")
+    #expect(parts.title == "")
+    #expect(parts.body == "Just a body.\n- item")
+}
+
+@Test func cardPartsKindNameIsSentenceCase() {
+    #expect(SessionDetail.cardParts("**CONTEXT · x**").kindName == "Context")
+    #expect(SessionDetail.cardParts("**NEEDS CONTEXT · x**").kindName == "Needs context")
+    #expect(SessionDetail.cardParts("**FACT-CHECK · x**").kindName == "Fact-check")
+    #expect(SessionDetail.cardParts("**Q · Which is production-ready?**").kindName == "Question")
+}
+
+@Test func cardCountIsPluralised() {
+    #expect(SessionDetail.cardCount(0) == "0 cards")
+    #expect(SessionDetail.cardCount(1) == "1 card")
+    #expect(SessionDetail.cardCount(9) == "9 cards")
+}
+
+@Test func detailKeepsParagraphTimesAlongsideBlocks() {
+    let d = SessionDetail.parse(contents: note, fallbackTitle: "fallback")
+    #expect(d.blockTimes.count == d.blocks.count)
+    #expect(d.blockTimes.compactMap { $0 } == ["17:00", "17:00"])
+}

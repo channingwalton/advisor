@@ -8,6 +8,22 @@ struct SurfacedCard: Equatable {
     let snippet: String
 }
 
+/// A saved card split for display (`SessionDetail.cardParts`): the header label
+/// (ANSWER, CONTEXT, SUMMARY, Q, …; "" when there's no header), its title ("" for
+/// a label-only header) and the body markdown.
+struct SavedCardParts: Equatable {
+    let label: String
+    let title: String
+    let body: String
+
+    /// The label as shown above the card title: sentence case, with the
+    /// follow-up `Q` spelt out.
+    var kindName: String {
+        if label == "Q" { return "Question" }
+        return label.prefix(1).uppercased() + label.dropFirst().lowercased()
+    }
+}
+
 /// A question the user asked about a session (the `# Follow-ups` blocks), shown
 /// in the "You asked" list.
 struct AskedQuestion: Equatable {
@@ -38,12 +54,18 @@ struct SessionDetail: Equatable {
     let cards: [SurfacedCard]
     let questions: [AskedQuestion]
     let blocks: [TranscriptBlock]
+    /// `HH:mm` each block's first transcript line was spoken, parallel to
+    /// `blocks` (nil for cards, notes, headings and unstamped prose).
+    let blockTimes: [String?]
 
     /// Session length in whole minutes, when both ends are known.
     var durationMinutes: Int? {
         guard let started, let ended else { return nil }
         return max(0, Int(ended.timeIntervalSince(started) / 60))
     }
+
+    /// "1 card", "9 cards".
+    static func cardCount(_ n: Int) -> String { n == 1 ? "1 card" : "\(n) cards" }
 
     /// Parse a note. `fallbackTitle` (the formatted date) is used when the note
     /// carries no `context` to title it.
@@ -53,7 +75,8 @@ struct SessionDetail: Equatable {
         let name = fm["name"]?.trimmingCharacters(in: .whitespaces) ?? ""
         let context = fm["context"]?.trimmingCharacters(in: .whitespaces) ?? ""
         let tags = SessionArchive.parseTags(fm["tags"] ?? "")
-        let blocks = TranscriptDoc.blocks(from: SessionArchive.strippingFrontmatter(contents))
+        let timed = TranscriptDoc.timedBlocks(from: SessionArchive.strippingFrontmatter(contents))
+        let blocks = timed.map(\.block)
 
         var cards: [SurfacedCard] = []
         var questions: [AskedQuestion] = []
@@ -83,7 +106,8 @@ struct SessionDetail: Equatable {
             ended: fm["ended"].flatMap(iso.date(from:)),
             cards: cards,
             questions: questions,
-            blocks: blocks)
+            blocks: blocks,
+            blockTimes: timed.map(\.time))
     }
 
     /// Splits a card's inner markdown into (label, title, snippet). The header is
@@ -109,6 +133,26 @@ struct SessionDetail: Equatable {
             return !t.isEmpty && !t.hasPrefix("_")
         }
         return (label, title, truncated(snippet ?? "", max: 80))
+    }
+
+    /// Splits a saved card's inner markdown for display: the `**LABEL · Title**`
+    /// header (or a label-only `**SUMMARY**`) and the body markdown under it. A
+    /// card without a bold header line is all body.
+    static func cardParts(_ markdown: String) -> SavedCardParts {
+        var lines = markdown.components(separatedBy: "\n")
+        let header = lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
+        guard header.count > 4, header.hasPrefix("**"), header.hasSuffix("**") else {
+            return SavedCardParts(label: "", title: "", body: markdown)
+        }
+        let inner = String(header.dropFirst(2).dropLast(2))
+        lines.removeFirst()
+        while lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeFirst() }
+        let body = lines.joined(separator: "\n")
+        guard let sep = inner.range(of: " · ") else {
+            return SavedCardParts(label: inner, title: "", body: body)
+        }
+        return SavedCardParts(
+            label: String(inner[..<sep.lowerBound]), title: String(inner[sep.upperBound...]), body: body)
     }
 
     /// Pulls `HH:MM` out of a follow-up's `_Asked HH:MM:SS · …_` footer. Anchored

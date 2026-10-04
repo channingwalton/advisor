@@ -230,13 +230,16 @@ choose.
 The **Sessions** browser is the app's main window (it opens at launch; the
 recording window's **History** button, clock icon, brings it forward) — a master/
 detail window over past sessions. The left sidebar lists sessions grouped by day
-(Today / Yesterday / Earlier this week / …) with search (which also matches tags;
-type `#tag` to filter by tag specifically), an All / This week
-filter and a recent/oldest sort toggle; each row shows the session's title (its name if you gave it one, else the
-context you typed before Listen, else the date), a gist, duration and card count,
-and any tags as coloured pills.
-Organise sessions into **folders**: the sidebar's **FOLDERS** bar (with a `+` to
-add one) lists collapsible folder sections above the date-grouped sessions. File
+(Today / Yesterday / Earlier this week / …) with a **Search** field (which also
+matches tags; type `#tag` to filter by tag specifically); the filter button at its
+end switches between all sessions and this week, and between newest and oldest
+first (it turns the accent colour while showing this week only). Each row shows
+the session's title (its name if you gave it one, else the context you typed
+before Listen, else the date), a gist, duration and card count, and a coloured dot
+per tag (hover for the names).
+Organise sessions into **folders**: the sidebar's **Folders** label (hover it for
+a `+` to add one) lists collapsible folder sections above the date-grouped
+sessions. File
 a session by dragging its row onto a folder, or via its **right-click** menu →
 **Move to Folder** (existing folders, **No Folder** to take it back out, or
 **New Folder…**). Right-click a folder header to rename or delete it — deleting a
@@ -246,8 +249,8 @@ owned by the Recording window cannot be re-filed until that window closes.
 Its containing folder cannot be renamed or deleted either, including while stopped.
 Closing drains the last speech results before saving and releasing the note;
 a reopened Recording window waits for that save. You can
-**start** a recording already in a folder: the red **record button** on a folder
-header opens the recording window filed into that folder, so its note is saved
+**start** a recording already in a folder: hover a folder header to show its
+buttons, and its red **record button** opens the recording window filed into that folder, so its note is saved
 there straight away (the recording window shows the target folder). The folder is
 fixed once you press Listen; re-file afterwards with **Move to Folder**. Each folder
 can also carry a **default context**: the speech-bubble button beside a folder's
@@ -259,17 +262,17 @@ from that folder inherits them, and you can adjust them before or during the
 session. Existing sessions and sessions moved into the folder are unchanged.
 Selecting one shows it on the right: title and meta, the questions you asked, and
 the transcript rendered like the live window (with the cards Advisor surfaced
-inline, as in the live view). The detail header's **Tags** chip applies or
-removes tags (picking from your library). Give a session a name with the
-`…` menu → **Rename**
-(top right of the detail) — a short label for an easier-to-scan list; leave it
+inline, as in the live view, with each paragraph's time in the margin; hover a
+card to copy it). The toolbar above the detail holds **Hide Transcript**,
+**Summarise**, **Tags** (applies or removes tags, picking from your library) and
+the `…` menu. Give a session a name with `…` → **Rename** — a short label for an easier-to-scan list; leave it
 blank to fall back to the context. The same menu has **Export…** (save a copy of
 the markdown elsewhere), **Share…** (the macOS share sheet — Mail, AirDrop,
 Messages, etc.), **Reveal in Finder** (opens
 the session's markdown file) and **Delete** (behind a confirmation — it
 permanently removes the note from disk); the live session can't be deleted. The
 same actions are also on each list row's **right-click** menu.
-Ask a question about the selected session in the box at the bottom: the answer
+Ask a question about the selected session in the field at the bottom: the answer
 streams in and, once finished, is appended to that session's note under a
 `# Follow-ups` heading, so the saved transcript grows with
 the questions you ask of it. (The session currently being recorded is read-only

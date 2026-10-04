@@ -93,3 +93,24 @@ import Testing
     let blocks = TranscriptDoc.blocks(from: SessionArchive.strippingFrontmatter(md))
     #expect(blocks == [.heading("Transcript"), .paragraph("hello there how are you")])
 }
+
+@Test func paragraphsCarryTheTimeOfTheirFirstLine() {
+    let body = """
+    # Transcript
+
+    - 17:00:00 One.
+
+    - 17:00:01 Two.
+
+    - 17:05:09 Three.
+
+    > **CONTEXT · x**
+    """
+    let timed = TranscriptDoc.timedBlocks(from: body)
+    #expect(timed.map(\.block) == TranscriptDoc.blocks(from: body))
+    #expect(timed.map(\.time) == [nil, "17:00", "17:05", nil])
+}
+
+@Test func unstampedParagraphHasNoTime() {
+    #expect(TranscriptDoc.timedBlocks(from: "Loose prose line.").map(\.time) == [nil])
+}
