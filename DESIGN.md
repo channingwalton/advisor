@@ -1483,6 +1483,40 @@ feature and removes signals rather than adding them:
 The Recording window was out of scope beyond the shared card renderer and accent
 colour; its toolbar, AskBar and card chrome keep their earlier look.
 
+## Website rebuilt as plain HTML (2026-10-04)
+
+The site in `www/` was a design-tool export: every page loaded a generated
+React runtime (`support.js`) to render inline-styled `<x-dc>` templates, with no
+`@media` rules, so at phone width an `overflow: hidden` wrapper silently clipped
+the nav's Download button and every third grid column. Its "screenshots" were
+hand-built HTML mockups that had drifted from the app (upper-case kind chips,
+blue pills, named speakers with avatars, which the app has never had), and the
+copy repeated the privacy pitch six times, advertised a paid plan and
+described the Codex sandbox as it was before the Seatbelt profile.
+
+The three pages now share one `www/style.css` (system font, light and dark
+from `prefers-color-scheme`, two breakpoints) and no script. The index is
+hero, how it works, sessions, six features, privacy once, and download. The
+pricing section is gone: Advisor is free. The terms lost their "paid
+subscriptions, when introduced" sentence (§2, both copies) and stay at Version
+1.0, since removing it adds no obligation. The feature guide was rewritten from
+FEATURES.md, so change the two together. Screenshots are real window
+captures in `www/img/` (`recording-` and `sessions-`, `-light` and `-dark`,
+swapped by a `<picture>` media query), taken with `screencapture -l` from
+staged demo sessions, never real ones, so recapturing after a UI change is the
+whole maintenance cost. `terms.html` kept its wording; `mise run release`'s two
+`sed` lines still match the version line and DMG link.
+
+## MIT licence (2026-10-04)
+
+Advisor is free and open source under the MIT licence (`LICENSE`, copyright
+Monoidal Ltd). The terms' §1 used to grant a personal, non-transferable licence
+that forbade redistribution and modification; it now points at the MIT licence
+and says nothing in the terms takes away a right it gives. Both copies (TERMS.md
+and `www/terms.html`) changed together and stay at Version 1.0: like the
+time-limit and paid-subscription removals, the change only widens what users may
+do, so it must not re-prompt anyone to accept.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

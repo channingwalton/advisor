@@ -368,4 +368,12 @@ agents consume Claude Max subscription allowance.
 
 ## www
 
+Plain HTML pages sharing `www/style.css`, with no build step or scripts.
+Screenshots live in `www/img/` as `-light`/`-dark` pairs; capture them from
+demo sessions, never real ones.
+
 Hosted by Cloudfare. The dmg is stored in an R2 bucket called `advisor-downloads` with a custom domain of `downloads.advisor.monoidal.co.uk`. Download link is `https://downloads.advisor.monoidal.co.uk/Advisor-a.b.c.dmg`
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).

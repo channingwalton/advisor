@@ -137,9 +137,11 @@ Advisor researches across whatever you've connected:
   are denied — case-insensitively, with symlinks resolved so a link can't slip
   past the denylist.
 - **Sandboxed research (Codex)** — coarser, because the Codex SDK has no
-  per-call hook: a process-wide `read-only` sandbox with `never` approval blocks
-  all writes and escalation, but read-only shell *is* permitted (so the
-  credential-path denylist does not apply), and MCP connectors come from your
+  per-call hook: the Codex CLI runs under a macOS Seatbelt profile built from
+  the same credential-path denylist, so it and every process it starts (shell
+  commands, MCP servers) can't read those paths or write anywhere but Codex's
+  own state and temp folders. Read-only shell *is* permitted, Codex can still
+  read its own `~/.codex` login, and MCP connectors come from your
   `~/.codex/config.toml` rather than the "Allow connector actions" gate.
 - **Connectors fail closed (Claude)** — anything not recognised as a read or
   search is treated as an action and gated behind an opt-in "Allow connector

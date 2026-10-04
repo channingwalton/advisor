@@ -9,17 +9,15 @@ Advisor you agree to these terms. If you do not agree, do not use Advisor.
 
 ## 1. Licence
 
-We grant you a personal, non-exclusive, non-transferable, revocable licence to
-install and use Advisor on Apple-branded devices you own or control, for your
-own use. You may not sell, rent, redistribute or sublicense Advisor, and you
-may not reverse engineer, decompile or modify it except where the law
-expressly permits.
+Advisor is open-source software released under the MIT licence, whose full
+text is in the LICENSE file in Advisor's source code. Under it you may use,
+copy, modify, merge, publish, distribute, sublicense and sell copies of
+Advisor. Nothing in these terms takes away a right the MIT licence gives you.
 
 ## 2. Beta software
 
 Advisor is currently a free beta. Beta features may change or be removed, and
-beta builds may contain defects. Paid subscriptions, when introduced, will be
-covered by an updated version of these terms presented before you subscribe.
+beta builds may contain defects.
 
 ## 3. AI agents act on your Mac, under your control
 

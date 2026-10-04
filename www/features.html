@@ -1,502 +1,253 @@
 <!DOCTYPE html>
-<html>
+<html lang="en-GB">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Advisor — every feature, in detail</title>
-<script src="./support.js"></script>
+<title>Advisor Feature Guide</title>
+<meta name="description" content="Everything Advisor does, from listening and on-device transcription to how its research agents are sandboxed.">
+<link rel="icon" href="img/icon.png">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<x-dc>
-<helmet>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<style>
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
-  body { background: #f4f2ee; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; color: #1f1d24; }
-  a { color: inherit; }
-  ::selection { background: rgba(58,92,224,0.18); }
-  @keyframes adv-pulse { 0% { box-shadow: 0 0 0 0 rgba(255,69,58,0.45); } 70% { box-shadow: 0 0 0 6px rgba(255,69,58,0); } 100% { box-shadow: 0 0 0 0 rgba(255,69,58,0); } }
-</style>
-</helmet>
 
-<div style="overflow: hidden; background: #f4f2ee;">
+<!-- Keep the nav and footer in sync across index.html, features.html and terms.html. -->
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="img/icon.png" alt="">Advisor</a>
+    <nav class="nav-links">
+      <a href="features.html">Features</a>
+      <a class="optional" href="index.html#privacy">Privacy</a>
+      <a class="button small" href="index.html#download">Download</a>
+    </nav>
+  </div>
+</header>
 
-<!-- ================= NAV ================= -->
-<div style="position: sticky; top: 0; z-index: 50; backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); background: rgba(244,242,238,0.74); border-bottom: 0.5px solid rgba(0,0,0,0.08);">
-  <div style="max-width: 1140px; margin: 0 auto; height: 58px; display: flex; align-items: center; gap: 14px; padding: 0 26px;">
-    <a href="index.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none;">
-      <span style="position: relative; width: 28px; height: 28px; border-radius: 22.5%; overflow: hidden; box-shadow: 0 2px 5px -1px rgba(40,44,96,0.45), inset 0 0 0 0.5px rgba(0,0,0,0.06); background: linear-gradient(157deg, #7088ff 0%, #3a5ce0 52%, #4730a8 100%); display: inline-block;">
-        <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 9%;">
-          <span style="width: 8%; height: 40%; background: rgba(255,255,255,0.9); border-radius: 99px;"></span>
-          <span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span>
-          <span style="width: 8%; height: 88%; background: #fff; border-radius: 99px;"></span>
-          <span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span>
-          <span style="width: 8%; height: 40%; background: rgba(255,255,255,0.9); border-radius: 99px;"></span>
-        </span>
-        <span style="position: absolute; top: 7%; right: 7%; width: 25%; height: 25%; background: #fff; clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%);"></span>
-      </span>
-      <span style="font-size: 17px; font-weight: 600; letter-spacing: -0.2px; color: #1f1d24;">Advisor</span>
-    </a>
-    <div style="margin-left: auto; display: flex; align-items: center; gap: 30px;">
-      <a href="index.html#how" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">How it works</a>
-      <a href="index.html#screens" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">Screenshots</a>
-      <a href="#top" style="font-size: 13.5px; color: #1f1d24; text-decoration: none; font-weight: 600;">Feature guide</a>
-      <a href="index.html#pricing" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">Pricing</a>
-      <a href="index.html#download" style="display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 16px; border-radius: 9px; background: #1f1d24; color: #fff; font-size: 13px; font-weight: 600; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,0.12);" style-hover="background:#34313c;">
-        <span style="width: 8px; height: 8px; border-right: 1.6px solid #fff; border-bottom: 1.6px solid #fff; transform: rotate(45deg) translate(-1px,-1px); display: inline-block;"></span>
-        Download
-      </a>
-    </div>
+<main class="guide">
+
+<div class="wrap">
+  <div class="intro head">
+    <h1>Feature guide</h1>
+    <p class="lede">Everything Advisor does, in more detail than the <a href="index.html">overview</a>.</p>
+    <ul class="toc">
+      <li><a href="#listening">Listening</a></li>
+      <li><a href="#transcription">Transcription</a></li>
+      <li><a href="#cards">Cards</a></li>
+      <li><a href="#asking">Asking</a></li>
+      <li><a href="#window">Recording window</a></li>
+      <li><a href="#sessions">Sessions</a></li>
+      <li><a href="#organisation">Organisation</a></li>
+      <li><a href="#sources">Sources</a></li>
+      <li><a href="#privacy">Privacy</a></li>
+      <li><a href="#providers">Providers</a></li>
+      <li><a href="#settings">Settings</a></li>
+      <li><a href="#requirements">Requirements</a></li>
+    </ul>
   </div>
 </div>
 
-<!-- ================= HEADER ================= -->
-<div id="top" style="position: relative; background: radial-gradient(120% 80% at 50% -10%, #ffffff 0%, #f4f2ee 60%);">
-  <div style="max-width: 900px; margin: 0 auto; padding: 84px 26px 56px; text-align: center;">
-    <div style="font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #3a5ce0; margin-bottom: 16px;">Feature guide</div>
-    <h1 style="font-size: 56px; line-height: 1.05; letter-spacing: -1.8px; font-weight: 700; margin: 0; color: #1c1a22; text-wrap: balance;">Everything Advisor does.</h1>
-    <p style="max-width: 640px; margin: 22px auto 0; font-size: 18px; line-height: 1.6; color: #56545d; text-wrap: pretty;">The complete tour — every feature, from the Listen button to the sandbox that keeps research on a leash. For the short version, head back to the <a href="index.html" style="color: #3a5ce0; text-decoration: none; font-weight: 600;">overview</a>.</p>
-    <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 34px;">
-      <a href="#listening" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Live listening</a>
-      <a href="#transcription" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Transcription</a>
-      <a href="#cards" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Proactive cards</a>
-      <a href="#ask" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Ask anything</a>
-      <a href="#window" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Recording window</a>
-      <a href="#sessions" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Sessions browser</a>
-      <a href="#organisation" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Organisation</a>
-      <a href="#sources" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Sources</a>
-      <a href="#privacy" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Privacy &amp; safety</a>
-      <a href="#providers" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Providers</a>
-      <a href="#preferences" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Preferences</a>
-      <a href="#requirements" style="font-size: 12.5px; font-weight: 600; color: #3b4254; background: #fff; border: 0.5px solid rgba(0,0,0,0.09); border-radius: 99px; padding: 7px 14px; text-decoration: none;" style-hover="border-color:#3a5ce0;">Requirements</a>
+<section id="listening">
+  <div class="wrap topic">
+    <div>
+      <h2>Listening</h2>
+      <p>Advisor hears both sides of a conversation: you through the microphone, everyone else through your Mac's audio. Nothing joins the call, so it works with any meeting app, a video, or people in the room.</p>
     </div>
+    <ul class="items">
+      <li><h3>Listen</h3><p>Press Listen to start. A red indicator and a timer show while Advisor is capturing. It never starts on its own.</p></li>
+      <li><h3>Both sides</h3><p>The microphone and system audio (through ScreenCaptureKit) are captured together, so Advisor hears you and whatever is playing: Zoom, Meet, Teams, a video or a webinar.</p></li>
+      <li><h3>Mute</h3><p>Mute your microphone during a session while system audio carries on being transcribed. Tap again to unmute.</p></li>
+      <li><h3>Echo removal</h3><p>On a call, your voice comes back through the speakers into the microphone. Advisor removes that echo so you aren't transcribed twice.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 01 LIVE LISTENING ================= -->
-<div id="listening" style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">01</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Live listening</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">One button hears the whole room — you through the microphone, everyone else through the Mac's own audio. No bot joins the call, so it works with any app, any video, or a conversation across the table.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">One button to listen</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Press <strong>Listen</strong> and Advisor starts capturing; a pulsing red indicator and a running timer make it unmistakable that it's live. Listening is always explicitly user-initiated — the app never starts capturing on its own.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Both sides of any conversation</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Advisor captures your microphone and your Mac's system audio (via ScreenCaptureKit) at the same time — so it hears you <em>and</em> whatever is playing: a Zoom call, a Meet, a Teams meeting, a video, a webinar. Nothing joins the meeting; nobody sees an extra participant.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Mic mute</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Silence your own microphone mid-session while system audio keeps being captured and transcribed — useful when you want the room on record but not yourself. Tap again to unmute.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Echo dedup</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">On a call, your own voice comes back out of the speakers and into the mic. Advisor detects and removes that bleed, so you aren't transcribed twice.</p>
-        </div>
-      </div>
+<section id="transcription">
+  <div class="wrap topic">
+    <div>
+      <h2>Transcription</h2>
+      <p>Speech is transcribed on your Mac by Apple's SpeechAnalyzer. There's no cloud transcription service and no model to download.</p>
     </div>
+    <ul class="items">
+      <li><h3>Live transcript</h3><p>Words appear in grey as they're spoken and settle into finished sentences.</p></li>
+      <li><h3>Audio stays on your Mac</h3><p>Only transcript text is sent anywhere, and only to the AI provider you've signed in with.</p></li>
+      <li><h3>No recordings</h3><p>No audio file is written. The transcript, saved as Markdown, is the only record of the conversation.</p></li>
+      <li><h3>Language</h3><p>Choose the speech-recognition language in Settings, or leave it on System default to follow your Mac.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 02 TRANSCRIPTION ================= -->
-<div id="transcription" style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">02</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">On-device transcription</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">Speech becomes text on your Mac, using Apple's SpeechAnalyzer. No cloud transcription service, no audio uploads, no model files to download and manage.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">A live transcript that firms up</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Words appear in grey as they're spoken, then settle into finalised sentences — a clean, chronological feed of the conversation. Runs of transcript between cards are grouped into their own recessed panel, so speech and assistant output stay visually distinct.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Audio never leaves the Mac</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Speech-to-text runs entirely on-device (macOS 26+). The only thing that ever goes anywhere is transcript <em>text</em>, and only to the AI provider you've signed in with.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Nothing is recorded</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">No audio file is ever written. The transcript is the only record of the conversation — stored as plain markdown you can read, move, or delete.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Locale-aware</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Pick the speech-recognition locale in Preferences from the list Apple supports, or leave it on <strong>System default</strong> and Advisor follows your Mac's locale.</p>
-        </div>
-      </div>
+<section id="cards">
+  <div class="wrap topic">
+    <div>
+      <h2>Cards</h2>
+      <p>As the conversation goes on, Advisor decides what's worth looking up and adds a card to the transcript at the point it relates to.</p>
     </div>
+    <ul class="items">
+      <li><h3>Answer</h3><p>A question asked aloud, by you or anyone else, gets an answer.</p></li>
+      <li><h3>Context</h3><p>Background on the people, projects, tickets, terms and technologies being discussed.</p></li>
+      <li><h3>Fact-check</h3><p>Claims are checked against sources. When a claim can't be confirmed, the card says so rather than guessing. Fact-checks start collapsed.</p></li>
+      <li><h3>Sources</h3><p>A short first answer appears, then a fuller one once research finishes. Every card cites its sources as links or file paths.</p></li>
+      <li><h3>How often</h3><p>Choose conservative, balanced or eager, and turn each kind of card on or off. The Auto cards switch stops cards appearing by themselves while transcription carries on.</p></li>
+      <li><h3>Speed</h3><p>A fast classifier decides whether to act in under a second, leaving the rest of the time for research. Research runs in parallel, so one slow question doesn't hold up the next.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 03 PROACTIVE CARDS ================= -->
-<div id="cards" style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">03</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Proactive cards</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">As the conversation flows, Advisor decides what's worth helping with and slides a card into the feed, anchored to the exact moment it relates to.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;"><span style="display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #3a5ce0; background: #e7ecfd; padding: 2px 8px; border-radius: 5px; vertical-align: 2px; margin-right: 8px;">ANSWER</span>Questions answered as they're asked</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Ask something aloud — or hear someone else ask it — and an Answer card appears without anyone touching the keyboard.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;"><span style="display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #6044c0; background: #eee9fb; padding: 2px 8px; border-radius: 5px; vertical-align: 2px; margin-right: 8px;">CONTEXT</span>Background on what's in play</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Context cards brief you on the people, projects, tickets, terms, and technologies being discussed — pulled from the web and whatever sources you've connected.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;"><span style="display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #2f8d5b; background: #e6f4ec; padding: 2px 8px; border-radius: 5px; vertical-align: 2px; margin-right: 8px;">FACT-CHECK</span>Claims checked against sources</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Factual claims are verified against real sources — and when a claim can't be confirmed, the card says <em>"couldn't verify"</em> rather than guessing. Fact-checks start collapsed so they stay out of the way until you want them.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Cards stream in, then improve</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">A brief preliminary answer lands first, then a revised one replaces it as the research agent consults the web and your connected sources. Every card cites where it came from — links or file paths, inline.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Tunable triggers</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Set the sensitivity — <strong>conservative</strong>, <strong>balanced</strong>, or <strong>eager</strong> — and toggle each card kind (answer / context / fact-check) on or off independently. An Auto-cards switch in the toolbar turns proactive help off entirely while you keep transcribing.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Built for speed</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">A fast classifier decides <em>whether</em> to act in under a second, leaving the research agent the rest of the budget to answer — so useful cards arrive within a few seconds, while the moment is still live. Research runs in parallel lanes, so one slow question never blocks the next.</p>
-        </div>
-      </div>
+<section id="asking">
+  <div class="wrap topic">
+    <div>
+      <h2>Asking</h2>
+      <p>Anything Advisor does by itself, you can also ask for, with the transcript as context.</p>
     </div>
+    <ul class="items">
+      <li><h3>Ask box</h3><p>Type a question at any time, about the conversation or anything else. The answer arrives as a card.</p></li>
+      <li><h3>Right-click a line</h3><p>Select transcript text and choose Answer, Context or Fact check; the card appears under that line. The same menu copies text and corrects a misheard word.</p></li>
+      <li><h3>Notes</h3><p>Right-click a line and choose Add note here… to add your own note to the transcript. Advisor trusts it over the speech recognition, may research it, and saves it with the session.</p></li>
+      <li><h3>Follow-ups</h3><p>Ask a follow-up on a finished card and the reply is added to that card.</p></li>
+      <li><h3>Card controls</h3><p>Collapse, expand, copy or dismiss any card. Dismissing a card that's still researching stops the research.</p></li>
+      <li><h3>Summary</h3><p>Summarise the whole conversation into a card in one click, live or on a saved session. The summary is saved with the session.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 04 ASK ANYTHING ================= -->
-<div id="ask" style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">04</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Ask anything</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">The assistant doesn't just volunteer — everything it can do on its own, you can ask for directly, with the live transcript as context.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">The query box</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Type a question at any time — about the current conversation or anything else. The answer arrives as a card in the feed, with the transcript so far as its context.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Right-click any line</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Select transcript text and run <strong>Answer</strong>, <strong>Context</strong>, or <strong>Fact check</strong> on it directly — the same actions the assistant triggers automatically — with the resulting card anchored under that line. The menu also copies the selection, and lets you correct a mis-heard word so the record is right.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Editorial notes</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Right-click a line ▸ <em>Add note here…</em> to inject your own note into the transcript as a distinct NOTE card, anchored where you put it. The assistant treats your note as authoritative context — it can even trigger research of its own — and it's saved with the session, round-tripping through the markdown. Delete it any time.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Follow-ups turn cards into threads</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Once a card is done, ask it a follow-up; the reply is appended in place, so a card becomes a short, focused thread rather than a scattering of new cards.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Card controls</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Collapse, expand, copy, or dismiss any card. Dismissing a card that's still researching cancels its work — no orphaned agents grinding away in the background.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Summarise on demand</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">One tap distils the whole conversation into a Summary card — during the session or on a saved one afterwards — and the summary is kept with the note.</p>
-        </div>
-      </div>
+<section id="window">
+  <div class="wrap topic">
+    <div>
+      <h2>Recording window</h2>
+      <p>One window that sits beside your call.</p>
     </div>
+    <ul class="items">
+      <li><h3>Float</h3><p>Keep the window above other apps so it stays in view during a meeting.</p></li>
+      <li><h3>Stop and resume</h3><p>Stop pauses capture without ending the session, and Resume carries on with the same context. The session ends when you close the window.</p></li>
+      <li><h3>Session context</h3><p>Tell Advisor who's there, what the topic is and what to focus on, before you start or during the session. Changes apply from the next card.</p></li>
+      <li><h3>Name</h3><p>Rename the session from the toolbar while it records. A session started in a folder shows which folder it's saved to.</p></li>
+      <li><h3>Cards only</h3><p>Hide the transcript to see only the cards, and tap again to bring it back.</p></li>
+      <li><h3>Export</h3><p>Save a copy of the session's Markdown anywhere you like, during or after recording.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 05 RECORDING WINDOW ================= -->
-<div id="window" style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">05</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">The recording window</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">A single window designed to sit beside your call — quiet when there's nothing to say, unmissable when there is.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Floating mode</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Keep the window always-on-top so it stays visible next to your meeting without stealing focus from it.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Stop is a pause, not an ending</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;"><strong>Stop</strong> pauses capture but keeps the session live; <strong>Resume</strong> picks it back up with full context intact. The session is only finalised when you close the window.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Session context</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Tell the assistant who's present, what the topic is, and what to focus on — before you start, or edited live to steer it mid-conversation. Each change applies from the next card. Pick from saved contexts instead of retyping common setups.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Name it while it's live</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">A Name chip in the toolbar renames the session as it records; the Sessions sidebar updates immediately. Started from a folder, a read-only chip shows where the note is being written.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Cards-only view</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Hide the transcript with one tap to watch just the cards stream in — the assistant's output and nothing else. Tap again to bring the words back.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Export</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Copy the current session note to any location you choose, while it's still recording or after.</p>
-        </div>
-      </div>
+<section id="sessions">
+  <div class="wrap topic">
+    <div>
+      <h2>Sessions</h2>
+      <p>The app opens on your past sessions, and you can keep asking them questions.</p>
     </div>
+    <ul class="items">
+      <li><h3>List</h3><p>Sessions are grouped by day, with search and a filter menu for this week and sort order. Each row shows the title, a one-line summary, the duration, the number of cards and the session's tags. Type #tag to filter by tag.</p></li>
+      <li><h3>Detail</h3><p>The questions you asked and the transcript, with each card where it appeared.</p></li>
+      <li><h3>Ask a past session</h3><p>Ask a question about a saved session. The answer is added to its note under Follow-ups.</p></li>
+      <li><h3>Rename, export, show and delete</h3><p>From the session's … menu, or by right-clicking it in the list.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 06 SESSIONS BROWSER ================= -->
-<div id="sessions" style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">06</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Sessions browser</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">The app opens on a master/detail browser of everything you've captured — and past sessions stay alive: you can keep asking them questions.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Grouped &amp; searchable</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Sessions are grouped by day — Today, Yesterday, Earlier this week, and so on — with search, an All / This week filter, and a recent / oldest sort toggle. Each row shows a title, a one-line gist, the duration, and how many cards were surfaced. Type <code style="font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; background: #eceae5; padding: 1px 5px; border-radius: 4px;">#tag</code> to filter by tag.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Full session detail</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Title and metadata, the questions you asked, and the transcript rendered just like the live window — with every surfaced card inline, exactly where it appeared.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Ask-and-append</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Ask a question about a past session; the answer streams in and is appended to that session's note under a <strong>Follow-ups</strong> heading. The saved transcript grows with the questions you ask of it.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Rename, export, reveal &amp; delete</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Give a session a short name for an easier-to-scan list, export a copy of its markdown, reveal the file in Finder, or delete it (behind a confirmation) — from the detail header's <strong>…</strong> menu or each row's right-click menu.</p>
-        </div>
-      </div>
+<section id="organisation">
+  <div class="wrap topic">
+    <div>
+      <h2>Organisation</h2>
+      <p>Folders, tags and saved contexts.</p>
     </div>
+    <ul class="items">
+      <li><h3>Folders</h3><p>Group sessions into folders. Each folder has its own record button, so a new session is saved straight into it. Move older sessions with Move to Folder.</p></li>
+      <li><h3>Folder context</h3><p>Give a folder a standing brief, such as the background to a weekly meeting. Sessions started there begin with it, and you can still edit it per session.</p></li>
+      <li><h3>Tags</h3><p>Create coloured tags and apply them from the recording window or the Sessions window. Renaming a tag updates it everywhere.</p></li>
+      <li><h3>Saved contexts</h3><p>Keep the context for meetings you have often, such as a stand-up, a customer call or an interview, and pick it instead of retyping it.</p></li>
+      <li><h3>Plain Markdown</h3><p>Each session is a Markdown file with its cards included, in a folder you choose. There's no database, so any notes app can open them.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 07 ORGANISATION ================= -->
-<div id="organisation" style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">07</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Organisation</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">Folders, tags, and saved contexts — light structure that pays off the more you record.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Folders</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Group sessions into folders in the sidebar, children indented under their folder. Every folder header has its own record button — start a recording there and the note is written straight into that folder. Re-file existing sessions later with <em>Move to Folder</em>.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Folder context</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">A folder can carry a default context — say, the standing brief for a weekly meeting. Recordings started from that folder inherit it as the seed of their session prompt, still editable per session. The context travels with the folder through renames and storage moves.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Tags</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">A user-managed library of coloured tags. Apply them from the live toolbar or the browser; they show as coloured pills on session rows and are searchable. Rename a tag and it updates everywhere it's used.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Saved contexts</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Pre-canned context prompts you can pick from instead of retyping common setups — one for the stand-up, one for customer calls, one for interviews.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Markdown, yours forever</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Every session is a portable markdown file with its cards embedded inline, in a storage folder you choose. No database, no lock-in — your notes app can read them today.</p>
-        </div>
-      </div>
+<section id="sources">
+  <div class="wrap topic">
+    <div>
+      <h2>Sources</h2>
+      <p>Advisor uses what your AI provider can already reach. It has no accounts of its own.</p>
     </div>
+    <ul class="items">
+      <li><h3>Web search</h3><p>Built in, with nothing to set up.</p></li>
+      <li><h3>Connectors</h3><p>Connectors your Claude or Codex setup already has, such as Jira, Confluence, Slack or your notes, are searched too. Add one to your provider and Advisor can use it.</p></li>
+      <li><h3>Local files</h3><p>Read-only access to non-sensitive files in your home folder, so a card can cite the document being discussed.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 08 SOURCES ================= -->
-<div id="sources" style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">08</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Sources</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">Advisor researches across whatever you've already connected to your AI provider — it brings no accounts of its own.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Web search, built in</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Cards draw on live web search out of the box — no setup required.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Your notes &amp; work tools</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Whatever connectors your AI provider is configured with — Jira, Confluence, Slack, your notes — Advisor can search them too, read-only by default. Connect a tool once for your provider and Advisor benefits automatically.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Local files</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Read-only access to non-sensitive files in your home directory, so a card can cite the document you were actually talking about.</p>
-        </div>
-      </div>
+<section id="privacy">
+  <div class="wrap topic">
+    <div>
+      <h2>Privacy</h2>
+      <p>There are no Advisor accounts and no Advisor server. Audio stays on your Mac, and transcript text goes only to your own AI provider. Research agents are sandboxed differently for each provider.</p>
     </div>
+    <ul class="items">
+      <li><h3>On your Mac</h3><p>Transcription runs on-device, and Advisor only listens after you press Listen.</p></li>
+      <li><h3>Claude</h3><p>Every tool call is checked against a policy that allows web search, connector reads and searches, and read-only access to your home folder. There's no shell and no file writing. Credential locations such as <code>~/.ssh</code>, <code>~/.aws</code> and keychains are blocked, and symlinks are resolved first so a link can't get round the list.</p></li>
+      <li><h3>Connector actions on Claude</h3><p>A connector call that isn't recognised as a read or a search counts as an action, and actions are blocked unless you turn on Allow connector actions in Settings.</p></li>
+      <li><h3>Codex</h3><p>Codex has no per-call check, so Advisor runs it inside a macOS sandbox built from the same list of blocked locations. Codex, and anything it starts, can't read those locations or write files outside its own state and temporary folders. It's coarser than the Claude policy: Codex can run read-only shell commands, can read its own login in <code>~/.codex</code>, and uses the connectors in your <code>~/.codex/config.toml</code>, which Allow connector actions doesn't cover.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 09 PRIVACY (dark band) ================= -->
-<div id="privacy" style="background: linear-gradient(165deg, #1d1e29, #14141c);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #6a6b7a; letter-spacing: 0.5px; margin-bottom: 10px;">09</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #f4f4f7;">Privacy &amp; safety</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #a3a3ad; margin: 0;">Privacy by architecture, not by policy: single user, no accounts, no server of ours — and research agents kept on a short, auditable leash.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(255,255,255,0.08);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #f4f4f7;">Local-first</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #9a9aa6; margin: 0;">Transcription is on-device and listening is always explicitly user-initiated. To research, Advisor sends transcript <em>text</em> — never audio — to your own AI provider, on your own subscription.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(255,255,255,0.08);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #f4f4f7;">Sandboxed research (Claude)</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #9a9aa6; margin: 0;">Every tool call the agent makes passes a per-call policy: web search, read/search-only connectors, and read-only home-directory access. No shell, no writes. Credential paths — <code style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #c6b6f5;">~/.ssh</code>, <code style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #c6b6f5;">~/.aws</code>, keychains and the like — are denied case-insensitively, with symlinks resolved first so a link can't slip past the denylist.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(255,255,255,0.08);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #f4f4f7;">Sandboxed research (Codex)</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #9a9aa6; margin: 0;">The Codex SDK has no per-call hook, so the sandbox is coarser but stricter in kind: a process-wide read-only sandbox with approval set to <em>never</em> blocks all writes and escalation. Read-only shell <em>is</em> permitted there, and connectors come from your own <code style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #c6b6f5;">~/.codex/config.toml</code>.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(255,255,255,0.08);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #f4f4f7;">Connectors fail closed</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #9a9aa6; margin: 0;">Any connector call not recognised as a read or a search is treated as an action — and actions are blocked unless you've opted in with the "Allow connector actions" toggle.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #f4f4f7;">Single user, no server</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #9a9aa6; margin: 0;">No accounts, no multi-tenancy, nothing of yours stored anywhere but your Mac. There is no Advisor server to trust, because there isn't one.</p>
-        </div>
-      </div>
+<section id="providers">
+  <div class="wrap topic">
+    <div>
+      <h2>Providers</h2>
+      <p>Advisor runs on the AI subscription you already have. An API key is never required.</p>
     </div>
+    <ul class="items">
+      <li><h3>Claude or Codex</h3><p>All of Advisor's agents use one provider, Claude by default or Codex, chosen in Settings along with the model.</p></li>
+      <li><h3>Your existing login</h3><p>Advisor uses your Claude Code or Codex CLI login, so usage counts against the plan you already have.</p></li>
+      <li><h3>API key instead</h3><p>On a Mac without a CLI login, paste an Anthropic or OpenAI API key. It's stored in the macOS Keychain and checked with the provider when you enter it.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 10 PROVIDERS ================= -->
-<div id="providers" style="background: #fff;">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">10</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Providers &amp; authentication</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">Bring your own brain. Advisor runs on the AI subscription you already pay for — it never requires an API key.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Claude or Codex</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Every agent lane — the classifier, research, and queries — shares one backend: <strong>Claude</strong> (Agent SDK) by default, or <strong>Codex</strong>, picked in Preferences along with the model.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Your existing login</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">By default Advisor uses your Claude Code or Codex CLI sign-in — agent usage is billed to the subscription you already have, not by us.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Optional API-key fallback</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">For a machine with no CLI login, paste an Anthropic or OpenAI key instead. It's stored in the macOS Keychain — never in a config file — and validated against the provider the moment you enter it, so a bad key surfaces immediately.</p>
-        </div>
-      </div>
+<section id="settings">
+  <div class="wrap topic">
+    <div>
+      <h2>Settings</h2>
+      <p>Everything is in one Settings window (⌘,).</p>
     </div>
+    <ul class="items">
+      <li><h3>Options</h3><p>The number of parallel agents, connector permissions, how often cards appear and which kinds, provider and model, saved contexts, tags, system-audio capture, transcription language, and where sessions are stored.</p></li>
+      <li><h3>Appearance</h3><p>Light, dark, or follow the system.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 11 PREFERENCES ================= -->
-<div id="preferences" style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">11</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Preferences &amp; appearance</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">One Settings window (⌘,) holds every knob — and the whole UI follows your Mac's look.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Everything in Settings</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">Parallel agent count, connector permissions, trigger sensitivity and per-kind card toggles, agent backend and model, saved contexts, the tag library, system-audio capture, the speech-recognition locale, and where sessions are stored.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Light, dark, or system</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">The entire app — live window, cards, and Sessions browser — is themed for light and dark, or follows the system automatically.</p>
-        </div>
-      </div>
+<section id="requirements">
+  <div class="wrap topic">
+    <div>
+      <h2>Requirements</h2>
+      <p>What Advisor needs, and one thing it can't do.</p>
     </div>
+    <ul class="items">
+      <li><h3>System</h3><p>macOS 26 or later on Apple Silicon.</p></li>
+      <li><h3>Permissions</h3><p>Microphone, and screen and system audio recording, requested on first run.</p></li>
+      <li><h3>AI provider</h3><p>A Claude Code or Codex CLI login, or an API key.</p></li>
+      <li><h3>Install</h3><p>A signed, notarised app with its Node runtime bundled. There's nothing else to install.</p></li>
+      <li><h3>Known limit</h3><p>When two people talk at once on the same audio, the transcript can't fully separate them. It recovers once one of them stops.</p></li>
+    </ul>
   </div>
-</div>
+</section>
 
-<!-- ================= 12 REQUIREMENTS ================= -->
-<div id="requirements" style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px;">
-    <div style="display: grid; grid-template-columns: 0.85fr 1.6fr; gap: 48px; align-items: start;">
-      <div style="position: sticky; top: 90px;">
-        <div style="font-size: 12px; font-weight: 700; color: #b0b1bb; letter-spacing: 0.5px; margin-bottom: 10px;">12</div>
-        <h2 style="font-size: 34px; line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Requirements &amp; honesty</h2>
-        <p style="font-size: 15px; line-height: 1.6; color: #56545d; margin: 0;">What it needs, and the one thing it can't do.</p>
-      </div>
-      <div style="display: flex; flex-direction: column;">
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">A single, self-contained app</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">The download is a signed, notarised app with everything bundled inside — including its Node runtime. Nothing else to install.</p>
-        </div>
-        <div style="padding: 20px 0; border-bottom: 0.5px solid rgba(0,0,0,0.07);">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">What it needs</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">macOS 26 or later on Apple Silicon; microphone and screen &amp; system-audio permissions (granted on first run); and a Claude Code or Codex CLI login — or an API key — for the research side.</p>
-        </div>
-        <div style="padding: 20px 0;">
-          <h3 style="font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0 0 6px; color: #1c1a22;">Known limit</h3>
-          <p style="font-size: 14.5px; line-height: 1.62; color: #56545d; margin: 0;">When two people talk over each other on a single mixed mono feed, no single-stream transcriber can fully separate them — Advisor included. It recovers as soon as one voice yields.</p>
-        </div>
-      </div>
-    </div>
+<section class="alt download">
+  <div class="wrap">
+    <h2>Download Advisor</h2>
+    <p class="lede">Advisor is free.</p>
+    <p class="cta"><a class="button" href="index.html#download">Download for Mac</a></p>
   </div>
-</div>
+</section>
 
-<!-- ================= CTA ================= -->
-<div style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 88px 26px; text-align: center;">
-    <h2 style="font-size: 40px; line-height: 1.1; letter-spacing: -1.2px; font-weight: 700; margin: 0 0 14px; color: #1c1a22;">Hear it for yourself.</h2>
-    <p style="max-width: 480px; margin: 0 auto 30px; font-size: 16px; line-height: 1.6; color: #56545d;">Free 7-day trial. On-device transcription. Your own AI subscription does the thinking.</p>
-    <div style="display: flex; align-items: center; justify-content: center; gap: 13px;">
-      <a href="index.html#download" style="display: inline-flex; align-items: center; gap: 9px; height: 50px; padding: 0 26px; border-radius: 13px; background: linear-gradient(180deg, #4a6bef, #3a5ce0); color: #fff; font-size: 16px; font-weight: 600; text-decoration: none; box-shadow: 0 8px 22px -8px rgba(58,92,224,0.6), inset 0 1px 0 rgba(255,255,255,0.22);" style-hover="filter:brightness(1.05);">
-        <span style="width: 9px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(45deg) translate(-1px,-1px); display: inline-block;"></span>
-        Download for macOS
-      </a>
-      <a href="index.html#pricing" style="display: inline-flex; align-items: center; gap: 9px; height: 50px; padding: 0 24px; border-radius: 13px; background: #fff; border: 0.5px solid rgba(0,0,0,0.1); color: #1f1d24; font-size: 16px; font-weight: 600; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" style-hover="background:#fbfbfb;">See pricing</a>
-    </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a href="features.html">Features</a>
+    <a href="index.html#privacy">Privacy</a>
+    <a href="index.html#download">Download</a>
+    <a href="terms.html">Terms</a>
+    <span class="copy">© 2026 Advisor</span>
   </div>
-</div>
+</footer>
 
-<!-- ================= FOOTER ================= -->
-<div style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.07);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 48px 26px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
-    <div style="display: flex; align-items: center; gap: 10px;">
-      <span style="position: relative; width: 24px; height: 24px; border-radius: 22.5%; overflow: hidden; background: linear-gradient(157deg, #7088ff 0%, #3a5ce0 52%, #4730a8 100%); display: inline-block;">
-        <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 9%;"><span style="width: 8%; height: 40%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 88%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 40%; background: #fff; border-radius: 99px;"></span></span>
-        <span style="position: absolute; top: 7%; right: 7%; width: 25%; height: 25%; background: #fff; clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%);"></span>
-      </span>
-      <span style="font-size: 14px; font-weight: 600; color: #1f1d24;">Advisor</span>
-    </div>
-    <div style="display: flex; gap: 24px; margin-left: 8px;">
-      <a href="index.html#how" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">How it works</a>
-      <a href="index.html#features" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Features</a>
-      <a href="#top" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Feature guide</a>
-      <a href="index.html#pricing" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Pricing</a>
-      <a href="index.html#download" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Download</a>
-      <a href="terms.html" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Terms</a>
-    </div>
-    <div style="margin-left: auto; font-size: 12.5px; color: #9a9aa6;">© 2026 Advisor · A personal macOS assistant</div>
-  </div>
-</div>
-
-</div>
-</x-dc>
 </body>
 </html>

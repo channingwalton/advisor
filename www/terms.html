@@ -1,83 +1,41 @@
 <!DOCTYPE html>
-<html>
+<html lang="en-GB">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Advisor — Terms of Use</title>
-<script src="./support.js"></script>
+<title>Advisor Terms of Use</title>
+<link rel="icon" href="img/icon.png">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<x-dc>
-<helmet>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<style>
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
-  body { background: #f4f2ee; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; color: #1f1d24; }
-  a { color: inherit; }
-  ::selection { background: rgba(58,92,224,0.18); }
-  .terms h2 { font-size: 19px; letter-spacing: -0.3px; font-weight: 650; color: #1c1a22; margin: 38px 0 10px; }
-  .terms p, .terms li { font-size: 15px; line-height: 1.65; color: #3a3b44; margin: 0 0 12px; }
-  .terms ul { padding-left: 22px; margin: 0 0 12px; }
-  .terms a { color: #3a5ce0; text-decoration: none; font-weight: 600; }
-</style>
-</helmet>
 
-<div style="overflow: hidden; background: #f4f2ee;">
-
-<!-- ================= NAV ================= -->
-<!-- Keep in sync with features.html's nav. -->
-<div style="position: sticky; top: 0; z-index: 50; backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); background: rgba(244,242,238,0.74); border-bottom: 0.5px solid rgba(0,0,0,0.08);">
-  <div style="max-width: 1140px; margin: 0 auto; height: 58px; display: flex; align-items: center; gap: 14px; padding: 0 26px;">
-    <a href="index.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none;">
-      <span style="position: relative; width: 28px; height: 28px; border-radius: 22.5%; overflow: hidden; box-shadow: 0 2px 5px -1px rgba(40,44,96,0.45), inset 0 0 0 0.5px rgba(0,0,0,0.06); background: linear-gradient(157deg, #7088ff 0%, #3a5ce0 52%, #4730a8 100%); display: inline-block;">
-        <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 9%;">
-          <span style="width: 8%; height: 40%; background: rgba(255,255,255,0.9); border-radius: 99px;"></span>
-          <span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span>
-          <span style="width: 8%; height: 88%; background: #fff; border-radius: 99px;"></span>
-          <span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span>
-          <span style="width: 8%; height: 40%; background: rgba(255,255,255,0.9); border-radius: 99px;"></span>
-        </span>
-        <span style="position: absolute; top: 7%; right: 7%; width: 25%; height: 25%; background: #fff; clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%);"></span>
-      </span>
-      <span style="font-size: 17px; font-weight: 600; letter-spacing: -0.2px; color: #1f1d24;">Advisor</span>
-    </a>
-    <div style="margin-left: auto; display: flex; align-items: center; gap: 30px;">
-      <a href="index.html#how" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">How it works</a>
-      <a href="features.html" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">Feature guide</a>
-      <a href="index.html#pricing" style="font-size: 13.5px; color: #56545d; text-decoration: none; font-weight: 500;" style-hover="color:#1f1d24;">Pricing</a>
-      <a href="index.html#download" style="display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 16px; border-radius: 9px; background: #1f1d24; color: #fff; font-size: 13px; font-weight: 600; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,0.12);" style-hover="background:#34313c;">
-        <span style="width: 8px; height: 8px; border-right: 1.6px solid #fff; border-bottom: 1.6px solid #fff; transform: rotate(45deg) translate(-1px,-1px); display: inline-block;"></span>
-        Download
-      </a>
-    </div>
+<!-- Keep the nav and footer in sync across index.html, features.html and terms.html. -->
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="img/icon.png" alt="">Advisor</a>
+    <nav class="nav-links">
+      <a href="features.html">Features</a>
+      <a class="optional" href="index.html#privacy">Privacy</a>
+      <a class="button small" href="index.html#download">Download</a>
+    </nav>
   </div>
-</div>
+</header>
 
-<!-- ================= HEADER ================= -->
-<div id="top" style="position: relative; background: radial-gradient(120% 80% at 50% -10%, #ffffff 0%, #f4f2ee 60%);">
-  <div style="max-width: 900px; margin: 0 auto; padding: 84px 26px 48px; text-align: center;">
-    <div style="font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #3a5ce0; margin-bottom: 16px;">Legal</div>
-    <h1 style="font-size: 52px; line-height: 1.05; letter-spacing: -1.6px; font-weight: 700; margin: 0; color: #1c1a22; text-wrap: balance;">Terms of Use.</h1>
-    <p style="margin: 20px auto 0; font-size: 15px; color: #8a8891;">Version 1.0 — 5 July 2026</p>
-  </div>
-</div>
-
-<!-- ================= TERMS ================= -->
-<!-- Keep in sync with the repo-root TERMS.md (the copy the app shows at first
-     run). A material change means bumping the version here, in TERMS.md, and
-     in TermsAcceptance.currentVersion. -->
-<div style="background: #fff; border-top: 0.5px solid rgba(0,0,0,0.06);">
-  <div class="terms" style="max-width: 760px; margin: 0 auto; padding: 56px 26px 88px;">
+<main class="legal">
+  <!-- Keep in sync with the repo-root TERMS.md (the copy the app shows at first
+       run). A material change means bumping the version here, in TERMS.md, and
+       in TermsAcceptance.currentVersion. -->
+  <div class="wrap narrow">
+    <h1>Terms of Use</h1>
+    <p class="version">Version 1.0 — 5 July 2026</p>
 
     <p>These terms are an agreement between you and Monoidal Ltd (&ldquo;we&rdquo;, &ldquo;us&rdquo;), a company registered in England and Wales, and they govern your download and use of the Advisor app for macOS (&ldquo;Advisor&rdquo;). By downloading, installing or using Advisor you agree to these terms. If you do not agree, do not use Advisor.</p>
 
     <h2>1. Licence</h2>
-    <p>We grant you a personal, non-exclusive, non-transferable, revocable licence to install and use Advisor on Apple-branded devices you own or control, for your own use. You may not sell, rent, redistribute or sublicense Advisor, and you may not reverse engineer, decompile or modify it except where the law expressly permits.</p>
+    <p>Advisor is open-source software released under the MIT licence, whose full text is in the LICENSE file in Advisor&rsquo;s source code. Under it you may use, copy, modify, merge, publish, distribute, sublicense and sell copies of Advisor. Nothing in these terms takes away a right the MIT licence gives you.</p>
 
     <h2>2. Beta software</h2>
-    <p>Advisor is currently a free beta. Beta features may change or be removed, and beta builds may contain defects. Paid subscriptions, when introduced, will be covered by an updated version of these terms presented before you subscribe.</p>
+    <p>Advisor is currently a free beta. Beta features may change or be removed, and beta builds may contain defects.</p>
 
     <h2>3. AI agents act on your Mac, under your control</h2>
     <p>Advisor runs AI agents locally on your Mac using your own AI provider account (Anthropic Claude or OpenAI Codex). Depending on your settings, those agents can:</p>
@@ -129,31 +87,17 @@
     <p>Questions about these terms: see <a href="index.html">advisor.monoidal.co.uk</a>.</p>
 
   </div>
-</div>
+</main>
 
-<!-- ================= FOOTER ================= -->
-<div style="background: #f4f2ee; border-top: 0.5px solid rgba(0,0,0,0.07);">
-  <div style="max-width: 1140px; margin: 0 auto; padding: 48px 26px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
-    <div style="display: flex; align-items: center; gap: 10px;">
-      <span style="position: relative; width: 24px; height: 24px; border-radius: 22.5%; overflow: hidden; background: linear-gradient(157deg, #7088ff 0%, #3a5ce0 52%, #4730a8 100%); display: inline-block;">
-        <span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 9%;"><span style="width: 8%; height: 40%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 88%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 66%; background: #fff; border-radius: 99px;"></span><span style="width: 8%; height: 40%; background: #fff; border-radius: 99px;"></span></span>
-        <span style="position: absolute; top: 7%; right: 7%; width: 25%; height: 25%; background: #fff; clip-path: polygon(50% 0,58% 42%,100% 50%,58% 58%,50% 100%,42% 58%,0 50%,42% 42%);"></span>
-      </span>
-      <span style="font-size: 14px; font-weight: 600; color: #1f1d24;">Advisor</span>
-    </div>
-    <div style="display: flex; gap: 24px; margin-left: 8px;">
-      <a href="index.html#how" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">How it works</a>
-      <a href="index.html#features" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Features</a>
-      <a href="features.html" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Feature guide</a>
-      <a href="index.html#pricing" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Pricing</a>
-      <a href="index.html#download" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Download</a>
-      <a href="terms.html" style="font-size: 13px; color: #56545d; text-decoration: none;" style-hover="color:#1f1d24;">Terms</a>
-    </div>
-    <div style="margin-left: auto; font-size: 12.5px; color: #9a9aa6;">© 2026 Advisor · A personal macOS assistant</div>
+<footer>
+  <div class="wrap">
+    <a href="features.html">Features</a>
+    <a href="index.html#privacy">Privacy</a>
+    <a href="index.html#download">Download</a>
+    <a href="terms.html">Terms</a>
+    <span class="copy">© 2026 Advisor</span>
   </div>
-</div>
+</footer>
 
-</div>
-</x-dc>
 </body>
 </html>
