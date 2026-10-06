@@ -600,7 +600,34 @@ as before. The sidecar is never stopped — only this session's tasks — so the
 Sessions browser keeps working. The pure choice→action map (`SessionClose.action`)
 is unit-tested; the AppKit plumbing is exercised by hand. Cmd-Q still bypasses all
 of this via `applicationShouldTerminate` (which `sidecar.stop()`s, killing the node
-child and every agent with it).
+child and every agent with it) — but since 2026-10-06 it ends the recording first
+(below).
+
+**⌘Q saves the recording's tail (2026-10-06, code review).** Quit used to call
+`recorder.stop()` without awaiting it, flush the note and `_exit(0)` at once, so
+microphone text still in the 1.5 s echo delay and the finals the speech engines
+emit while stopping never reached the note — the close path already waited for
+both (issue #79). `applicationShouldTerminate` now answers `.terminateLater` and
+hands `AppServices` (as `Quitting`) to `QuitSequence`:
+
+- **`shutdown`** runs the whole close path, `releaseRecording` — the tail
+  reaches the note, which is flushed and released, the window's controls are
+  locked meanwhile (`isClosingRecording`, so Space can't resume recording), and a
+  close already under way is joined rather than raced.
+- It is cut off after **5 s** (a healthy teardown is the echo delay plus engine
+  finalisation; the margin is for a slow one), so a wedged SpeechAnalyzer can't
+  stop the app quitting.
+- **`finishQuit`** always runs next, deadline or not: a synchronous save —
+  `writer.end()` while still recording, otherwise `flush()` so an ended session
+  keeps its end time (both no-ops once the note is released; otherwise they save
+  what the cut-off missed, and a card that finished after a "Wait" close) — and
+  `sidecar.stop()`. Then `_exit(0)`. A cut-off is logged; a second ⌘Q meanwhile
+  does nothing. With no recording window, note or close, `shutdown` does nothing.
+
+In-flight agents are still not waited for. Tested with the real `Recorder` over
+fake speech engines (`req_quit_saves_tail_finals`), the deadline and ordering in
+`QuitSequenceTests`, and by quitting the dev build with a quit Apple Event (exits
+in well under a second with no recording open, node child gone).
 
 **Trailing-STT bleed across sessions (2026-06-19).** Closing and quickly reopening
 showed fragments of the previous conversation in the new session. Cause:

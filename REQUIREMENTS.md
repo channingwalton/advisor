@@ -54,6 +54,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - Save final microphone text already waiting for echo detection before releasing the note. `#close-mic-delay`
   - Save finals emitted while speech engines finish, retaining note ownership until the final save. `#close-speech-finals`
   - Retire the old generation only after saving; late old results cannot enter a reopened session. `#close-generation-isolation`
+  - Quitting (⌘Q) saves the same tail — echo-delayed microphone text and finals emitted while the engines stop — before exiting. `#quit-saves-tail-finals`
+  - Quitting still exits if speech teardown hangs, after a deadline, and saves the note first. `#quit-deadline`
 
 ## Non-functional requirements
 

@@ -455,6 +455,73 @@ struct RecordingPersistenceTests {
         #expect(!services.isClosingRecording)
     }
 
+    /// ⌘Q (code review 2026-10-06): the quit teardown saves what the close path
+    /// saves — microphone text still in the echo delay, and finals the speech
+    /// engines emit while finishing — before the process exits.
+    @MainActor
+    @Test func req_quit_saves_tail_finals() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-quit-finals-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let services = AppServices(resolveDirectory: { root })
+        let harness = try makeHarness(sessionGeneration: 31, store: services.store)
+        services.recorder = harness.recorder
+        services.writer.start()
+        let url = try #require(services.writer.currentFileURL)
+        await startListening(harness)
+        harness.micEngine.onFinal?("The last microphone sentence", 31)
+        harness.micEngine.setStopDelay(nanoseconds: 100_000_000)
+        harness.sysEngine.finaliseOnStop("Remote concluding remarks")
+
+        await services.shutdown()
+        services.finishQuit()
+
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("The last microphone sentence"))
+        #expect(saved.contains("Remote concluding remarks"))
+    }
+
+    /// A card that finishes after the session ended (the close guard's "Wait")
+    /// is still saved when ⌘Q comes before its debounced write — as the old
+    /// synchronous quit save did.
+    @MainActor
+    @Test func quitSavesACardThatFinishedAfterTheSessionEnded() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-quit-late-card-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let services = AppServices(resolveDirectory: { root })
+        services.writer.start()
+        let url = try #require(services.writer.currentFileURL)
+        await services.endRecording().value
+        let ended = try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n").first { $0.hasPrefix("ended:") }
+        try await Task.sleep(for: .milliseconds(1100)) // the stamp has 1 s resolution
+        var card = Card(id: "c1", created: Date(), kind: "answer", title: "Cedar", body: "…", state: "pending")
+        card.apply(body: "A late answer.", state: "done")
+        services.store.cards.append(card)
+
+        services.finishQuit() // even if shutdown was cut off at the deadline
+
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("A late answer."))
+        // Saved, not re-ended: the session's end time is when it ended, not the quit.
+        #expect(ended != nil)
+        #expect(saved.split(separator: "\n").first { $0.hasPrefix("ended:") } == ended)
+    }
+
+    /// ⌘Q with no recording open (the Sessions browser alone) has nothing to
+    /// close: no session_end, no store reset.
+    @MainActor
+    @Test func quitWithNoRecordingOpenClosesNothing() async {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-quit-idle-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let services = AppServices(resolveDirectory: { root })
+        let generation = services.store.sessionGeneration
+        await services.shutdown()
+        #expect(services.store.sessionGeneration == generation)
+    }
+
     @MainActor
     @Test func req_close_generation_isolation() async throws {
         let root = FileManager.default.temporaryDirectory

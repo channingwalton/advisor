@@ -32,6 +32,9 @@ final class SessionWriter {
     /// clobbered by the live rewrite.
     var currentFileURL: URL? { fileURL }
 
+    /// True from `start()` until `end()`: the session is still being recorded.
+    var isSessionActive: Bool { sessionActive }
+
     init(
         store: TranscriptStore,
         resolveDirectory: @escaping () -> URL = { SessionArchive.directory }

@@ -11,12 +11,19 @@ let repoRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()   // App/
     .deletingLastPathComponent()   // repo root
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var shared: AppDelegate?
 
-    /// Orderly teardown registered by the view (stop sidecar child + audio,
-    /// flush the session). Re-registered whenever the recorder is rebuilt.
-    var onTerminate: (() -> Void)?
+    /// The ⌘Q teardown, registered by `AppServices.start`.
+    weak var quitting: Quitting?
+    // Drain the log first: its writes are async, and `_exit` would drop them
+    // (a cut-off quit's own diagnostic among them).
+    private let quit = QuitSequence(exit: {
+        appLog.flushSidecar()
+        appLog.flush()
+        _exit(0)
+    })
 
     override init() {
         super.init()
@@ -50,10 +57,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ggml-metal registers a global Metal-device vector whose destructor
     /// hits `ggml_abort` at process-exit (the same teardown hazard the smoke
     /// test sidesteps with deinit-before-exit ordering). Do our own orderly
-    /// cleanup, then `_exit` to bypass those finalisers entirely.
+    /// cleanup, then `_exit` to bypass those finalisers entirely. The cleanup is
+    /// async — the recording's last speech has to reach the note — so AppKit is
+    /// told to wait (`terminateLater`) and `QuitSequence` exits when it is done,
+    /// or after its deadline. A second ⌘Q meanwhile changes nothing.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        onTerminate?()
-        _exit(0)
+        let quitting = quitting
+        quit.start(shutdown: { await quitting?.shutdown() }, finish: { quitting?.finishQuit() })
+        return .terminateLater
     }
 }
 

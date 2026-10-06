@@ -69,7 +69,7 @@ final class FileLog {
         }
     }
 
-    /// Block until queued writes have drained (used by tests).
+    /// Block until queued writes have drained (tests, and ⌘Q before `_exit`).
     func flush() { queue.sync {} }
 
     // MARK: - serial-queue internals (only ever run on `queue`)

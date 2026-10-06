@@ -82,12 +82,29 @@ final class AppServices: ObservableObject {
         sidecar.sendLanes(lanes)
         TranscriptWindowContext.shared.sidecar = sidecar
         TranscriptWindowContext.shared.writer = writer
-        // Orderly teardown before `_exit(0)` (see AppDelegate). recorder is nil
-        // when no recording window is open — that's fine.
-        AppDelegate.shared?.onTerminate = { [weak self] in
-            self?.recorder?.stop()   // stops audio engine + ScreenCaptureKit stream
-            self?.sidecar.stop()     // closes stdin so the node child exits
-            self?.writer.end()       // synchronous final flush
-        }
+        AppDelegate.shared?.quitting = self
+    }
+}
+
+extension AppServices: Quitting {
+    /// ⌘Q (AppDelegate runs this through `QuitSequence`, before `_exit(0)`):
+    /// close the recording exactly as closing its window does — microphone text
+    /// in the echo delay and the finals the speech engines emit while stopping
+    /// reach the note, which is flushed and released, with the window's
+    /// controls locked meanwhile (`isClosingRecording`). Joins a close already
+    /// under way. With no recording window, note or close, there is nothing to do.
+    func shutdown() async {
+        guard recorder != nil || writer.currentFileURL != nil || recordingCloseTask != nil else { return }
+        await releaseRecording().value
+    }
+
+    /// The final step of ⌘Q, run even if `shutdown` was cut off at the
+    /// deadline: save synchronously — ending the session if it is still
+    /// recording, otherwise just writing, so an ended session keeps its end
+    /// time (both no-ops once the close has released the note) — then close
+    /// the node child's stdin so it exits.
+    func finishQuit() {
+        if writer.isSessionActive { writer.end() } else { writer.flush() }
+        sidecar.stop()
     }
 }
