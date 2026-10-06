@@ -67,6 +67,10 @@ sentence) to:
 
 Once a card has finished, a follow-up box appears on it — ask a question about
 the card and the answer is appended in place, so a card becomes a short thread.
+A card never loses an answer it has already given: while a follow-up or a
+re-summarise runs, the saved note keeps the previous answer; cancelling one puts
+it back, and a failed re-summarise keeps the old summary with a line saying it
+couldn't be updated (Summarise again to retry).
 Hover a card for its controls: **Copy** (puts the title, body and any sources
 on the clipboard), collapse/expand (a collapsed card keeps its chevron showing;
 fact-checks start collapsed) and delete (✕); deleting a card that's still

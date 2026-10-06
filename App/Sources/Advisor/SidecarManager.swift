@@ -45,10 +45,73 @@ struct Card: Identifiable, Equatable {
     /// App-only (never from the protocol): suppresses the cancel button and the
     /// reply field so a card can't take a second follow-up mid-answer.
     var replying: Bool = false
+    /// The card's last completed answer. A follow-up or re-summarise replaces
+    /// `body` while it runs; this keeps the answer that was there, so the note
+    /// never loses it and a cancelled one (or a failed re-summarise) can put it
+    /// back. Nil until the card first completes.
+    var settledBody: String?
 
     /// Maps the streaming `state` onto the spec's research lifecycle: a card is
     /// "researching" (spinner) until its first terminal state.
     var isResearching: Bool { state == "pending" || state == "streaming" }
+
+    /// The card as the saved note holds it: a finished card (done or failed) as
+    /// it stands; one mid-follow-up or mid-re-run as its last completed answer;
+    /// one still on its first run, not at all.
+    var persisted: Card? {
+        if state == "done" || state == "failed" { return self }
+        guard let settledBody else { return nil }
+        var card = self
+        card.body = settledBody
+        card.state = "done"
+        return card
+    }
+
+    /// Apply a sidecar `card_update`'s body and state.
+    mutating func apply(body newBody: String?, state: String?) {
+        if let newBody { body = newBody }
+        guard let state else { return }
+        // A follow-up answer reaching a terminal state re-enables the reply
+        // field for another turn.
+        if state == "done" || state == "failed" || state == "cancelled" {
+            replying = false
+        }
+        switch (state, settledBody) {
+        case ("done", _):
+            self.state = state
+            settledBody = self.body
+        case ("cancelled", let settled?),
+             // A sidecar crash fails in-flight cards with no body (issue #49);
+             // a follow-up it cut off has no answer to keep, so the last stands.
+             ("failed", let settled?) where newBody == nil && kind != "summary":
+            // An abandoned follow-up or re-summarise: the last answer stands.
+            self.body = settled
+            self.state = "done"
+        case ("failed", let settled?) where kind == "summary":
+            // A failed reply already carries its thread; a failed re-summarise
+            // carries only the error, so keep the summary and say so.
+            body = "\(settled)\n\n*Couldn't update the summary\(Self.failureReason(newBody))*"
+            self.state = state
+        default:
+            self.state = state
+        }
+    }
+
+    /// ": <reason>" from the sidecar's failure text ("failed: timed out",
+    /// "error: …"), or "." when there is none — a sidecar crash sends no body.
+    /// Plain text on one line: it sits inside an italic span.
+    private static func failureReason(_ text: String?) -> String {
+        guard let text else { return "." }
+        let firstLine = (text.hasPrefix("failed: ") ? text.dropFirst(8) : Substring(text))
+            .split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let plain = firstLine.filter { !"*_`[]".contains($0) }.trimmingCharacters(in: .whitespaces)
+        return plain.isEmpty ? "." : ": \(plain)"
+    }
+
+    /// Cancelled from the app (Stop and Close), before the sidecar confirms.
+    mutating func cancel() {
+        apply(body: nil, state: "cancelled")
+    }
 }
 
 /// Main-actor registry for saved-document requests. Removing terminal handlers
@@ -267,7 +330,7 @@ final class SidecarManager {
         // would spin forever (issue #49). Fail them now — on every crash path
         // (restart and exhausted-attempts alike), before the restart backoff below.
         for idx in store.cards.indices where store.cards[idx].isResearching {
-            store.cards[idx].state = "failed"
+            store.cards[idx].apply(body: nil, state: "failed")
         }
         // A crash after a healthy run is a fresh failure, not part of a loop.
         if let lastSpawn, Date().timeIntervalSince(lastSpawn) > healthyRunSeconds {
@@ -641,38 +704,33 @@ final class SidecarManager {
                 store.utterances.first { $0.id.uuidString == trigger }
             }
             let kind = obj["kind"] as? String ?? "query"
+            let body = obj["body"] as? String ?? ""
+            let state = obj["state"] as? String ?? "pending"
             store.cards.append(
                 Card(
                     id: id,
                     created: anchor?.time ?? Date(),
                     kind: kind,
                     title: obj["title"] as? String ?? "",
-                    body: obj["body"] as? String ?? "",
-                    state: obj["state"] as? String ?? "pending",
+                    body: body,
+                    state: state,
                     triggerId: triggerId,
                     triggerQuote: anchor?.text,
                     sources: Self.parseSources(obj["sources"]),
                     verdict: (obj["verdict"] as? String).flatMap(Verdict.init(rawValue:)),
                     // Fact-checks default collapsed so they don't bury the
                     // transcript; everything else opens expanded.
-                    isExpanded: kind != "factcheck"))
+                    isExpanded: kind != "factcheck",
+                    settledBody: state == "done" ? body : nil))
         case "card_update":
             guard let id = obj["id"] as? String,
                 let idx = store.cards.firstIndex(where: { $0.id == id })
             else { return }
-            if let body = obj["body"] as? String { store.cards[idx].body = body }
             if let sources = obj["sources"] { store.cards[idx].sources = Self.parseSources(sources) }
             if let verdict = (obj["verdict"] as? String).flatMap(Verdict.init(rawValue:)) {
                 store.cards[idx].verdict = verdict
             }
-            if let state = obj["state"] as? String {
-                store.cards[idx].state = state
-                // A follow-up answer reaching a terminal state re-enables the
-                // reply field for another turn.
-                if state == "done" || state == "failed" || state == "cancelled" {
-                    store.cards[idx].replying = false
-                }
-            }
+            store.cards[idx].apply(body: obj["body"] as? String, state: obj["state"] as? String)
         case "document_answer":
             guard let id = obj["id"] as? String else { return }
             let body = obj["body"] as? String ?? ""

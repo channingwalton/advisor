@@ -271,6 +271,29 @@ The reply is answered by a **transient one-shot session** (`makeLane("reply", �
 
 A card carries an app-only `replying` flag (never on the wire): while a follow-up is in flight it hides both the reply box (so one card can't take two at once) and the cancel button, cleared when a terminal `card_update` arrives. The optimistic in-card edit is applied only if the `card_reply` send succeeds — if the sidecar is down the message is dropped and the card is left untouched, rather than spinning forever with no answer coming and no cancel.
 
+### A completed card keeps its answer (2026-10-06, code review)
+
+The optimistic follow-up replaced the card's body and set it streaming, and a
+re-summarise reset the summary card to `…` pending. Only finished (`done`/
+`failed`) cards reach the note, so anything that wrote the store mid-run — a
+quit, a window close, Stop and Close (which marks it `cancelled`) — dropped the
+card's previous answer from the note, and a failed re-summarise replaced the
+summary with its error in the window too. `Card.settledBody` now holds the last
+completed answer (set whenever the card reaches `done`):
+
+- **The note** writes a running or cancelled card from `settledBody`
+  (`Card.persisted`); the `# Summary` section falls back to it the same way.
+- **Cancelling** (from the sidecar or Stop and Close, both through
+  `Card.apply`/`cancel`) restores it and sets the card back to `done`, so the
+  follow-up box returns.
+- **A failed re-summarise** keeps the old summary in the card with a "Couldn't
+  update the summary" line, state `failed` (Summarise can run again); the note
+  keeps the summary without the line. A failed reply is left as it was — its
+  body already carries the thread. A sidecar crash fails in-flight cards through
+  `apply` too (issue #49), with no body: a re-summarise it cuts off keeps the
+  summary (with the line); a follow-up it cuts off reverts to its last answer,
+  `done`, so it can be asked again.
+
 ## Packaging as a distributable .app (2026-06-13)
 
 The dev build is a bare SwiftPM executable that locates the sidecar by `#filePath`-derived `repoRoot`. That doesn't survive leaving the checkout. `App/package.sh` now assembles a self-contained `Advisor.app`; `AppResources` resolves resources from `Bundle.main` when packaged and falls back to `repoRoot` in a dev checkout, so one binary runs either way.

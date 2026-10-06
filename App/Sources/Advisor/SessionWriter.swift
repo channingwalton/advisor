@@ -129,11 +129,12 @@ final class SessionWriter {
     }
 
     /// True when there is something worth exporting — any transcript line, or a
-    /// finished card. Drives the toolbar's Export button enabled state.
+    /// card the note would hold (`Card.persisted`). Drives the toolbar's Export
+    /// button enabled state.
     var hasExportContent: Bool {
         !store.utterances.isEmpty
             || !store.notes.isEmpty
-            || store.cards.contains { $0.state == "done" || $0.state == "failed" }
+            || store.cards.contains { $0.persisted != nil }
     }
 
     /// Suggested save filename for an export: the on-disk note's name (the

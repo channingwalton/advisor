@@ -43,6 +43,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F14b. Editorial notes (issue #34): right-click a transcript line to inject the user's own context as a distinct green NOTE card anchored at that line; the agents read it as part of the transcript (so it can inform or trigger research). Deletable; persisted with the session.
 - F15. Show live transcript (collapsible).
 - F16. Session history: transcripts and surfaced items reviewable afterwards, stored as app-managed local markdown files. No writing to the Obsidian Vault (read-only source).
+  - The saved note keeps a card's last completed answer while a follow-up or re-summarise runs, and after one is cancelled. `#card-settled-note`
+  - A failed re-summarise keeps the previous summary, in the window and the note. `#card-settled-summary`
 - F17. Session tags (issue #15): a user-managed library of coloured tags (Preferences), applied to a session from the live toolbar or the browser, shown as coloured pills on session rows and searchable. Stored by name in the note's frontmatter.
 - F17a. Folder tag defaults (issue #76): folders can hold tags from the library; a new recording started from that folder inherits them, with per-session editing still available. Existing sessions and sessions moved into the folder are unchanged.
 - F17b. Owned session folders (issue #78):

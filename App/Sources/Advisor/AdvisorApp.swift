@@ -803,7 +803,7 @@ struct TranscriptView: View {
     private func terminateAgents() {
         for idx in store.cards.indices where store.cards[idx].isResearching {
             services.sidecar.sendCancel(store.cards[idx].id)
-            store.cards[idx].state = "cancelled"
+            store.cards[idx].cancel()
         }
     }
 

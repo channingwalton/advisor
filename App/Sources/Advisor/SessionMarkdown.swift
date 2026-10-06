@@ -7,8 +7,10 @@ import Foundation
 enum SessionMarkdown {
     /// Utterances and finished cards are merged chronologically
     /// (a card sorts after an utterance at equal time, so it lands beneath its
-    /// triggering line — the same ordering the live feed uses). Only `done`/
-    /// `failed` cards are included; in-flight cards are skipped.
+    /// triggering line — the same ordering the live feed uses). Each card goes in
+    /// as `Card.persisted`: finished cards as they stand, a card mid-follow-up or
+    /// cancelled as its last completed answer, and a card that never completed
+    /// not at all.
     static func inline(
         utterances: [Utterance], cards: [Card], notes: [EditorialNote] = [],
         started: Date?, ended: Date?,
@@ -32,7 +34,8 @@ enum SessionMarkdown {
         entries += cards
             // The summary card isn't an inline transcript entry — it renders in
             // its own `# Summary` section (below), so the note holds one summary.
-            .filter { ($0.state == "done" || $0.state == "failed") && $0.kind != "summary" }
+            .filter { $0.kind != "summary" }
+            .compactMap(\.persisted)
             .map { Entry(time: $0.created, rank: 2, text: cardBlock($0)) }
         // Editorial notes the user injected (issue #34) sit inline at their anchor
         // time, in their own `**NOTE**` blockquote.
@@ -78,12 +81,13 @@ enum SessionMarkdown {
         return md + "\n"
     }
 
-    /// The session's summary body, from its single `done` summary card (empty when
-    /// none). Mid-summarise (pending/streaming) and failed summaries are ignored,
-    /// matching how only finished cards reach the note.
+    /// The session's summary body, from its single summary card (empty when
+    /// none). While a re-summarise runs, or after one fails, that is the last
+    /// completed summary; a first summarise that hasn't finished yields none.
     static func summaryText(in cards: [Card]) -> String {
-        cards.first { $0.kind == "summary" && $0.state == "done" }?
-            .body.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let card = cards.first(where: { $0.kind == "summary" }) else { return "" }
+        let text = card.state == "done" ? card.body : card.settledBody ?? ""
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The summary as a `>`-quoted card block (`**SUMMARY**` + body),
