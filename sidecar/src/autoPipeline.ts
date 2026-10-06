@@ -223,6 +223,21 @@ export class AutoPipeline {
   }
 }
 
+/// The dedup key for a subject, in any script: letters, marks and digits of
+/// every alphabet survive (an ASCII-only filter emptied 東京 or Ελλάδα, and an
+/// empty key is skipped — no card), punctuation goes, and only what is certainly
+/// the same word is folded: case (Turkish İ as I first, or it lower-cases to i
+/// plus a dot) and whitespace. Marks are kept — año/ano, мой/мои and
+/// がっこう/かっこう are different words — and ß is not ss (Maße/Masse), because a
+/// wrong merge silently loses a card while a missed one only duplicates it (and
+/// the classifier's covered list catches many). NFC, not NFKC: compatibility
+/// folding would make ½ and 12 one key.
 function normalise(subject: string): string {
-  return subject.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  return subject
+    .normalize("NFC")
+    .replace(/\u0130/g, "I")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

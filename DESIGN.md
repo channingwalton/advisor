@@ -1341,6 +1341,27 @@ the classifier, lane choice and research injected), so it is tested directly
 (`autoPipeline.test.ts`), including the issue #43 re-feed-on-failure behaviour
 that had no test before.
 
+### Subjects in any script (2026-10-06)
+
+The dedup key (`normalise`) kept only `a-z0-9` and spaces, so a subject written
+entirely in another script — 東京, Ελλάδα — keyed as the empty string, which is
+skipped: no card at all, silently, for any non-Latin conversation (the app
+transcribes other locales via `sttLocale`). Accented subjects also collided
+(café and caf both keyed `caf`).
+
+The key now keeps letters, marks and digits of every script and drops
+punctuation, folding only what is certainly the same word: case (Turkish İ
+mapped to I first, or it lower-cases to i plus a combining dot) and whitespace. The governing asymmetry: a wrong merge silently loses a card, a
+missed merge only duplicates one (and the classifier's covered list catches
+many). So marks are kept — año/ano, мой/мои, Vietnamese tones and Japanese
+がっこう/かっこう are different words — ß is not folded to ss (Maße/Masse), and
+NFC is used, not NFKC, which would make ½ and 12 one key. Accepted duplicates: Greek capitals written without
+accents (ΕΛΛΑΔΑ vs Ελλάδα), full-width letters, vocalised vs unvocalised
+Arabic/Hebrew, Straße vs STRASSE. A first cut that dropped Latin/Greek/Cyrillic
+accents and folded ß was reverted for exactly the wrong merges above. Not attempted: symbols still drop
+(C# and C++ both key `c`, as before), and translations (東京 vs Tokyo) can't
+meet by key.
+
 ## Versioning and the release cut (2026-07-04)
 
 The repo-root `VERSION` file is the single source of truth for the app

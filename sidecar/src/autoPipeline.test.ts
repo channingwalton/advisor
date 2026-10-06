@@ -209,3 +209,71 @@ test("after three failed classifies the window is given up on (issue #43)", asyn
   await settle();
   assert.doesNotMatch(h.windows[3], /Cedar/, "re-fed twice, then skipped");
 });
+
+test("#trigger-subject-any-script a subject in any script becomes a card, once", async () => {
+  const h = harness(2);
+  h.pipeline.start();
+  h.say("東京とΕλλάδα");
+  await settle();
+  h.answer("東京", "Ελλάδα");
+  await settle();
+  assert.deepEqual([...h.researched].sort(), ["Ελλάδα", "東京"].sort());
+
+  // Covered as itself: not raised twice, and named to the classifier as covered.
+  h.say("また東京");
+  await settle();
+  assert.ok(h.coveredLists[1].includes("東京"), JSON.stringify(h.coveredLists[1]));
+  h.answer("東京");
+  await settle();
+  assert.equal(h.researched.filter((s) => s === "東京").length, 1);
+});
+
+test("#trigger-subject-any-script accented subjects don't collide with unaccented prefixes", async () => {
+  const h = harness(2);
+  h.pipeline.start();
+  h.say("Café and caf");
+  await settle();
+  h.answer("café", "caf");
+  await settle();
+  assert.deepEqual([...h.researched].sort(), ["caf", "café"]);
+});
+
+test("#trigger-subject-any-script case and spacing variants of one subject make one card", async () => {
+  for (const [first, again] of [
+    ["Москва", "МОСКВА"], // case in another alphabet
+    ["İstanbul", "Istanbul"], // Turkish dotted capital I
+    ["New\tYork", "New  York"], // any whitespace is one space
+    ["東京　タワー", "東京 タワー"], // the ideographic space too
+  ]) {
+    const h = harness(2);
+    h.pipeline.start();
+    h.say("first");
+    await settle();
+    h.answer(first);
+    await settle();
+    h.say("again");
+    await settle();
+    h.answer(again);
+    await settle();
+    assert.deepEqual(h.researched, [first], `${first} / ${again}`);
+  }
+});
+
+test("#trigger-subject-any-script words that differ only by a mark stay distinct", async () => {
+  // A wrong merge silently loses a card; a missed one only duplicates a card.
+  for (const pair of [
+    ["がっこう", "かっこう"], // school / cuckoo (dakuten)
+    ["año", "ano"], // year / anus
+    ["мой", "мои"], // my (sing.) / my (pl.)
+    ["Hà Nội", "Hà Nổi"], // Vietnamese tones
+    ["Maße", "Masse"], // measurements / mass: ß is not ss here
+  ]) {
+    const h = harness(2);
+    h.pipeline.start();
+    h.say("two subjects");
+    await settle();
+    h.answer(...pair);
+    await settle();
+    assert.deepEqual([...h.researched].sort(), [...pair].sort(), pair.join(" / "));
+  }
+});
