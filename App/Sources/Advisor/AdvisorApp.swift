@@ -418,164 +418,60 @@ struct TranscriptView: View {
             .contains { l.contains($0) }
     }
 
-    private enum FeedItem: Identifiable {
-        case utterance(Utterance)
-        case card(Card)
-        case note(EditorialNote)
-
-        var id: String {
-            switch self {
-            case .utterance(let u): "u-\(u.id.uuidString)"
-            case .card(let c): "c-\(c.id)"
-            case .note(let n): "n-\(n.id.uuidString)"
-            }
-        }
-
-        var time: Date {
-            switch self {
-            case .utterance(let u): u.time
-            case .card(let c): c.created
-            case .note(let n): n.time
-            }
-        }
-
-        var isUtterance: Bool {
-            if case .utterance = self { return true }
-            return false
-        }
-
-        /// Tie-break rank at equal times: an utterance (0) first, then the user's
-        /// own note (1) hugging its line, then any card (2) below it (issue #34).
-        var rank: Int {
-            switch self {
-            case .utterance: 0
-            case .note: 1
-            case .card: 2
-            }
-        }
-    }
-
     private enum ScrollTarget: Hashable {
         case bottom
     }
 
-    /// Transcript, cards and editorial notes merged chronologically, so answers
-    /// and the user's own notes appear in context. At equal times an utterance
-    /// sorts first, then a note anchored to that line, then a card — so the note
-    /// hugs its text and the card sits below.
-    private var feed: [FeedItem] {
-        (store.utterances.map(FeedItem.utterance)
-            + store.cards.map(FeedItem.card)
-            + store.notes.map(FeedItem.note))
-            .sorted { a, b in
-                a.time != b.time ? a.time < b.time : a.rank < b.rank
-            }
+    /// The live session as the shared feed shows it: paragraphs grouped into
+    /// transcript runs between cards and notes; with the transcript hidden, only
+    /// cards and notes.
+    private var feedItems: [FeedItem] {
+        Feed.grouped(
+            Feed.live(utterances: store.utterances, cards: store.cards, notes: store.notes),
+            hideTranscript: hideTranscript)
     }
 
-    /// A run of consecutive utterances rendered as one flowing paragraph.
-    private struct Paragraph: Identifiable {
-        let id: String
-        let text: String
-        let toolTip: String
-        /// Last utterance in the run — manual right-click cards anchor here.
-        let anchorId: String
-        /// Every utterance in the run, in order — a correction maps a paragraph
-        /// selection back to the utterance(s) that compose it (issue #32).
-        let utteranceIds: [UUID]
+    /// The live feed's actions: research and notes go to the sidecar, everything
+    /// else edits the store (the session writer persists it).
+    private var feedActions: FeedActions {
+        FeedActions(
+            transcriptActions: transcriptActions,
+            onAction: { kind, selection, paragraph in
+                // Anchor the card under the paragraph's last line.
+                guard let anchor = paragraph.lines.last?.id else { return }
+                services.sidecar.sendAction(kind, text: selection, triggerId: anchor)
+            },
+            onAddNote: { text, offset, paragraph in
+                addNote(text, atOffset: offset, in: Self.utteranceIds(paragraph))
+            },
+            onCorrect: { request, paragraph in
+                switch request.scope {
+                case .thisOccurrence:
+                    store.correctOccurrence(
+                        request.occurrenceInParagraph, of: request.original,
+                        with: request.replacement, inParagraph: Self.utteranceIds(paragraph))
+                case .allInSession:
+                    store.correctAll(of: request.original, with: request.replacement)
+                }
+            },
+            onToggleCard: { store.toggleCard($0.id) },
+            onDeleteCard: { card in
+                // Cancel the underlying research so a deleted in-flight card
+                // doesn't keep a lane busy.
+                if card.isResearching { services.sidecar.sendCancel(card.id) }
+                store.dismissCard(card.id)
+            },
+            onCancelCard: { services.sidecar.sendCancel($0.id) },
+            onReply: { submitReply($0, $1) },
+            onDeleteNote: { id in
+                if let uuid = UUID(uuidString: id) { store.dismissNote(uuid) }
+            })
     }
 
-    private enum RenderItem: Identifiable {
-        case paragraph(Paragraph)
-        case card(Card)
-        case note(EditorialNote)
-
-        var id: String {
-            switch self {
-            case .paragraph(let p): "p-\(p.id)"
-            case .card(let c): "c-\(c.id)"
-            case .note(let n): "n-\(n.id.uuidString)"
-            }
-        }
-    }
-
-    /// A feed row for display: each run of consecutive paragraphs between cards
-    /// collapses into one transcript card, so transcript and answers read as
-    /// distinct stacked cards.
-    private enum DisplayItem: Identifiable {
-        case transcript([Paragraph])
-        case card(Card)
-        case note(EditorialNote)
-
-        var id: String {
-            switch self {
-            case .transcript(let ps): "t-\(ps.first?.id ?? "empty")"
-            case .card(let c): "c-\(c.id)"
-            case .note(let n): "n-\(n.id.uuidString)"
-            }
-        }
-    }
-
-    /// The feed collapsed for display: consecutive utterances join into a single
-    /// paragraph so the transcript reads as prose. A new paragraph starts when
-    /// the gap to the previous line exceeds 2s, or when a card interrupts.
-    private var renderItems: [RenderItem] {
-        var items: [RenderItem] = []
-        var buf: [Utterance] = []
-        func flush() {
-            guard let first = buf.first, let last = buf.last else { return }
-            items.append(
-                .paragraph(
-                    Paragraph(
-                        id: first.id.uuidString,
-                        text: buf.map(\.text).joined(separator: " "),
-                        toolTip: first.time.formatted(date: .omitted, time: .standard),
-                        anchorId: last.id.uuidString,
-                        utteranceIds: buf.map(\.id))))
-            buf.removeAll()
-        }
-        for item in feed {
-            switch item {
-            case .utterance(let u):
-                if let last = buf.last, u.time.timeIntervalSince(last.time) > 2 { flush() }
-                buf.append(u)
-            case .card(let c):
-                flush()
-                items.append(.card(c))
-            case .note(let n):
-                flush()
-                items.append(.note(n))
-            }
-        }
-        flush()
-        return items
-    }
-
-    /// `renderItems` grouped for display: each run of consecutive paragraphs
-    /// between cards becomes one transcript card. With the transcript hidden
-    /// (experiment) paragraphs are dropped, leaving only answer cards.
-    private var displayedItems: [DisplayItem] {
-        var items: [DisplayItem] = []
-        var buf: [Paragraph] = []
-        func flush() {
-            if !buf.isEmpty { items.append(.transcript(buf)); buf.removeAll() }
-        }
-        for item in renderItems {
-            switch item {
-            case .paragraph(let p):
-                if hideTranscript { continue }
-                buf.append(p)
-            case .card(let c):
-                flush()
-                items.append(.card(c))
-            case .note(let n):
-                // Notes are the user's own signal, not transcript chatter, so they
-                // stay visible even in cards-only mode.
-                flush()
-                items.append(.note(n))
-            }
-        }
-        flush()
-        return items
+    /// The utterances composing a live paragraph, so a note or correction maps
+    /// back to them (issue #32).
+    private static func utteranceIds(_ paragraph: FeedParagraph) -> [UUID] {
+        paragraph.lines.compactMap { UUID(uuidString: $0.id) }
     }
 
     /// Changes whenever a final line or card is added — the tail-follow trigger
@@ -593,14 +489,16 @@ struct TranscriptView: View {
         return tv.isEditable
     }
 
-    /// Centered transcript column (max-width 812): day divider, flowing
-    /// paragraphs, inline cards, then the live interim line.
+    /// Centred reading column: day divider, the shared feed (transcript runs,
+    /// cards, notes), then the live interim line.
     private var transcriptArea: some View {
         ScrollViewReader { proxy in
+            // Built once per redraw: it re-sorts the whole session.
+            let items = feedItems
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
+                LazyVStack(alignment: .leading, spacing: FeedView.spacing) {
                     dayDivider
-                    if displayedItems.isEmpty && (hideTranscript || interimText.isEmpty) {
+                    if items.isEmpty && (hideTranscript || interimText.isEmpty) {
                         Text(hideTranscript
                             ? "Cards only — answer cards appear here as they arrive."
                             : "Press Listen — the conversation and answer cards appear here.")
@@ -609,39 +507,15 @@ struct TranscriptView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 40)
                     }
-                    ForEach(displayedItems) { item in
-                        switch item {
-                        case .transcript(let paragraphs):
-                            transcriptCard(paragraphs)
-                                .id(item.id)
-                        case .card(let card):
-                            ListeningCardView(
-                                card: card,
-                                onToggleExpand: { store.toggleCard(card.id) },
-                                onDismiss: {
-                                    // Cancel the underlying research so a dismissed
-                                    // in-flight card doesn't keep a lane busy.
-                                    if card.isResearching { services.sidecar.sendCancel(card.id) }
-                                    store.dismissCard(card.id)
-                                },
-                                onCancel: { services.sidecar.sendCancel(card.id) },
-                                onReply: { submitReply(card, $0) }
-                            )
-                            .id(item.id)
-                        case .note(let note):
-                            EditorialNoteView(
-                                note: note,
-                                onDismiss: { store.dismissNote(note.id) }
-                            )
-                            .id(item.id)
-                        }
-                    }
+                    FeedView(items: items, actions: feedActions)
                     if !hideTranscript { interimLine }
                 }
-                .frame(maxWidth: Theme.Metric.contentMaxWidth, alignment: .leading)
+                // The same reading column as the Sessions detail; its margin holds
+                // the paragraph times.
+                .frame(maxWidth: Theme.Metric.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.top, Theme.Metric.contentTopPad)
-                .padding(.horizontal, Theme.Metric.contentSidePad)
+                .padding(.horizontal, Theme.Metric.readingMargin)
                 .padding(.bottom, Theme.Metric.contentBottomPad)
                 // Target the padded feed, not its last item: aligning the last
                 // item leaves the bottom padding below the visible viewport.
@@ -662,54 +536,15 @@ struct TranscriptView: View {
                 // toggles recording (issue #37). The non-editable selectable
                 // transcript NSTextView is fine to scroll past.
                 guard transcriptAutoScroll.followsTail, !isEditingTextField else { return }
-                if !displayedItems.isEmpty {
+                if !feedItems.isEmpty {
                     withAnimation { proxy.scrollTo(ScrollTarget.bottom, anchor: .bottom) }
                 }
             }
         }
     }
 
-    /// A run of transcript between cards, wrapped in card chrome. Each paragraph
-    /// keeps its own selectable text view so right-click actions and corrections
-    /// still map back to the utterance(s) that compose it.
-    @ViewBuilder private func transcriptCard(_ paragraphs: [Paragraph]) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Metric.paragraphSpacing) {
-            ForEach(paragraphs) { p in
-                SelectableTranscriptText(
-                    text: p.text,
-                    toolTip: p.toolTip,
-                    actions: transcriptActions,
-                    onAction: { kind, selection in
-                        services.sidecar.sendAction(
-                            kind, text: selection, triggerId: p.anchorId)
-                    },
-                    onAddNote: { noteText, offset in
-                        addNote(noteText, atOffset: offset, in: p.utteranceIds)
-                    },
-                    onCorrect: { request in
-                        switch request.scope {
-                        case .thisOccurrence:
-                            store.correctOccurrence(
-                                request.occurrenceInParagraph, of: request.original,
-                                with: request.replacement, inParagraph: p.utteranceIds)
-                        case .allInSession:
-                            store.correctAll(
-                                of: request.original, with: request.replacement)
-                        }
-                    }
-                )
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Theme.surfaceCardInset, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Metric.cardRadius)
-                .stroke(Theme.hairline, lineWidth: 0.5))
-    }
-
     @ViewBuilder private var dayDivider: some View {
-        if !feed.isEmpty || store.listening {
+        if !store.utterances.isEmpty || !store.cards.isEmpty || !store.notes.isEmpty || store.listening {
             let when = store.utterances.first?.time ?? Date()
             Text(
                 "Today · \(when.formatted(date: .omitted, time: .shortened)) · on-device transcription"
@@ -760,7 +595,7 @@ struct TranscriptView: View {
             cardId: card.id, kind: card.kind, title: card.title,
             base: base, replyText: reply, transcript: recentTranscript())
         guard sent else { return }
-        store.cards[idx].body = base + "\n\n---\n\n**You:** \(reply)\n\n…"
+        store.cards[idx].body = SessionMarkdown.replyBody(base: base, question: reply, answer: "…")
         store.cards[idx].replying = true
         store.cards[idx].state = "streaming"
     }
@@ -773,18 +608,9 @@ struct TranscriptView: View {
             .joined(separator: "\n")
     }
 
-    /// Right-click AI actions offered on selected transcript text — the same
-    /// trigger kinds the auto-classifier uses, gated by the same config toggles
-    /// (so a kind disabled in Preferences never appears here either). The kind
-    /// string is the card kind the sidecar emits.
+    /// Right-click AI actions offered on selected transcript text.
     private var transcriptActions: [TranscriptAction] {
-        var actions: [TranscriptAction] = []
-        if triggers.question { actions.append(TranscriptAction(title: "Answer", kind: "answer")) }
-        if triggers.context { actions.append(TranscriptAction(title: "Context", kind: "context")) }
-        if triggers.factcheck {
-            actions.append(TranscriptAction(title: "Fact check", kind: "factcheck"))
-        }
-        return actions
+        TranscriptAction.research(for: triggers)
     }
 
     private func setup() {
@@ -1094,6 +920,18 @@ struct BlinkingCaret: View {
 struct TranscriptAction {
     let title: String
     let kind: String
+
+    /// The right-click research actions — the same trigger kinds the
+    /// auto-classifier uses, gated by the same Preferences toggles (so a kind
+    /// disabled there never appears here either). `kind` is the card kind the
+    /// sidecar emits.
+    static func research(for triggers: AdvisorConfig.Triggers) -> [TranscriptAction] {
+        var actions: [TranscriptAction] = []
+        if triggers.question { actions.append(TranscriptAction(title: "Answer", kind: "answer")) }
+        if triggers.context { actions.append(TranscriptAction(title: "Context", kind: "context")) }
+        if triggers.factcheck { actions.append(TranscriptAction(title: "Fact check", kind: "factcheck")) }
+        return actions
+    }
 }
 
 /// A transcription correction chosen from the right-click menu (issue #32).
@@ -1119,8 +957,8 @@ struct SelectableTranscriptText: NSViewRepresentable {
     let onAction: (String, String) -> Void
     /// Fired with (entered text, selection-end/click offset within this
     /// paragraph) when the user adds an editorial note here (issue #34). Nil hides
-    /// the "Add note" menu item — e.g. saved notes in the browser, where notes are
-    /// only injected into the live feed.
+    /// the "Add note" menu item — e.g. the still-being-written live note in the
+    /// browser.
     var onAddNote: ((String, Int) -> Void)? = nil
     /// Fired when a correction is confirmed (issue #32). Nil hides the correction
     /// menu items — e.g. the still-being-written live note in the browser.
@@ -1166,8 +1004,21 @@ struct SelectableTranscriptText: NSViewRepresentable {
     /// Push the current text + styling into the view's storage. isRichText is
     /// false, so style the storage directly — typingAttributes alone won't
     /// reflow already-set text, and height measurement reads the storage's
-    /// paragraph style.
-    private func apply(to tv: ActionTextView) {
+    /// paragraph style. The text is restyled and re-measured only when it has
+    /// changed (`renderedContent`); returns whether it was.
+    @discardableResult
+    func apply(to tv: ActionTextView) -> Bool {
+        // The handlers capture the caller's current state, so always take them —
+        // they're cheap to assign. Setting a tool-tip re-registers it with AppKit,
+        // so only when it changes.
+        if tv.toolTip != toolTip { tv.toolTip = toolTip }
+        tv.menuActions = actions
+        tv.onAction = onAction
+        tv.onAddNote = onAddNote
+        tv.onCorrect = onCorrect
+        guard tv.renderedContent != AnyHashable(text) else { return false }
+        tv.renderedContent = AnyHashable(text)
+
         if tv.string != text { tv.string = text }
         // Transcript body type: 14.5 pt, line-height 1.2, semantic body colour.
         let font = NSFont.systemFont(ofSize: Theme.Metric.transcriptSize)
@@ -1179,13 +1030,9 @@ struct SelectableTranscriptText: NSViewRepresentable {
         let range = NSRange(location: 0, length: (tv.string as NSString).length)
         tv.textStorage?.addAttributes(
             [.font: font, .foregroundColor: Theme.nsTextBody, .paragraphStyle: para], range: range)
-        tv.toolTip = toolTip
-        tv.menuActions = actions
-        tv.onAction = onAction
-        tv.onAddNote = onAddNote
-        tv.onCorrect = onCorrect
         // New text at the same width still changes the line count.
         tv.invalidateIntrinsicContentSize()
+        return true
     }
 }
 
@@ -1232,8 +1079,8 @@ final class ActionTextView: IntrinsicHeightTextView {
         }
         if !menuActions.isEmpty { menu.addItem(.separator()) }
 
-        // Add an editorial note here (issue #34): always available where wired
-        // (the live feed), with no selection needed — it anchors to this line.
+        // Add an editorial note here (issue #34): always available where wired,
+        // with no selection needed — it anchors to this line.
         if onAddNote != nil {
             let note = NSMenuItem(
                 title: "Add note here…", action: #selector(addNoteHere(_:)), keyEquivalent: "")

@@ -4,7 +4,7 @@ import SwiftUI
 /// Styling for a card's rich text. NSColors (not SwiftUI Colors) because the text
 /// is drawn by an AppKit text view; values mirror the `Theme` tokens the cards
 /// used under MarkdownUI.
-struct MarkdownTextStyle {
+struct MarkdownTextStyle: Hashable {
     var size: CGFloat = Theme.Metric.cardBodySize
     var body: NSColor
     var code: NSColor
@@ -66,18 +66,23 @@ struct MarkdownText: NSViewRepresentable {
         apply(to: tv)
     }
 
-    private func apply(to tv: IntrinsicHeightTextView) {
+    /// Render `markdown` into `tv`, unless it already shows this markdown in this
+    /// style (`renderedContent`). Returns whether it rendered. The colours are
+    /// dynamic, so a skipped update still follows light/dark changes.
+    @discardableResult
+    func apply(to tv: IntrinsicHeightTextView) -> Bool {
+        let content = AnyHashable([AnyHashable(markdown), AnyHashable(style)])
+        guard tv.renderedContent != content else { return false }
+        tv.renderedContent = content
         // Accent links, no underline (the hand cursor is the affordance).
         tv.linkTextAttributes = [
             .foregroundColor: style.link,
             .cursor: NSCursor.pointingHand,
             .underlineStyle: 0,
         ]
-        let attr = Self.render(markdown, style: style)
-        if tv.textStorage?.isEqual(to: attr) != true {
-            tv.textStorage?.setAttributedString(attr)
-        }
+        tv.textStorage?.setAttributedString(Self.render(markdown, style: style))
         tv.invalidateIntrinsicContentSize()
+        return true
     }
 
     /// One laid-out paragraph of a card body: its role, its inline-markdown

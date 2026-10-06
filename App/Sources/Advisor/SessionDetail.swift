@@ -8,22 +8,6 @@ struct SurfacedCard: Equatable {
     let snippet: String
 }
 
-/// A saved card split for display (`SessionDetail.cardParts`): the header label
-/// (ANSWER, CONTEXT, SUMMARY, Q, …; "" when there's no header), its title ("" for
-/// a label-only header) and the body markdown.
-struct SavedCardParts: Equatable {
-    let label: String
-    let title: String
-    let body: String
-
-    /// The label as shown above the card title: sentence case, with the
-    /// follow-up `Q` spelt out.
-    var kindName: String {
-        if label == "Q" { return "Question" }
-        return label.prefix(1).uppercased() + label.dropFirst().lowercased()
-    }
-}
-
 /// A question the user asked about a session (the `# Follow-ups` blocks), shown
 /// in the "You asked" list.
 struct AskedQuestion: Equatable {
@@ -133,26 +117,6 @@ struct SessionDetail: Equatable {
             return !t.isEmpty && !t.hasPrefix("_")
         }
         return (label, title, truncated(snippet ?? "", max: 80))
-    }
-
-    /// Splits a saved card's inner markdown for display: the `**LABEL · Title**`
-    /// header (or a label-only `**SUMMARY**`) and the body markdown under it. A
-    /// card without a bold header line is all body.
-    static func cardParts(_ markdown: String) -> SavedCardParts {
-        var lines = markdown.components(separatedBy: "\n")
-        let header = lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
-        guard header.count > 4, header.hasPrefix("**"), header.hasSuffix("**") else {
-            return SavedCardParts(label: "", title: "", body: markdown)
-        }
-        let inner = String(header.dropFirst(2).dropLast(2))
-        lines.removeFirst()
-        while lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeFirst() }
-        let body = lines.joined(separator: "\n")
-        guard let sep = inner.range(of: " · ") else {
-            return SavedCardParts(label: inner, title: "", body: body)
-        }
-        return SavedCardParts(
-            label: String(inner[..<sep.lowerBound]), title: String(inner[sep.upperBound...]), body: body)
     }
 
     /// Pulls `HH:MM` out of a follow-up's `_Asked HH:MM:SS · …_` footer. Anchored

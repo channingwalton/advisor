@@ -35,14 +35,20 @@ struct EditorialNote: Identifiable, Equatable {
 /// each line's UTF-16 length plus one for the separator.
 enum NoteAnchor {
     static func time(forOffset offset: Int, in utterances: [(text: String, time: Date)]) -> Date? {
+        lineIndex(forOffset: offset, in: utterances.map(\.text)).map { utterances[$0].time }
+    }
+
+    /// The index of the line `offset` falls in, among `texts` joined by single
+    /// spaces — the last line for an offset past the end; nil when empty.
+    static func lineIndex(forOffset offset: Int, in texts: [String]) -> Int? {
         var cursor = 0
-        for u in utterances {
-            let len = (u.text as NSString).length
+        for (index, text) in texts.enumerated() {
+            let len = (text as NSString).length
             // `<=` so the trailing separator/caret position counts as this line.
-            if offset <= cursor + len { return u.time }
+            if offset <= cursor + len { return index }
             cursor += len + 1
         }
-        return utterances.last?.time
+        return texts.isEmpty ? nil : texts.count - 1
     }
 }
 

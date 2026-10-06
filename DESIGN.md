@@ -66,6 +66,8 @@ Swift → sidecar:
 {"type":"cancel","cardId":"c9"}
 {"type":"card_reply","cardId":"c9","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","transcript":"them: ...\nme: ..."}
 {"type":"ask_document","id":"d3","question":"...","document":"<the whole saved transcript note>"}
+{"type":"research_document","id":"d4","action":"answer|context|factcheck","text":"<selected passage>","document":"<the whole saved transcript note>"}
+{"type":"reply_document","id":"d5","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","document":"<the whole saved transcript note>"}
 {"type":"session_end"}
 ```
 
@@ -1457,7 +1459,9 @@ feature and removes signals rather than adding them:
   inline-first renderer's flattened lists (the 2026-06-21 section) and applies to
   the Recording window's cards too, which share it. Saved cards split their
   `**LABEL · Title**` header (`SessionDetail.cardParts`) into a coloured kind
-  label over the title; Copy shows on hover.
+  label over the title; Copy shows on hover. (Superseded 2026-10-06: saved
+  cards are parsed into `Card`s and share the recording window's card view — see
+  *One feed for both windows*.)
 - **One accent, used rarely.** `Theme.accent` and its tints follow the macOS
   accent colour (`NSColor.controlAccentColor`) instead of a fixed periwinkle, in
   both windows. Card counts and metadata are grey, row tags are coloured dots
@@ -1516,6 +1520,150 @@ and says nothing in the terms takes away a right it gives. Both copies (TERMS.md
 and `www/terms.html`) changed together and stay at Version 1.0: like the
 time-limit and paid-subscription removals, the change only widens what users may
 do, so it must not re-prompt anyone to accept.
+
+## One feed for both windows (2026-10-06)
+
+The Sessions detail had drifted from the recording window: saved cards were
+display-only (`SessionCardView`), so they couldn't be collapsed, deleted or
+replied to, and the paragraph-to-run grouping was written twice
+(`displayedItems` live, `displayBlocks` saved). Both windows now render one feed:
+
+- **One model.** `Feed` (`Feed.swift`) builds `FeedItem`s — transcript runs,
+  cards, notes, headings — from the live store (`Feed.live`) or a saved note's
+  blocks (`Feed.saved`); `Feed.grouped` merges adjacent paragraphs into runs and
+  applies Hide Transcript (paragraphs and headings go, cards and notes stay).
+- **Saved cards are `Card`s.** `SavedCard.card(from:id:)` is the inverse of
+  `SessionMarkdown.cardBlock`: the header label gives the kind and verdict, the
+  one-line footer the trigger quote and sources. Only the writer's own footer
+  forms count — an italic `↳ quote`, grounded line or follow-up `Asked …`,
+  optionally followed by links — so a body that merely ends in italics or links
+  keeps that line (a links-only footer can't be told apart from the body's own
+  citations, and the sidecar doesn't emit sources yet); link labels may contain
+  ` · `. The `Asked …` stamp has no live field, so it's kept in
+  `Card.footnote`. Saved follow-ups are kind `question` (labelled Question); a
+  blockquote without a known header (one the user typed) has no kind, so it
+  shows no label and no grounded footer.
+- **One view, per-window actions.** `FeedView` renders the items;
+  `FeedCardView` and `FeedNoteView` replace `ListeningCardView`,
+  `EditorialNoteView` and `SessionCardView`. Behaviour comes from `FeedActions`,
+  a struct of handlers each window supplies — the store and sidecar live, the
+  note on disk saved. A nil handler hides its control, which is how the note
+  still being recorded stays read-only in Sessions; otherwise Sessions supplies
+  every handler the recording window does — corrections, collapse, delete,
+  notes, research actions and card follow-ups.
+- **Saved cards have content ids.** A saved card or note has no id in the
+  file, and its block offset shifts whenever another block is added or removed.
+  `Feed.savedIds` gives each one a digest of its markdown (FNV-1a — `hashValue`
+  is seeded per run) plus how many identical blocks precede it, so the id
+  follows the content; an edit maps it back to a block offset with
+  `firstIndex(of:)`. Paragraph ids stay block offsets, which corrections key on.
+- **Detail actions at the trailing edge.** Hide Transcript, Summarise, Tags and
+  `…` sat at the detail column's leading edge, beside the sidebar, where they
+  were missed (macOS places `.primaryAction` there, and `.automatic` measured the
+  same on macOS 26). A flexible `ToolbarSpacer` ahead of the group pushes it to
+  the window's trailing edge, where the recording window keeps its controls.
+- **Saved-note edits splice lines.** `TranscriptDoc.TimedBlock.lines` records
+  the body lines each block was read from, and `TranscriptDoc.splitFrontmatter`
+  (moved from `TranscriptCorrection`) keeps the frontmatter verbatim, so
+  `NoteEdit` edits the note by line. Each edit names the block it expects at the
+  offset and declines if the note no longer has it there, so a stale view can't
+  edit the wrong block; `SessionArchive.rewrite` writes nothing when an edit
+  declines.
+- **Delete is immediate, as live.** `NoteEdit.removingBlock` drops a card's or
+  note's `>` lines and one of the blank separators either side; a `# Summary` or
+  `# Follow-ups` section left empty goes too (the transcript and any heading the
+  user wrote never do). A card that split two paragraphs within 2s of each other
+  lets them rejoin, as dismissing it live would. An edit that doesn't apply
+  still reloads the detail, with a line under the ask field saying so — it
+  usually means the note changed on disk. `SessionArchive.strippingFrontmatter`
+  now delegates to `splitFrontmatter`, so display and edits can't disagree about
+  where the body starts.
+- **Notes in saved sessions.** "Add note here…" on a saved transcript inserts a
+  `**NOTE**` block (`SessionMarkdown.noteBlock`) straight after the line the
+  click or selection end falls in (`NoteAnchor.lineIndex`, shared with the live
+  feed, over `TranscriptDoc.memberText`), so it splits the paragraph there and
+  sits above a card under that line — where the live feed would put it. Nothing
+  goes to the sidecar: a saved session has no agents running.
+- **Research on saved transcripts.** Right-click Answer / Context / Fact check
+  (gated by the same Preferences toggles, via `TranscriptAction.research`) sends
+  `research_document`: the live action's instruction (`researchTask`, wrapped by
+  `documentResearchTask`) over the whole note, on a transient document lane like
+  `ask_document`, streamed back as `document_answer`. The card streams in under
+  its paragraph (`Feed.inserting`, after the cards and notes already there) and,
+  when done, is written into the note with `SessionMarkdown.cardBlock` under the
+  paragraph's last line (`NoteEdit.anchor` / `insertingBlock`) — where a live
+  manual card anchors. The line is found again by its text, nearest where it
+  was, so edits made while the research ran don't misplace the card — or by its
+  `- HH:MM:SS` stamp if a correction changed it; if it has gone altogether the
+  card goes under the last transcript line rather than being lost — not by
+  heading, since a user's own heading can sit inside the transcript and an
+  older note's summary after it, where a later Summarise would replace it. While
+  it streams the card shows under the paragraph that ends with that line, or
+  the paragraph nearest where it was (`NoteEdit.paragraphOffset`), so it doesn't
+  jump as other edits shift block offsets. The save runs from captured values,
+  so it still lands if the user has moved to another session, and is retried at
+  the note's new path if it was filed into a folder meanwhile
+  (`SessionArchive.relocated`). An answer researched here is footed "Grounded
+  in the saved transcript" (kept as `Card.footnote`, which `cardBlock` writes in
+  place of the live line). Failed and skipped cards aren't saved; they stay
+  until deleted. Skip and Delete both drop the request's handler
+  (`discardDocumentRequest`), so a finish already on its way can't save the
+  card. The sidecar rejects an unknown action (`researchKind`) instead of
+  prompting with it. Saved research shares the document lanes' cap of two
+  requests with Ask and Summarise; a third is refused at once (the live query
+  lane takes one action at a time).
+- **Smooth scrolling: redraws don't re-lay out text.** SwiftUI calls
+  `updateNSView` whenever a row redraws — and rows redraw a lot: on hover as
+  cards scroll under the pointer, and on every live interim-speech update in
+  the recording window (the row actions are closures, so SwiftUI can't tell a
+  row is unchanged). `MarkdownText` re-parsed and re-rendered its markdown and
+  both text views invalidated their intrinsic size on every update, forcing a
+  layout pass each time, so scrolling stuttered in both windows. Now each text
+  view remembers what it last showed (`IntrinsicHeightTextView.renderedContent`)
+  and an update bringing the same text and style does nothing; the colours are
+  dynamic, so light/dark still follows. And hover lives in a `HoverState` the
+  card holds but never reads — only `HoverReveal`, around the buttons, reads it
+  — so a pointer crossing a card redraws its buttons, not its text.
+- **Built per detail, not per redraw.** The pane builds the note's feed items
+  and card ids in its initialiser, from `detail`, so its own state changes —
+  streamed answers, typing in the ask field — redraw without re-parsing every
+  card. (The parent still re-creates the pane when it redraws.)
+- **Follow-ups on saved cards.** A card's follow-up field sends `reply_document`
+  — `card_reply`'s fields with the whole note in place of the recent transcript
+  slice, answered by `replyTask` in its saved-session wording (`saved: true`:
+  the card is from a session being reviewed, and the context is the whole saved
+  note, not a live slice) on a transient document lane. The
+  sidecar streams only the answer; the app shows it in the live turn format
+  (`SessionMarkdown.replyBody`, which the live optimistic edit now uses too) and,
+  when done, rewrites just that card's body in the note
+  (`NoteEdit.replacingCardBody`), keeping its header and footer. The card is
+  found by its content id, so edits made meanwhile don't misplace the reply; a
+  failed or skipped follow-up leaves the note untouched, and one that finished
+  but couldn't be saved stays on screen to copy. The rewritten card has a new
+  content id, so its expansion is carried over (`NoteEdit.cardId`) — a
+  fact-check would otherwise snap shut on the answer just given. Deleting the card stops its
+  follow-up. Replies aren't offered on summaries (as live), on blockquotes
+  Advisor didn't write, or on a research card that isn't in the note yet.
+  `SidecarManager`'s four document requests share one sender
+  (`sendDocumentRequest`).
+- **Saved collapse is view state.** Saved fact-checks start collapsed, as live
+  ones do. A toggle is kept in the pane by card id, so it survives other blocks
+  changing (a follow-up reply changes the card's markdown, so that card returns
+  to its default); it resets when another session is selected and never touches
+  the note, so the note still being recorded can be collapsed too. A card with
+  neither a kind label nor a title (a blockquote the user typed) can't collapse —
+  it would collapse to an empty box.
+- **One look.** The quiet Sessions style in both windows: a coloured kind label
+  over the title on a faint fill, no outline or pill; Copy, collapse and delete
+  on hover, with the chevron kept visible on a collapsed card. Transparent
+  controls drop out of the accessibility tree, so each card and note also
+  offers them as named accessibility actions, and `CardIconButton` is labelled
+  with its help text rather than its symbol name. The recording
+  window's transcript is no longer boxed into recessed run cards — it is plain
+  text in the same reading column (`readingWidth`, `readingMargin`) with each
+  paragraph's time in the margin. This supersedes the 2026-10-04 restyle's note
+  that the Recording window keeps its earlier card chrome; `contentMaxWidth` is
+  gone.
 
 ## Revisit as it grows
 

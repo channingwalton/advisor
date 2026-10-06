@@ -40,22 +40,58 @@ export function researchTask(kind: ResearchKind, subject: string, query: string)
   }
 }
 
+/// The research kind for an app action name ("answer" | "context" |
+/// "factcheck"), or undefined for anything else — so a bad action fails fast
+/// rather than reaching an agent as a broken prompt.
+export function researchKind(action: string): ResearchKind | undefined {
+  switch (action) {
+    case "answer":
+      return "question";
+    case "context":
+    case "factcheck":
+      return action;
+    default:
+      return undefined;
+  }
+}
+
+/// A research action (right-click Answer / Context / Fact check) on a line of a
+/// saved past transcript, from the Sessions browser. The same instruction as a
+/// live action (`researchTask`), but with the whole saved transcript as context
+/// in place of the live delta — there is no live session behind it.
+export function documentResearchTask(kind: ResearchKind, query: string, document: string): string {
+  return (
+    `The user is reading a saved transcript of a past conversation and picked a passage from it.\n\n` +
+    `<transcript>\n${document}\n</transcript>\n\n` +
+    researchTask(kind, query, query)
+  );
+}
+
 /// The instruction for a follow-up on an existing card. The sidecar is stateless
 /// about cards, so the app supplies the card's current body and a recent
 /// transcript slice; this reconstructs the context for a transient one-shot
 /// session. Mirrors researchTask: single source of truth for the reply prompt.
+/// `saved` is a card on a saved session (the Sessions browser), where the
+/// "transcript" is the whole saved note — cards included — not a live slice.
 export function replyTask(
   kind: string,
   title: string,
   cardBody: string,
   followUp: string,
-  transcript: string
+  transcript: string,
+  options: { saved?: boolean } = {}
 ): string {
-  const ctx = transcript.trim()
-    ? `\n\nRecent conversation transcript (resolve references like "she"/"that" against it):\n<transcript>\n${transcript.trim()}\n</transcript>`
-    : "";
+  const saved = options.saved ?? false;
+  const ctx = !transcript.trim()
+    ? ""
+    : saved
+      ? `\n\nThe saved session note it belongs to (transcript and other cards):\n<transcript>\n${transcript.trim()}\n</transcript>`
+      : `\n\nRecent conversation transcript (resolve references like "she"/"that" against it):\n<transcript>\n${transcript.trim()}\n</transcript>`;
+  const origin = saved
+    ? `This ${kind} card titled "${title}" is from a saved session the user is reviewing:`
+    : `You previously produced this ${kind} card titled "${title}" during a live conversation:`;
   return (
-    `You previously produced this ${kind} card titled "${title}" during a live conversation:\n\n` +
+    `${origin}\n\n` +
     `<card>\n${cardBody}\n</card>` +
     ctx +
     `\n\nThe user has a follow-up about that card:\n<followup>\n${followUp}\n</followup>\n\n` +

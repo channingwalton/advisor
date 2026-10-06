@@ -175,3 +175,10 @@ test("parseClassifierResponse: a junk object before the triggers object is skipp
 test("parseClassifierResponse: a parseable object without a triggers array is a success with no triggers", () => {
   assert.deepEqual(parseClassifierResponse('{"junk":1}'), { ok: true, triggers: [] });
 });
+test("replyTask for a saved session describes a saved note, not a live conversation", () => {
+  const task = replyTask("context", "Foo", "Foo is a thing.", "tell me more", "# Transcript\n- a", { saved: true });
+  assert.ok(!task.includes("live conversation"));
+  assert.ok(!task.includes("Recent conversation transcript"));
+  assert.match(task, /saved/);
+  assert.ok(task.includes("<transcript>\n# Transcript\n- a\n</transcript>"));
+});

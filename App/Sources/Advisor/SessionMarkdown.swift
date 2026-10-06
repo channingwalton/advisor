@@ -123,6 +123,13 @@ enum SessionMarkdown {
         return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
     }
 
+    /// A card's body after a follow-up: the body so far, a rule, the user's
+    /// question, then the answer — the turn format the sidecar streams for a live
+    /// `card_reply`, so live and saved threads read alike.
+    static func replyBody(base: String, question: String, answer: String) -> String {
+        "\(base)\n\n---\n\n**You:** \(question)\n\n\(answer)"
+    }
+
     /// An editorial note as a `**NOTE**`-headed blockquote (issue #34) — the same
     /// "chat" block style as cards, so a saved note renders in card chrome, but
     /// with a `NOTE` header `TranscriptDoc` parses back to a `.note` block.
@@ -156,7 +163,7 @@ enum SessionMarkdown {
     /// A card as a blockquote "chat" block: bold `LABEL · Title` header, the
     /// body markdown, then a footer line (grounding/trigger quote + sources).
     /// Every line is `>`-prefixed so multi-paragraph bodies stay in the quote.
-    private static func cardBlock(_ card: Card) -> String {
+    static func cardBlock(_ card: Card) -> String {
         var lines = ["**\(label(for: card)) · \(card.title)**"]
 
         let body = card.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -166,7 +173,7 @@ enum SessionMarkdown {
         }
 
         let isAnswer = card.kind == "answer" || card.kind == "query"
-        var footer = isAnswer ? "Grounded in the live conversation" : ""
+        var footer = card.footnote ?? (isAnswer ? SavedCard.groundedNote : "")
         if footer.isEmpty, let quote = card.triggerQuote, !quote.isEmpty {
             footer = "↳ \(quote)"
         }

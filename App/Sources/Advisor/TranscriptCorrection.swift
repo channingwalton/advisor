@@ -87,7 +87,7 @@ enum TranscriptCorrection {
         of original: String, with replacement: String, inMarkdown markdown: String
     ) -> String {
         guard !original.isEmpty else { return markdown }
-        let (prefix, body) = splitBody(markdown)
+        let (prefix, body) = TranscriptDoc.splitFrontmatter(markdown)
         let lines = body.components(separatedBy: "\n").map { line -> String in
             guard isParagraphMemberLine(line), let (linePrefix, text) = splitMemberLine(line)
             else { return line }
@@ -105,7 +105,7 @@ enum TranscriptCorrection {
         inParagraph paragraphIndex: Int, ofMarkdown markdown: String
     ) -> String {
         guard !original.isEmpty, n >= 0, paragraphIndex >= 0 else { return markdown }
-        let (prefix, body) = splitBody(markdown)
+        let (prefix, body) = TranscriptDoc.splitFrontmatter(markdown)
         var lines = body.components(separatedBy: "\n")
         let paragraphs = paragraphMemberIndices(in: lines)
         guard paragraphIndex < paragraphs.count else { return markdown }
@@ -124,23 +124,6 @@ enum TranscriptCorrection {
     }
 
     // MARK: markdown helpers
-
-    /// Splits leading YAML frontmatter (`---` … `---`, plus the blank lines after
-    /// it) off `markdown`, returning (prefix-to-preserve-verbatim, body). The body
-    /// is what `TranscriptDoc` parses; the prefix is re-prepended unchanged so a
-    /// correction never disturbs frontmatter. No frontmatter → ("", markdown).
-    private static func splitBody(_ markdown: String) -> (prefix: String, body: String) {
-        guard markdown.hasPrefix("---\n"),
-            let close = markdown.range(
-                of: "\n---\n",
-                range: markdown.index(markdown.startIndex, offsetBy: 4)..<markdown.endIndex)
-        else { return ("", markdown) }
-        var bodyStart = close.upperBound
-        while bodyStart < markdown.endIndex, markdown[bodyStart] == "\n" {
-            bodyStart = markdown.index(after: bodyStart)
-        }
-        return (String(markdown[..<bodyStart]), String(markdown[bodyStart...]))
-    }
 
     /// True for a line that contributes prose to a transcript paragraph: not a
     /// blockquote (`>`), heading (`#`), or blank line. Mirrors `TranscriptDoc`.

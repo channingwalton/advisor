@@ -29,6 +29,9 @@ struct SessionsView: View {
     /// The user's tag library (issue #15) — supplies pill colours and the detail
     /// pane's autocomplete. Refreshed from config on appear and config changes.
     @State private var tagLibrary: [SavedTag] = []
+    /// Which research kinds are on in Preferences — gates the detail's
+    /// right-click Answer / Context / Fact check, as in the recording window.
+    @State private var triggers = AdvisorConfig.Triggers()
     @Environment(\.openWindow) private var openWindow
 
     /// For the row context menu's live-note awareness (mirrors the detail pane).
@@ -93,8 +96,10 @@ struct SessionsView: View {
         // Tag library edits in Preferences (rename, recolour, delete) must
         // recolour/hide pills and refresh folder defaults without a relaunch.
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
-            let library = AdvisorConfig.load().tags
+            let config = AdvisorConfig.load()
+            let library = config.tags
             tagLibrary = library
+            triggers = config.triggers
             folderTags = folders.reduce(into: [:]) {
                 $0[$1] = SessionArchive.folderTags($1).filter {
                     TagLibrary.named($0, in: library) != nil
@@ -605,7 +610,8 @@ struct SessionsView: View {
         // must not stay open in the detail (the Ask bar would append to a
         // transcript no longer in the sidebar).
         if let selected = filtered.first(where: { $0.id == selection }) {
-            SessionDetailPane(file: selected.file, detail: selected.detail, library: tagLibrary)
+            SessionDetailPane(
+                file: selected.file, detail: selected.detail, library: tagLibrary, triggers: triggers)
                 .id(selected.id)
         } else {
             Text("Select a session to read it.")
@@ -617,7 +623,9 @@ struct SessionsView: View {
     // MARK: data
 
     private func reload() {
-        tagLibrary = AdvisorConfig.load().tags
+        let config = AdvisorConfig.load()
+        tagLibrary = config.tags
+        triggers = config.triggers
         folders = SessionArchive.folders()
         folderContexts = folders.reduce(into: [:]) { $0[$1] = SessionArchive.folderContext($1) }
         folderTags = folders.reduce(into: [:]) {
@@ -924,6 +932,28 @@ private extension View {
     }
 }
 
+/// A follow-up streaming into a saved card.
+private struct SavedReply {
+    /// The card's body with the follow-up turn so far.
+    var body: String
+    /// The sidecar request, so deleting the card can stop it.
+    var requestId: String?
+    /// Finished but couldn't be saved — kept on screen so it can be copied.
+    var unsaved = false
+}
+
+/// A research card asked for on a saved transcript, while it streams.
+private struct SavedResearch {
+    var card: Card
+    /// The transcript line it will be saved under, and the paragraph's block
+    /// offset when it was asked — together they find the paragraph to show it
+    /// under as other edits shift offsets.
+    let anchor: NoteEdit.Anchor
+    let paragraphOffset: Int
+    /// The sidecar request, for Skip and Delete.
+    let requestId: String
+}
+
 /// The right-hand detail: a selected session rendered like the live window —
 /// header + meta, the cards it surfaced, the questions asked of it, and the full
 /// transcript — with the ask bar kept (answers append to the note on disk).
@@ -932,6 +962,21 @@ private struct SessionDetailPane: View {
     let detail: SessionDetail
     /// The tag library, for the Tags chip's autocomplete and pill colours.
     let library: [SavedTag]
+    /// Which right-click research actions Preferences allows.
+    let triggers: AdvisorConfig.Triggers
+    /// The note as feed items and its card/note ids, built once per `detail`
+    /// rather than on every redraw — streaming answers redraw many times a second.
+    private let savedItems: [FeedItem]
+    private let blockIds: [String?]
+
+    init(file: SessionFile, detail: SessionDetail, library: [SavedTag], triggers: AdvisorConfig.Triggers) {
+        self.file = file
+        self.detail = detail
+        self.library = library
+        self.triggers = triggers
+        savedItems = Feed.saved(blocks: detail.blocks, times: detail.blockTimes)
+        blockIds = Feed.savedIds(detail.blocks)
+    }
 
     @ObservedObject private var ctx = TranscriptWindowContext.shared
 
@@ -946,6 +991,15 @@ private struct SessionDetailPane: View {
 
     /// Experiment: hide transcript paragraphs/headings so only cards show.
     @State private var hideTranscript = false
+    /// Cards the user expanded or collapsed, by card id (`Feed.savedIds`, which
+    /// follow the content); the rest keep their default (fact-checks collapsed).
+    /// View state only, like the recording window's — it never touches the note.
+    @State private var expansion: [String: Bool] = [:]
+    /// Research cards asked for on this note's transcript, shown under their
+    /// paragraph until the finished card is saved into the note.
+    @State private var research: [SavedResearch] = []
+    /// Follow-ups streaming into saved cards, by card id.
+    @State private var replies: [String: SavedReply] = [:]
 
     // Rename state.
     @State private var renaming = false
@@ -978,7 +1032,11 @@ private struct SessionDetailPane: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
+            // The detail's items otherwise sit at its leading edge, beside the
+            // sidebar, where they're easy to miss; a flexible spacer pushes them
+            // to the trailing edge, where the recording window keeps its controls.
+            ToolbarSpacer(.flexible)
+            ToolbarItemGroup {
                 hideTranscriptButton
                 summariseButton
                 tagsButton
@@ -1178,8 +1236,8 @@ private struct SessionDetailPane: View {
 
     private var youAsked: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionLabel(
-                "You asked",
+            FeedSectionLabel(
+                title: "You asked",
                 count: detail.questions.count == 1 ? "1 question" : "\(detail.questions.count) questions")
             ForEach(Array(detail.questions.enumerated()), id: \.offset) { _, q in
                 HStack(alignment: .top, spacing: 10) {
@@ -1199,115 +1257,198 @@ private struct SessionDetailPane: View {
 
     // MARK: transcript
 
-    /// A display row: each run of consecutive transcript paragraphs between
-    /// cards (or headings) collapses into one transcript card, mirroring the
-    /// live feed. Paragraphs keep their original block offset so a correction
-    /// still maps to the right paragraph.
-    private enum DisplayBlock: Identifiable {
-        case transcript([(offset: Int, text: String)])
-        case card(offset: Int, markdown: String)
-        case note(offset: Int, text: String)
-        case heading(offset: Int, title: String)
-
-        var id: Int {
-            switch self {
-            case .transcript(let ps): ps.first?.offset ?? -1
-            case .card(let offset, _): offset
-            case .note(let offset, _): offset
-            case .heading(let offset, _): offset
-            }
-        }
-    }
-
-    private var displayBlocks: [DisplayBlock] {
-        var out: [DisplayBlock] = []
-        var buf: [(offset: Int, text: String)] = []
-        func flush() {
-            if !buf.isEmpty { out.append(.transcript(buf)); buf.removeAll() }
-        }
-        for (offset, block) in detail.blocks.enumerated() {
-            switch block {
-            case .paragraph(let text): buf.append((offset, text))
-            case .card(let markdown): flush(); out.append(.card(offset: offset, markdown: markdown))
-            case .note(let text): flush(); out.append(.note(offset: offset, text: text))
-            case .heading(let title): flush(); out.append(.heading(offset: offset, title: title))
-            }
-        }
-        flush()
-        return out
-    }
-
+    /// The saved note in the shared feed — the same rows and controls as the
+    /// recording window, with this note's actions.
     private var transcript: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionLabel(hideTranscript ? "Cards" : "Transcript", count: nil)
-            ForEach(displayBlocks) { item in
-                switch item {
-                case .transcript(let paragraphs) where !hideTranscript:
-                    transcriptRun(paragraphs)
-                case .transcript:
-                    EmptyView()
-                case .card(_, let markdown):
-                    let parts = SessionDetail.cardParts(markdown)
-                    SessionCardView(
-                        kind: parts.label.isEmpty ? nil : parts.kindName,
-                        kindColour: Self.kindColour(parts.label),
-                        title: parts.title, markdown: parts.body, copyText: markdown)
-                        .padding(.vertical, 6)
-                case .note(_, let text):
-                    SessionCardView(
-                        kind: "Note", kindColour: Theme.factGreen, title: "", markdown: text,
-                        fill: Theme.factGreenTint.opacity(0.5))
-                        .padding(.vertical, 6)
-                case .heading(_, let title) where title != "Transcript" && !hideTranscript:
-                    sectionLabel(title, count: nil).padding(.top, 10)
-                case .heading:
-                    EmptyView()
-                }
-            }
-        }
-    }
-
-    /// A run of transcript between cards, as plain text with each paragraph's
-    /// time hanging in the left margin. Each paragraph keeps its own selectable
-    /// text view so a correction maps back to the right paragraph index.
-    private func transcriptRun(_ paragraphs: [(offset: Int, text: String)]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(paragraphs, id: \.offset) { para in
-                SelectableTranscriptText(
-                    text: para.text, toolTip: "", actions: [], onAction: { _, _ in },
-                    // The live note is still owned by its writer; correcting it
-                    // here would be clobbered, so the menu is hidden until saved.
-                    onCorrect: isLive
-                        ? nil
-                        : { request in apply(request, toParagraph: paragraphOrdinal(before: para.offset)) })
-                    .overlay(alignment: .topLeading) {
-                        if let time = detail.blockTimes.indices.contains(para.offset)
-                            ? detail.blockTimes[para.offset] : nil
-                        {
-                            Text(time).font(.system(size: 11.5)).monospacedDigit()
-                                .foregroundStyle(Theme.textTertiary)
-                                .fixedSize()
-                                .offset(x: -Theme.Metric.timeGutter, y: 3)
-                                .allowsHitTesting(false)
-                        }
+        VStack(alignment: .leading, spacing: FeedView.spacing) {
+            FeedSectionLabel(title: hideTranscript ? "Cards" : "Transcript")
+            FeedView(
+                items: Feed.mapCards(Feed.applyingExpansion(
+                    expansion,
+                    to: Feed.grouped(
+                        Feed.inserting(
+                            research.map { pending in
+                                let paragraph = NoteEdit.paragraphOffset(
+                                    endingWith: pending.anchor.line, near: pending.paragraphOffset,
+                                    in: detail.blocks)
+                                return (afterParagraph: paragraph.map(String.init) ?? "", card: pending.card)
+                            },
+                            into: savedItems),
+                        hideTranscript: hideTranscript))) { card in
+                    if let reply = replies[card.id] {
+                        card.body = reply.body
+                        card.state = reply.unsaved ? "done" : "streaming"
+                        card.replying = true
                     }
-            }
+                    // A finished research card that couldn't be saved has no place
+                    // in the note to take a follow-up.
+                    if card.state == "done", research.contains(where: { $0.card.id == card.id }) {
+                        card.replying = true
+                    }
+                },
+                actions: feedActions)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The colour of a saved card's kind label, by its header label.
-    private static func kindColour(_ label: String) -> Color {
-        switch label {
-        case "CONTEXT": Theme.contextViolet
-        case "SUMMARY": Theme.summaryTeal
-        case "VERIFIED": Theme.factGreen
-        case "NEEDS CONTEXT": Theme.factAmber
-        case "MISLEADING": Theme.factRed
-        case "FACT-CHECK": Theme.textSecondary
-        default: Theme.accent
-        }
+    /// What a saved note allows. The live note is still owned by its writer, so
+    /// edits here would be clobbered — it stays read-only until saved (collapse
+    /// is view state, so it's always allowed).
+    private var feedActions: FeedActions {
+        FeedActions(
+            transcriptActions: isLive ? [] : TranscriptAction.research(for: triggers),
+            onAction: { kind, selection, paragraph in startResearch(kind, on: selection, in: paragraph) },
+            onAddNote: isLive
+                ? nil
+                : { text, offset, paragraph in
+                    guard let block = Int(paragraph.id) else { return }
+                    finishEdit(SessionArchive.insertNote(
+                        text, inParagraphAt: block, expecting: detail.blocks[block], atCharacter: offset,
+                        in: file))
+                },
+            onCorrect: isLive
+                ? nil
+                : { request, paragraph in
+                    // Saved paragraph ids are their block offsets.
+                    guard let offset = Int(paragraph.id) else { return }
+                    apply(request, toParagraph: paragraphOrdinal(before: offset))
+                },
+            onToggleCard: { card in expansion[card.id] = !card.isExpanded },
+            onDeleteCard: isLive ? nil : { card in deleteBlock(id: card.id) },
+            onCancelCard: { card in
+                // Skip: drop the handler too, so a finish already on its way can't
+                // save the card; it stays, marked skipped, until deleted.
+                guard let index = research.firstIndex(where: { $0.card.id == card.id }) else { return }
+                ctx.sidecar?.discardDocumentRequest(research[index].requestId)
+                research[index].card.state = "cancelled"
+            },
+            onReply: isLive ? nil : { card, question in startReply(on: card, question) },
+            onDeleteNote: isLive ? nil : { id in deleteBlock(id: id) })
     }
+
+    /// Remove a card or note from the note on disk — or, for a research card not
+    /// saved yet, stop it and drop it.
+    private func deleteBlock(id: String) {
+        if let pending = research.first(where: { $0.card.id == id }) {
+            // Drop its handler too, so a finish already on its way can't save it.
+            ctx.sidecar?.discardDocumentRequest(pending.requestId)
+            research.removeAll { $0.card.id == id }
+            return
+        }
+        // A follow-up still streaming into this card has nowhere to go now.
+        if let reply = replies.removeValue(forKey: id), let request = reply.requestId {
+            ctx.sidecar?.discardDocumentRequest(request)
+        }
+        guard let offset = blockIds.firstIndex(of: id) else { return }
+        finishEdit(SessionArchive.removeBlock(at: offset, expecting: detail.blocks[offset], from: file))
+    }
+
+    /// Research `selection` from the paragraph it's in (right-click Answer /
+    /// Context / Fact check). The card streams in under the paragraph and, once
+    /// done, is saved into the note under the paragraph's last line — where the
+    /// live feed anchors a manual card. A failed or skipped card stays until
+    /// deleted, and isn't saved.
+    private func startResearch(_ kind: String, on selection: String, in paragraph: FeedParagraph) {
+        guard let offset = Int(paragraph.id), detail.blocks.indices.contains(offset) else { return }
+        guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
+        let document = SessionArchive.contents(of: file)
+        guard let anchor = NoteEdit.anchor(ofParagraphAt: offset, expecting: detail.blocks[offset], in: document)
+        else { return finishEdit(false) }
+
+        let card = Card(
+            id: "research-\(UUID().uuidString)", created: Date(), kind: kind, title: selection,
+            body: "…", state: "pending",
+            footnote: kind == "answer" ? SavedCard.savedGroundedNote : nil,
+            isExpanded: kind != "factcheck")
+        let file = file
+        let request = sidecar.researchDocument(action: kind, text: selection, document: document) { body, state in
+            // Save first, from captured values: the user may have moved to another
+            // session, taking this pane's state with it.
+            if state == "done" {
+                var done = card
+                done.body = body
+                done.state = state
+                if Self.save(to: file, { SessionArchive.insertBlock(SessionMarkdown.cardBlock(done), after: anchor, in: $0) }) {
+                    research.removeAll { $0.card.id == card.id }
+                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                    return
+                }
+                // Only an unreadable note or a failed write gets here.
+                askNote = "Couldn't save the card to the note — copy it before navigating away."
+            }
+            guard let index = research.firstIndex(where: { $0.card.id == card.id }) else { return }
+            research[index].card.body = body
+            research[index].card.state = state
+        }
+        guard let request else { askNote = "Sidecar not running — not sent."; return }
+        research.append(SavedResearch(card: card, anchor: anchor, paragraphOffset: offset, requestId: request))
+    }
+
+    /// Ask a follow-up on a saved card. The answer streams into the card in the
+    /// live turn format and, once done, the card's body is rewritten in the note.
+    /// A failed or skipped follow-up leaves the note as it was.
+    private func startReply(on card: Card, _ question: String) {
+        guard replies[card.id] == nil else { return }
+        guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
+        let base = card.body
+        let file = file
+        let request = sidecar.replyDocument(
+            kind: card.kind, title: card.title, base: base, replyText: question,
+            document: SessionArchive.contents(of: file)
+        ) { answer, state in
+            let body = SessionMarkdown.replyBody(base: base, question: question, answer: answer)
+            switch state {
+            case "done":
+                // Save first, from captured values: the user may have moved on.
+                if Self.save(to: file, { SessionArchive.replaceCardBody(ofCard: card.id, body: base, with: body, in: $0) }) {
+                    replies[card.id] = nil
+                    // The new body gives the card a new id; keep it open, as it
+                    // was to take the follow-up (a fact-check would otherwise shut).
+                    let saved = SessionArchive.relocated(file) ?? file
+                    if let newId = NoteEdit.cardId(withBody: body, in: SessionArchive.contents(of: saved)) {
+                        expansion[newId] = true
+                    }
+                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                } else {
+                    replies[card.id]?.body = body
+                    replies[card.id]?.unsaved = true
+                    askNote = "Couldn't save the follow-up to the note — copy it before navigating away."
+                }
+            case "failed":
+                replies[card.id] = nil
+                askNote = "The follow-up didn't complete — \(answer)"
+            case "cancelled":
+                replies[card.id] = nil
+            default:
+                replies[card.id]?.body = body
+            }
+        }
+        guard let request else { askNote = "Sidecar not running — follow-up not sent."; return }
+        replies[card.id] = SavedReply(
+            body: SessionMarkdown.replyBody(base: base, question: question, answer: "…"), requestId: request)
+    }
+
+    /// Run a save against `file`, and once more against where it is now if it
+    /// has moved (filed into a folder meanwhile) — a long research or follow-up
+    /// can outlast the note's path.
+    private static func save(to file: SessionFile, _ attempt: (SessionFile) -> Bool) -> Bool {
+        if attempt(file) { return true }
+        guard let moved = SessionArchive.relocated(file), moved.url != file.url else { return false }
+        return attempt(moved)
+    }
+
+    /// After an edit to the note on disk, refresh the list cache (and so this
+    /// pane's `detail`) either way: an edit that didn't apply usually means the
+    /// note changed underneath us, so the reload shows what's there now.
+    private func finishEdit(_ applied: Bool) {
+        if !applied {
+            askNote = Self.editFailed
+        } else if askNote == Self.editFailed {
+            askNote = ""
+        }
+        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+    }
+
+    private static let editFailed = "Couldn't update the note — it may have changed on disk, so it has been reloaded."
 
     /// The 0-based index of the paragraph at block `offset` among paragraph blocks
     /// only — the index `TranscriptCorrection` keys on (it groups paragraphs the
@@ -1333,18 +1474,6 @@ private struct SessionDetailPane: View {
                 of: request.original, with: request.replacement, in: file)
         }
         if changed { NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil) }
-    }
-
-    // MARK: shared bits
-
-    private func sectionLabel(_ title: String, count: String?) -> some View {
-        HStack(spacing: 8) {
-            Text(title).font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.textSecondary)
-            if let count {
-                Text(count).font(.system(size: 12)).foregroundStyle(Theme.textTertiary)
-            }
-        }
     }
 
     // MARK: ask
@@ -1474,71 +1603,5 @@ private struct SessionDetailPane: View {
             return
         }
         question = ""
-    }
-}
-
-// MARK: - Saved card
-
-/// A saved card (or editorial note) in the Sessions detail: a coloured kind label
-/// over its title, then the body, on a faint fill with no outline. Copy appears
-/// while the pointer is over the card.
-private struct SessionCardView: View {
-    /// "Context", "Answer", "Note", … — nil for a card without a header.
-    let kind: String?
-    let kindColour: Color
-    let title: String
-    let markdown: String
-    /// What Copy puts on the clipboard (the card's full inner markdown); nil
-    /// hides Copy.
-    var copyText: String? = nil
-    var fill: Color = Theme.surfaceCardSubtle
-    @State private var hovering = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if kind != nil || !title.isEmpty || copyText != nil {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        if let kind {
-                            HStack(spacing: 6) {
-                                Circle().frame(width: 6, height: 6)
-                                Text(kind)
-                            }
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(kindColour)
-                        }
-                        if !title.isEmpty {
-                            Text(title)
-                                .font(.system(size: 15.5, weight: .semibold))
-                                .foregroundStyle(Theme.textStrong)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    Spacer(minLength: 8)
-                    if let copyText {
-                        CardIconButton(system: "doc.on.doc", help: "Copy", action: { copy(copyText) })
-                            .opacity(hovering ? 1 : 0)
-                    }
-                }
-            }
-            if !markdown.isEmpty {
-                MarkdownText(markdown: markdown, style: .saved)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(.horizontal, 22)
-        .padding(.top, 18)
-        .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(fill, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
-        .onHover { hovering = $0 }
-    }
-
-    /// The card's inner markdown (header, body and footer, blockquote markers
-    /// already stripped by `TranscriptDoc`) is a faithful text snapshot of what's
-    /// shown, so it's copied verbatim.
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 }

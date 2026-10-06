@@ -641,3 +641,21 @@ private func makeFolderedArchive(
 
     #expect(draft == RecordingDraft(context: "Team sync", tags: ["work", "urgent"]))
 }
+
+@Test func aMovedNoteIsFoundAgainByItsFileName() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")
+    let folder = dir.appendingPathComponent("Work")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let name = "2026-06-18-090000.md"
+    let date = try #require(SessionArchive.date(from: name))
+    let original = SessionFile(url: dir.appendingPathComponent(name), date: date, folder: nil)
+    try "x".write(to: folder.appendingPathComponent(name), atomically: true, encoding: .utf8)
+
+    let moved = SessionArchive.relocated(original, in: dir)
+    #expect(moved?.folder == "Work")
+    #expect(moved?.url.lastPathComponent == name)
+    try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+    #expect(SessionArchive.relocated(original, in: dir) == nil)
+}

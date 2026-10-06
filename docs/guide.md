@@ -18,9 +18,9 @@ via the query box. If microphone permission or speech startup fails, fix the
 reported problem and press **Resume**; failed speech recovery also leaves Resume
 available and keeps the existing transcript.
 
-The feed reads as a stack of cards: each run of conversation between two cards
-sits in its own recessed transcript card, so transcript and answer cards are
-visually distinct.
+The recording window and the Sessions detail share one feed: the conversation
+as plain text with each paragraph's time in the margin, and cards and notes
+inline on a faint fill, so a past session reads just as it did live.
 
 ### Toolbar
 
@@ -58,18 +58,19 @@ sentence) to:
   all "…"** (every occurrence in the session); type the correction and it's
   saved to the transcript in place;
 - **Add note here…** when the audio missed context — your note lands as a green
-  **NOTE** card at that point and the assistant reads it as part of the
-  conversation (so it can inform, or trigger, research); delete it with its
-  dismiss button;
+  **Note** card at that point and the assistant reads it as part of the
+  conversation (so it can inform, or trigger, research); delete it with the ✕
+  that shows when you hover it;
 - copy the text.
 
 ### Cards
 
 Once a card has finished, a follow-up box appears on it — ask a question about
 the card and the answer is appended in place, so a card becomes a short thread.
-Each card can be copied (its **Copy** button puts the title, body and any sources
-on the clipboard), collapsed/expanded or dismissed (fact-checks start
-collapsed); dismissing a card that's still researching cancels its lane.
+Hover a card for its controls: **Copy** (puts the title, body and any sources
+on the clipboard), collapse/expand (a collapsed card keeps its chevron showing;
+fact-checks start collapsed) and delete (✕); deleting a card that's still
+researching cancels its lane.
 
 ### Where sessions are saved
 
@@ -127,11 +128,23 @@ collapsible folder sections above the date-grouped sessions.
 ### Session detail
 
 Selecting a session shows it on the right: title and meta, the questions you
-asked, and the transcript rendered like the live window, with the cards Advisor
-surfaced inline and each paragraph's time in the margin (hover a card to copy
-it).
+asked, and the transcript in the same feed as the recording window, with the
+cards Advisor surfaced inline and each paragraph's time in the margin. It has
+the recording window's controls too, and edits are saved into the note:
 
-The toolbar above the detail holds **Hide Transcript**, **Summarise**, **Tags**
+- **Hover a card or note** to copy it, collapse/expand it (fact-checks start
+  collapsed) or delete it (✕) — straight away, as in the recording window;
+  deleting the summary or the last follow-up removes its heading too.
+- **Follow up on a finished card**: the answer is appended to the card.
+- **Right-click the transcript** for **Answer / Context / Fact check** (the card
+  streams in under that paragraph and is saved when it finishes; a failed or
+  skipped one isn't), **Add note here…** (a green Note card at that line), and
+  **Correct "…"** / **Replace all "…"**.
+
+The session still being recorded can be read and collapsed here, but not edited
+until it has fully saved.
+
+The toolbar's right-hand end holds **Hide Transcript**, **Summarise**, **Tags**
 (applies or removes tags, picking from your library) and the `…` menu:
 
 - **Rename** — a short label for an easier-to-scan list; leave it blank to fall

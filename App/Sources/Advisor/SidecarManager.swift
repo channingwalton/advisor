@@ -35,6 +35,9 @@ struct Card: Identifiable, Equatable {
     /// Fact-check outcome, when known. Nil for non-factcheck cards and for
     /// factcheck cards before the sidecar emits a verdict.
     var verdict: Verdict?
+    /// A footer line with no live equivalent, kept from a saved note — a
+    /// follow-up's `Asked …` stamp. Nil for live cards.
+    var footnote: String?
     /// Whether the card is expanded. Long cards collapse to their header so they
     /// don't bury the live transcript; fact-checks default collapsed.
     var isExpanded: Bool = true
@@ -420,10 +423,10 @@ final class SidecarManager {
         return send(msg)
     }
 
-    /// Pending document-question answer streams, keyed by request id. Registered
-    /// by `askDocument`, invoked as `document_answer` frames arrive, dropped on a
-    /// terminal state. Main-actor confined: `askDocument` and inbound handling
-    /// both run on the main actor.
+    /// Pending document-request answer streams, keyed by request id. Registered
+    /// by `sendDocumentRequest`, invoked as `document_answer` frames arrive,
+    /// dropped on a terminal state. Main-actor confined: the requests and inbound
+    /// handling both run on the main actor.
     @MainActor private lazy var documentHandlers = DocumentRequestHandlers()
 
     /// Ask a question about a saved transcript (the history browser). `onUpdate`
@@ -436,16 +439,8 @@ final class SidecarManager {
     func askDocument(
         question: String, document: String, onUpdate: @escaping (String, String) -> Void
     ) -> String? {
-        let id = UUID().uuidString
-        documentHandlers.register(id, handler: onUpdate)
-        let sent = send([
-            "type": "ask_document", "id": id, "question": question, "document": document,
-        ])
-        if !sent {
-            documentHandlers.remove(id)
-            return nil
-        }
-        return id
+        sendDocumentRequest(
+            ["type": "ask_document", "question": question, "document": document], onUpdate: onUpdate)
     }
 
     /// Summarise a saved transcript (the history browser, issue #30). Like
@@ -457,14 +452,65 @@ final class SidecarManager {
     func summariseDocument(
         transcript: String, onUpdate: @escaping (String, String) -> Void
     ) -> String? {
+        sendDocumentRequest(["type": "summarise_document", "transcript": transcript], onUpdate: onUpdate)
+    }
+
+    /// Right-click research on a passage of a saved transcript (the Sessions
+    /// browser): `action` is the card kind ("answer" | "context" | "factcheck"),
+    /// `document` the whole note. Streams back like `askDocument`. Returns the
+    /// request id (cancel with `sendCancel`), or nil if the sidecar is down.
+    @MainActor
+    @discardableResult
+    func researchDocument(
+        action: String, text: String, document: String, onUpdate: @escaping (String, String) -> Void
+    ) -> String? {
+        sendDocumentRequest(
+            ["type": "research_document", "action": action, "text": text, "document": document],
+            onUpdate: onUpdate)
+    }
+
+    /// A follow-up typed into a card of a saved transcript (the Sessions browser):
+    /// `card_reply`'s fields with the whole note as context. Streams back the
+    /// answer alone, like `askDocument`. Returns the request id, or nil if the
+    /// sidecar is down.
+    @MainActor
+    @discardableResult
+    func replyDocument(
+        kind: String, title: String, base: String, replyText: String, document: String,
+        onUpdate: @escaping (String, String) -> Void
+    ) -> String? {
+        sendDocumentRequest(
+            [
+                "type": "reply_document", "kind": kind, "title": title, "base": base,
+                "replyText": replyText, "document": document,
+            ],
+            onUpdate: onUpdate)
+    }
+
+    /// Send a document request (`fields` plus a fresh id) whose answer streams
+    /// back as `document_answer` frames to `onUpdate`. Returns the id, or nil —
+    /// with nothing registered — if the sidecar is down.
+    @MainActor
+    private func sendDocumentRequest(
+        _ fields: [String: Any], onUpdate: @escaping (String, String) -> Void
+    ) -> String? {
         let id = UUID().uuidString
         documentHandlers.register(id, handler: onUpdate)
-        let sent = send(["type": "summarise_document", "id": id, "transcript": transcript])
-        if !sent {
+        var message = fields
+        message["id"] = id
+        guard send(message) else {
             documentHandlers.remove(id)
             return nil
         }
         return id
+    }
+
+    /// Stop a document request and forget its handler, so no frame still on its
+    /// way — even a `done` — reaches the caller (a deleted in-flight card).
+    @MainActor
+    func discardDocumentRequest(_ id: String) {
+        documentHandlers.remove(id)
+        sendCancel(id)
     }
 
     /// Manual right-click action on selected transcript text. `action` is the

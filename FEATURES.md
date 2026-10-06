@@ -91,8 +91,10 @@ The app opens on a master/detail browser of your past sessions:
   newest / oldest first). Each row shows a title, a gist, duration, card count
   and a dot per tag.
 - **Full session detail** — title and meta, the questions you asked, and the
-  transcript rendered just like the live window, with the surfaced cards
-  inline.
+  transcript in the same feed as the live window, with the surfaced cards
+  inline and the same controls: copy, collapse/expand, delete and follow up on
+  cards, and right-click the transcript to research a passage (Answer / Context
+  / Fact check), add a note or correct a word — all saved to the note.
 - **Ask-and-append** — ask a question about a past session; the answer streams
   in and is appended to that session's note under a **Follow-ups** heading, so
   the saved transcript grows with the questions you ask of it.

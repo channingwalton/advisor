@@ -31,6 +31,28 @@ enum TranscriptDoc {
     struct TimedBlock: Equatable {
         let block: TranscriptBlock
         let time: String?
+        /// The body lines (0-based, after `splitFrontmatter`) the block was read
+        /// from: a paragraph's text-bearing lines in order, a card's or note's
+        /// `>` lines, a heading's line — so an edit can splice the note.
+        let lines: [Int]
+    }
+
+    /// Splits leading YAML frontmatter (`---` … `---`, plus the blank lines after
+    /// it) off `markdown`, returning (prefix-to-preserve-verbatim, body). The body
+    /// is what `timedBlocks` parses (the same text `SessionArchive
+    /// .strippingFrontmatter` returns); an edit re-prepends the prefix unchanged.
+    /// No frontmatter → ("", markdown).
+    static func splitFrontmatter(_ markdown: String) -> (prefix: String, body: String) {
+        guard markdown.hasPrefix("---\n"),
+            let close = markdown.range(
+                of: "\n---\n",
+                range: markdown.index(markdown.startIndex, offsetBy: 4)..<markdown.endIndex)
+        else { return ("", markdown) }
+        var bodyStart = close.upperBound
+        while bodyStart < markdown.endIndex, markdown[bodyStart] == "\n" {
+            bodyStart = markdown.index(after: bodyStart)
+        }
+        return (String(markdown[..<bodyStart]), String(markdown[bodyStart...]))
     }
 
     /// `body` must already have frontmatter stripped
@@ -43,14 +65,18 @@ enum TranscriptDoc {
     static func timedBlocks(from body: String) -> [TimedBlock] {
         var blocks: [TimedBlock] = []
         var para: [String] = []
+        var paraLines: [Int] = []
         var paraTime: String?
         var prevSecs: Int?
         var quote: [String] = []
+        var quoteLines: [Int] = []
 
         func flushPara() {
             if !para.isEmpty {
-                blocks.append(TimedBlock(block: .paragraph(para.joined(separator: " ")), time: paraTime))
+                blocks.append(TimedBlock(
+                    block: .paragraph(para.joined(separator: " ")), time: paraTime, lines: paraLines))
                 para = []
+                paraLines = []
             }
             paraTime = nil
             prevSecs = nil
@@ -59,20 +85,22 @@ enum TranscriptDoc {
             if !quote.isEmpty {
                 let inner = quote.joined(separator: "\n")
                 if let noteBody = noteBody(from: inner) {
-                    blocks.append(TimedBlock(block: .note(noteBody), time: nil))
+                    blocks.append(TimedBlock(block: .note(noteBody), time: nil, lines: quoteLines))
                 } else {
-                    blocks.append(TimedBlock(block: .card(inner), time: nil))
+                    blocks.append(TimedBlock(block: .card(inner), time: nil, lines: quoteLines))
                 }
                 quote = []
+                quoteLines = []
             }
         }
 
-        for raw in body.components(separatedBy: "\n") {
+        for (index, raw) in body.components(separatedBy: "\n").enumerated() {
             if raw.hasPrefix(">") {
                 flushPara()
                 var inner = String(raw.dropFirst())
                 if inner.hasPrefix(" ") { inner.removeFirst() }
                 quote.append(inner)
+                quoteLines.append(index)
                 continue
             }
             flushQuote()
@@ -83,11 +111,12 @@ enum TranscriptDoc {
             if line.isEmpty { continue }
             if line.hasPrefix("# ") {
                 flushPara()
-                blocks.append(TimedBlock(block: .heading(String(line.dropFirst(2))), time: nil))
+                blocks.append(TimedBlock(block: .heading(String(line.dropFirst(2))), time: nil, lines: [index]))
                 continue
             }
             if line.hasPrefix("- ") {
-                let (secs, text) = splitTimestamp(String(line.dropFirst(2)))
+                let secs = splitTimestamp(String(line.dropFirst(2))).0
+                let text = memberText(raw)
                 if let prev = prevSecs, let s = secs {
                     // Stamps are HH:mm:ss only, so a session crossing midnight
                     // wraps to a smaller value — add a day before comparing.
@@ -95,7 +124,10 @@ enum TranscriptDoc {
                     if delta < 0 { delta += 86_400 }
                     if delta > 2 { flushPara() }
                 }
-                if !text.isEmpty { para.append(text) }
+                if !text.isEmpty {
+                    para.append(text)
+                    paraLines.append(index)
+                }
                 if let secs {
                     prevSecs = secs
                     if paraTime == nil { paraTime = String(format: "%02d:%02d", secs / 3600, secs % 3600 / 60) }
@@ -103,7 +135,8 @@ enum TranscriptDoc {
                 continue
             }
             // Any other prose line folds into the current paragraph.
-            para.append(line)
+            para.append(memberText(raw))
+            paraLines.append(index)
         }
         flushPara()
         flushQuote()
@@ -120,6 +153,14 @@ enum TranscriptDoc {
         // Drop the single blank separator line the writer emits after the header.
         if lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeFirst() }
         return lines.joined(separator: "\n")
+    }
+
+    /// The text a body line contributes to its paragraph: a transcript bullet's
+    /// text after its stamp, or any other prose line, trimmed. The one rule
+    /// `timedBlocks` joins into a `.paragraph` and an edit maps offsets with.
+    static func memberText(_ raw: String) -> String {
+        let line = raw.trimmingCharacters(in: .whitespaces)
+        return line.hasPrefix("- ") ? splitTimestamp(String(line.dropFirst(2))).1 : line
     }
 
     /// Splits a leading `HH:MM:SS ` stamp off a transcript line, returning the

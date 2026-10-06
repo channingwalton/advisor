@@ -20,7 +20,9 @@ import {
   cardKind,
   classify,
   configureClassifier,
+  documentResearchTask,
   replyTask,
+  researchKind,
   researchTask,
   resetClassifier,
   Trigger,
@@ -273,6 +275,21 @@ async function runDocumentTask(id: string, prompt: string): Promise<void> {
 
 function runDocumentQuestion(msg: Extract<Inbound, { type: "ask_document" }>): Promise<void> {
   return runDocumentTask(msg.id, documentQuestionTask(msg.question, msg.document));
+}
+
+async function runResearchDocument(msg: Extract<Inbound, { type: "research_document" }>): Promise<void> {
+  const kind = researchKind(msg.action);
+  if (!kind) {
+    send({ type: "document_answer", id: msg.id, body: `failed: unknown action ${msg.action}`, state: "failed" });
+    return;
+  }
+  return runDocumentTask(msg.id, documentResearchTask(kind, msg.text, msg.document));
+}
+
+function runReplyDocument(msg: Extract<Inbound, { type: "reply_document" }>): Promise<void> {
+  return runDocumentTask(
+    msg.id, replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.document, { saved: true })
+  );
 }
 
 function runSummariseDocument(
@@ -572,6 +589,16 @@ function handle(msg: Inbound): void {
       // History-browser question about a saved transcript. Transient session,
       // parallel-safe — no busy gate, no pool slot, no live-session state.
       void runDocumentQuestion(msg).catch(guard("ask_document"));
+      break;
+    case "research_document":
+      // Right-click research on a saved transcript (the Sessions browser). Like
+      // ask_document: transient session, parallel-safe, no live-session state.
+      void runResearchDocument(msg).catch(guard("research_document"));
+      break;
+    case "reply_document":
+      // Follow-up on a saved card (the Sessions browser). Like ask_document:
+      // transient session, parallel-safe, no live-session state.
+      void runReplyDocument(msg).catch(guard("reply_document"));
       break;
     case "summarise_live":
       // Summarise the live session into its single summary card. Transient

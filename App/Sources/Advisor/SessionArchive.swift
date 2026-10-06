@@ -136,11 +136,10 @@ enum SessionArchive {
     /// Read `file`, transform its markdown, and atomically write it back — the
     /// shared spine of the read-modify-write setters. Aborts (returns false) when
     /// the note can't be read (issue #41: never recreate a vanished or unreadable
-    /// note as a stub, losing the transcript) or the write fails. `transform` sees
-    /// the note's real contents, never "".
-    private static func rewrite(_ file: SessionFile, _ transform: (String) -> String) -> Bool {
-        guard let existing = readContents(of: file) else { return false }
-        let updated = transform(existing)
+    /// note as a stub, losing the transcript), the transform declines (nil), or
+    /// the write fails. `transform` sees the note's real contents, never "".
+    private static func rewrite(_ file: SessionFile, _ transform: (String) -> String?) -> Bool {
+        guard let existing = readContents(of: file), let updated = transform(existing) else { return false }
         // An atomic write recreates a file deleted since the read, so re-check
         // just before replacing — don't resurrect a note removed mid-edit.
         guard FileManager.default.fileExists(atPath: file.url.path) else { return false }
@@ -175,11 +174,8 @@ enum SessionArchive {
     /// closed by `---` as a setext heading and renders them huge. The session
     /// date is shown separately, so dropping the block loses nothing.
     static func strippingFrontmatter(_ markdown: String) -> String {
-        guard markdown.hasPrefix("---\n") else { return markdown }
-        let afterOpen = markdown.index(markdown.startIndex, offsetBy: 4)
-        guard let close = markdown.range(of: "\n---\n", range: afterOpen..<markdown.endIndex)
-        else { return markdown }
-        return String(markdown[close.upperBound...].drop(while: { $0 == "\n" }))
+        // One split for display and edits alike, so block offsets always agree.
+        TranscriptDoc.splitFrontmatter(markdown).body
     }
 
     /// `markdown` with a single scalar frontmatter `key:` set to `value` (collapsed
@@ -597,6 +593,14 @@ enum SessionArchive {
         return (try? fm.removeItem(at: folderURL)) != nil
     }
 
+    /// `file` where it is now: itself if it's still there, else the note with the
+    /// same file name elsewhere in the archive (moved into or out of a folder
+    /// meanwhile), or nil if it's gone.
+    static func relocated(_ file: SessionFile, in directory: URL = SessionArchive.directory) -> SessionFile? {
+        if FileManager.default.fileExists(atPath: file.url.path) { return file }
+        return list(in: directory).first { $0.url.lastPathComponent == file.url.lastPathComponent }
+    }
+
     /// Delete `file` from disk. Returns false if removal fails (e.g. the note is
     /// already gone). Irreversible — the caller owns confirmation.
     @discardableResult
@@ -666,6 +670,49 @@ enum SessionArchive {
         rewrite(file) {
             appendingFollowUp(to: $0, question: question, answer: answer, asked: asked)
         }
+    }
+
+    /// Remove the card or editorial note at block `offset` from `file` on disk
+    /// (`NoteEdit.removingBlock`). Returns false — leaving the note untouched —
+    /// when the block there is no longer `block`, the note can't be read, or the
+    /// write fails.
+    @discardableResult
+    static func removeBlock(at offset: Int, expecting block: TranscriptBlock, from file: SessionFile) -> Bool {
+        rewrite(file) { NoteEdit.removingBlock(at: offset, expecting: block, in: $0) }
+    }
+
+    /// Insert an editorial note into `file` on disk after the transcript line
+    /// that character `offset` of the paragraph at block `paragraphOffset` falls
+    /// in (`NoteEdit.insertingNote`). Returns false — leaving the note untouched —
+    /// when that paragraph is no longer `block`, the note can't be read, or the
+    /// write fails.
+    @discardableResult
+    static func insertNote(
+        _ text: String, inParagraphAt paragraphOffset: Int, expecting block: TranscriptBlock,
+        atCharacter offset: Int, in file: SessionFile
+    ) -> Bool {
+        rewrite(file) {
+            NoteEdit.insertingNote(
+                text, inParagraphAt: paragraphOffset, expecting: block, atCharacter: offset, in: $0)
+        }
+    }
+
+    /// Insert a finished card `block` into `file` on disk under `anchor`'s
+    /// transcript line, or at the end of the transcript if it has gone
+    /// (`NoteEdit.insertingBlock`). Returns false when the note can't be read or
+    /// the write fails.
+    @discardableResult
+    static func insertBlock(_ block: String, after anchor: NoteEdit.Anchor, in file: SessionFile) -> Bool {
+        rewrite(file) { NoteEdit.insertingBlock(block, after: anchor, in: $0) }
+    }
+
+    /// Replace the body of the card with id `id` in `file` on disk — a follow-up
+    /// appended (`NoteEdit.replacingCardBody`). Returns false — leaving the note
+    /// untouched — when the card has gone or changed, the note can't be read, or
+    /// the write fails.
+    @discardableResult
+    static func replaceCardBody(ofCard id: String, body old: String, with new: String, in file: SessionFile) -> Bool {
+        rewrite(file) { NoteEdit.replacingCardBody(ofCard: id, body: old, with: new, in: $0) }
     }
 
     /// Correct a transcription error in a saved note (issue #32): replace the

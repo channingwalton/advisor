@@ -47,6 +47,32 @@ export type Inbound =
   // session context, no transcript delta), streamed back as document_answer on
   // the same id.
   | { type: "ask_document"; id: string; question: string; document: string }
+  // Right-click research action on a passage of a saved past transcript (the
+  // Sessions browser): the live action's instruction over the whole document.
+  // Self-contained like ask_document — no live-session state — and streamed
+  // back as document_answer on the same id; the app writes the finished card
+  // into the saved note.
+  | {
+      type: "research_document";
+      id: string;
+      action: "answer" | "context" | "factcheck";
+      text: string;
+      document: string;
+    }
+  // Follow-up typed into a card of a saved past transcript (the Sessions
+  // browser): card_reply's fields, with the whole note in place of the recent
+  // transcript slice. Self-contained like ask_document; streamed back as
+  // document_answer on the same id — the answer only, which the app appends to
+  // the card in the live turn format and writes into the saved note.
+  | {
+      type: "reply_document";
+      id: string;
+      kind: string;
+      title: string;
+      base: string;
+      replyText: string;
+      document: string;
+    }
   // Summarise the live session (issue #30). Carries the full transcript (not a
   // delta) and produces a single "summary" card. `cardId` is set on re-summarise
   // to the existing summary card, so the sidecar updates it in place rather than

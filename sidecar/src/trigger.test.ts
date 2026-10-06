@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseClassifierResponse } from "./trigger.js";
+import { documentResearchTask, parseClassifierResponse, researchKind, researchTask } from "./trigger.js";
 
 const q = (subject: string) => ({ kind: "question", subject, query: `q:${subject}` });
 
@@ -60,4 +60,21 @@ test("classifier parse: drops incomplete triggers and caps at MAX (2)", () => {
   ];
   const r = parseClassifierResponse(JSON.stringify({ triggers }));
   assert.deepEqual(r, { ok: true, triggers: [q("keep1"), q("keep2")] });
+});
+
+// A right-click research action on a saved transcript (the Sessions browser):
+// the live instruction for that kind, with the whole transcript as context.
+test("documentResearchTask wraps the live instruction with the saved transcript", () => {
+  const doc = "# Transcript\n\n- 10:00:00 Rust is older than Go";
+  const t = documentResearchTask("factcheck", "Rust is older than Go", doc);
+  assert.ok(t.includes(`<transcript>\n${doc}\n</transcript>`));
+  assert.ok(t.endsWith(researchTask("factcheck", "Rust is older than Go", "Rust is older than Go")));
+  assert.match(t, /saved transcript of a past conversation/);
+});
+
+test("researchKind maps the app's action names and rejects anything else", () => {
+  assert.equal(researchKind("answer"), "question");
+  assert.equal(researchKind("context"), "context");
+  assert.equal(researchKind("factcheck"), "factcheck");
+  assert.equal(researchKind("query"), undefined);
 });

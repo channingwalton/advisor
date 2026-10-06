@@ -90,7 +90,6 @@ enum Theme {
 
     // MARK: context (violet)
     static let contextViolet = dyn(0x6044C0, 0xB9A4FF)
-    static let contextTint = dyn(0xEEE9FB, 0xB9A4FF, darkAlpha: 0.16)
     static let contextCodeBg = dyn(0xF1F0F6, 0xB9A4FF, darkAlpha: 0.14)
     static let contextCodeText = dyn(0x6E54B8, 0xCCBEFF)
 
@@ -98,13 +97,10 @@ enum Theme {
     static let factGreen = dyn(0x2F8D5B, 0x46D389)
     static let factGreenTint = dyn(0xE6F4EC, 0x46D389, darkAlpha: 0.16)
     static let factAmber = dyn(0xA06A12, 0xECB845)
-    static let factAmberTint = dyn(0xFAF0DB, 0xECB845, darkAlpha: 0.16)
     static let factRed = dyn(0xC0392B, 0xFF6B5C)
-    static let factRedTint = dyn(0xFBE9E7, 0xFF6B5C, darkAlpha: 0.16)
 
     // MARK: summary (teal) — distinct from answer/context/verdict pills
     static let summaryTeal = dyn(0x0E7C86, 0x4FD0DA)
-    static let summaryTint = dyn(0xE3F4F5, 0x4FD0DA, darkAlpha: 0.16)
 
     // MARK: misc
     static let termHighlightBg = dyn(0xEAE6FB, 0xB9A4FF, darkAlpha: 0.22)
@@ -114,7 +110,6 @@ enum Theme {
     // MARK: metrics
     enum Metric {
         static let toolbarHeight: CGFloat = 60
-        static let contentMaxWidth: CGFloat = 812
         /// The Sessions detail's centred reading column, its side margin, and
         /// how far paragraph times hang into that margin.
         static let readingWidth: CGFloat = 680
@@ -128,9 +123,7 @@ enum Theme {
         static let inputRadius: CGFloat = 12
         static let buttonRadius: CGFloat = 9
         static let chipRadius: CGFloat = 14
-        static let pillRadius: CGFloat = 6
 
-        static let paragraphSpacing: CGFloat = 6
         static let transcriptSize: CGFloat = 14.5
         static let transcriptLineSpacing: CGFloat = 14.5 * 0.2  // line-height 1.2
         static let cardBodySize: CGFloat = 14

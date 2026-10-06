@@ -9,6 +9,13 @@ import AppKit
 class IntrinsicHeightTextView: NSTextView {
     private var lastLaidOutWidth: CGFloat = -1
 
+    /// What the owning SwiftUI view last put in this text view. SwiftUI calls
+    /// `updateNSView` whenever the row's parent redraws — in the recording window,
+    /// on every live interim-speech update — so an update bringing the same
+    /// content is skipped rather than re-rendering and re-measuring the text,
+    /// which made scrolling stutter.
+    var renderedContent: AnyHashable?
+
     /// Height that fits the text at the current width; width stays flexible so
     /// the view fills its column. SwiftUI reads this for the row height, so it
     /// always matches the drawn wrap (issue #12).
