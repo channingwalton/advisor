@@ -1,5 +1,4 @@
 import { createInterface } from "node:readline";
-import { Agent } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, loadConfig, modelArg } from "./config.js";
 import {
@@ -15,6 +14,7 @@ import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { guardedRun } from "./guardedRun.js";
+import { Lane, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
 import {
   cardKind,
   classify,
@@ -76,13 +76,6 @@ const TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
 /// Pool grows lazily up to maxLanes (settable from the app).
 let maxLanes = 3;
 
-interface Lane {
-  name: string;
-  session: Agent;
-  busy: boolean;
-  currentCardId?: string;
-}
-
 const cancelledCards = new Set<string>();
 
 const researchLanes: Lane[] = [];
@@ -110,18 +103,7 @@ ensureLanes();
 
 let queryLane: Lane = makeLane("query");
 
-interface TranscriptEntry {
-  id: string;
-  // "me"/"them" are spoken lines; "note" is an editorial note the user injected
-  // (issue #34), rendered with a distinct label in the delta windows.
-  source: TranscriptSource;
-  text: string;
-  ts: number;
-}
-
-let transcript: TranscriptEntry[] = [];
-// Each persistent session tracks which transcript entries it has already seen.
-const cursors = new Map<string, number>();
+const transcript = new Transcript();
 let busy = false; // user queries (priority lane)
 const cardIDs = new ProcessCardIDs();
 let auto = true;
@@ -131,48 +113,22 @@ let auto = true;
 /// User queries (Ask box, right-click) are deliberately not gated by this.
 let sessionActive = false;
 
-/// Persistent sessions remember earlier messages, so send only new transcript.
-function transcriptDelta(lane: string): string {
-  const seen = cursors.get(lane) ?? 0;
-  const fresh = transcript.slice(seen);
-  cursors.set(lane, transcript.length);
-  if (fresh.length === 0) return "";
-  const text = fresh.map((e) => transcriptLine(e.source, e.text)).join("\n");
-  return `Conversation since my last message:\n<transcript>\n${text}\n</transcript>\n\n`;
-}
+const cardDeps: RunCardDeps = {
+  transcript,
+  nextCardId: () => cardIDs.next(),
+  sessionContext: () => sessionContext,
+  cancelledCards,
+  send,
+};
 
-async function runCard(
+function runCard(
   lane: Lane,
   kind: "answer" | "context" | "factcheck" | "query",
   title: string,
   task: string,
   triggerId?: string
 ): Promise<void> {
-  const cardId = cardIDs.next();
-  lane.currentCardId = cardId;
-  send({ type: "card", id: cardId, trigger: triggerId, kind, title, body: "…", state: "pending" });
-  let failed = false;
-  try {
-    const prompt = sessionContextPrefix(sessionContext) + transcriptDelta(lane.name) + task;
-    failed = await guardedRun(
-      lane.session, cardId, prompt,
-      (body, state) => ({ type: "card_update", id: cardId, body, state }),
-      "agent error", { cancelledCards, send }
-    );
-  } finally {
-    // Recycle a pooled (research/query) lane after any failure — timeout/error.
-    // Unlike the transient reply/summary/document lanes (disposed every turn),
-    // these persist to keep their session warm; but a timed-out turn may have
-    // wedged (interrupt is best-effort), so without this every later trigger
-    // routed to this lane would burn a full timeout indefinitely (issue #46).
-    // reset() drops the session; the next drainResearch dispatch re-spawns clean.
-    // Ordering: this runs before drainResearch's `.finally` clears `lane.busy`,
-    // so the re-dispatch always sees a fresh session. The warm session is kept on
-    // the success path (failed === false).
-    if (failed) lane.session.reset();
-    lane.currentCardId = undefined;
-    cancelledCards.delete(cardId);
-  }
+  return runCardWith(lane, kind, title, task, triggerId, cardDeps);
 }
 
 /// Answer a follow-up typed into an existing card. Runs on a transient one-shot
@@ -346,9 +302,8 @@ const COVERED_TTL_MS = 10 * 60 * 1000;
 /// serialised (the `classifying` guard), no second delta runs during the await,
 /// so deferring the commit can neither double-feed nor skip lines.
 function classifierDelta(): { text: string; anchorId?: string; end: number } {
-  const seen = cursors.get("classifier") ?? 0;
-  const fresh = transcript.slice(seen);
-  const end = transcript.length;
+  const fresh = transcript.entries.slice(transcript.cursor("classifier"));
+  const end = transcript.entries.length;
   if (fresh.length === 0) return { text: "", end };
   const blocks: { source: TranscriptSource; text: string }[] = [];
   for (const e of fresh) {
@@ -429,7 +384,7 @@ async function runClassify(): Promise<void> {
       // failing classifier can't stall the pipeline or grow the window forever.
       if (++classifyFailStreak >= MAX_CLASSIFY_RETRIES) {
         log(`classify failed ${classifyFailStreak}x — giving up on this window, advancing cursor`);
-        cursors.set("classifier", end);
+        transcript.setCursor("classifier", end);
         classifyFailStreak = 0;
       } else {
         log(`classify failed (${Date.now() - ct0}ms, attempt ${classifyFailStreak}) — re-feeding window next pass`);
@@ -439,7 +394,7 @@ async function runClassify(): Promise<void> {
     classifyFailStreak = 0;
     // Success (including a genuine "found nothing"): commit the cursor past this
     // window so its lines are judged exactly once.
-    cursors.set("classifier", end);
+    transcript.setCursor("classifier", end);
     const { triggers } = result;
     log(`classify ${Date.now() - ct0}ms → ${triggers.length} trigger(s)`);
     // The session may have ended during the classify await — drop its triggers
@@ -487,8 +442,7 @@ function handle(msg: Inbound): void {
   switch (msg.type) {
     case "session_start":
       sessionActive = true;
-      transcript = [];
-      cursors.clear();
+      transcript.clear();
       covered.clear();
       classifyFailStreak = 0;
       researchQueue.length = 0;

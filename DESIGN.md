@@ -1220,7 +1220,7 @@ rather than the new task.
 
 Fix, two parts:
 
-- **Recycle on failure (main.ts `runCard`).** After any failure outcome
+- **Recycle on failure (`runCard`, now in lanes.ts).** After any failure outcome
   (timeout or error) on a pooled lane, `reset()` the session so the next
   `drainResearch` dispatch re-spawns clean. This mirrors the transient lanes'
   `reset()`-in-`finally`, but gated on failure so the **success path keeps the
@@ -1230,7 +1230,7 @@ Fix, two parts:
   and a consistent `busy` flag. Cost accepted: a failed card pays one cold-spawn
   (and loses pre-failure session memory — the lane rebuilds context from
   subsequent deltas; the `cursors` entry is intentionally left as-is, so no giant
-  whole-transcript replay).
+  whole-transcript replay). *Reversed 2026-10-06 — see below.*
 
 - **`reset()` made robust + a defensive recycle in `run()` (agent.ts).**
   `reset()` now also settles any unresolved queued task (so a caller's promise
@@ -1248,6 +1248,23 @@ Unit-tested without the SDK via an injectable `queryFn` (default: the real
 timeout → recycle → fresh-spawn lifecycle and asserts no result desync, that
 streaming lands on the recycled task, and that the success path reuses the warm
 spawn (`agent.test.ts`).
+
+### Recycled lanes replay the conversation (2026-10-06, code review)
+
+Leaving the cursor as-is meant the fresh session never saw anything said before
+the failure: the next card on that lane got only the newest lines. Automatic
+cards mostly survived (the classifier writes each research query to stand
+alone), but the query lane didn't — after one timed-out card, an Ask-box "who
+owns it?" lost the conversation it referred to. The recycle now forgets the
+lane's cursor (`Transcript.forget`), so its next card is sent the whole
+conversation once. The cost is one larger prompt per failure (a one-hour meeting
+is roughly 10–15k tokens, small beside a research turn's web fetches), the same
+replay a lane added mid-session already gets. Rejected: re-sending a bounded tail,
+which keeps short-range referents but still loses earlier topics.
+
+`runCard` and the transcript/cursor bookkeeping moved out of `main.ts` into
+`lanes.ts` (`Transcript`, `runCard` with injected deps, like `guardedRun`), so
+the recycle is tested through the real card flow (`lanes.test.ts`).
 
 ## Versioning and the release cut (2026-07-04)
 

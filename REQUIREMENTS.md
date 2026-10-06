@@ -27,6 +27,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - entities/topics warranting background context (projects, people, tickets, technologies),
   - factual claims worth verifying.
 - F7. Maintain rolling conversation context so retrieval is topic-aware, not utterance-by-utterance.
+  - A research or query lane restarted after a failed card is sent the whole conversation again, so its next card keeps the earlier context. `#context-lane-recycle`
 
 ### Answering
 - F8. Answer detected questions automatically.
