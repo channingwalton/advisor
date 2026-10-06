@@ -1746,7 +1746,10 @@ replied to, and the paragraph-to-run grouping was written twice
   jump as other edits shift block offsets. The save runs from captured values,
   so it still lands if the user has moved to another session, and is retried at
   the note's new path if it was filed into a folder meanwhile
-  (`SessionArchive.relocated`). An answer researched here is footed "Grounded
+  (`SessionArchive.save(to:)`, via `relocated`). Ask and Summarise saved to
+  the captured path only, so filing the note during either lost the answer
+  until 2026-10-06 (code review); all four saved-note writes now go through
+  `SessionArchive.save(to:)`. An answer researched here is footed "Grounded
   in the saved transcript" (kept as `Card.footnote`, which `cardBlock` writes in
   place of the live line). Failed and skipped cards aren't saved; they stay
   until deleted. Skip and Delete both drop the request's handler

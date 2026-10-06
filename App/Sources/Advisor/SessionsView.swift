@@ -1172,7 +1172,7 @@ private struct SessionDetailPane: View {
                 // failure keep it visible (leave answerBody / answerState) so it
                 // isn't lost, and don't post — but still drop `summarising` so the
                 // UI isn't stuck.
-                if SessionArchive.upsertSummary(body, to: file) {
+                if SessionArchive.save(to: file, { SessionArchive.upsertSummary(body, to: $0) }) {
                     NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
                     answerBody = ""
                     answerState = ""
@@ -1367,7 +1367,7 @@ private struct SessionDetailPane: View {
                 var done = card
                 done.body = body
                 done.state = state
-                if Self.save(to: file, { SessionArchive.insertBlock(SessionMarkdown.cardBlock(done), after: anchor, in: $0) }) {
+                if SessionArchive.save(to: file, { SessionArchive.insertBlock(SessionMarkdown.cardBlock(done), after: anchor, in: $0) }) {
                     research.removeAll { $0.card.id == card.id }
                     NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
                     return
@@ -1399,7 +1399,7 @@ private struct SessionDetailPane: View {
             switch state {
             case "done":
                 // Save first, from captured values: the user may have moved on.
-                if Self.save(to: file, { SessionArchive.replaceCardBody(ofCard: card.id, body: base, with: body, in: $0) }) {
+                if SessionArchive.save(to: file, { SessionArchive.replaceCardBody(ofCard: card.id, body: base, with: body, in: $0) }) {
                     replies[card.id] = nil
                     // The new body gives the card a new id; keep it open, as it
                     // was to take the follow-up (a fact-check would otherwise shut).
@@ -1425,15 +1425,6 @@ private struct SessionDetailPane: View {
         guard let request else { askNote = "Sidecar not running — follow-up not sent."; return }
         replies[card.id] = SavedReply(
             body: SessionMarkdown.replyBody(base: base, question: question, answer: "…"), requestId: request)
-    }
-
-    /// Run a save against `file`, and once more against where it is now if it
-    /// has moved (filed into a folder meanwhile) — a long research or follow-up
-    /// can outlast the note's path.
-    private static func save(to file: SessionFile, _ attempt: (SessionFile) -> Bool) -> Bool {
-        if attempt(file) { return true }
-        guard let moved = SessionArchive.relocated(file), moved.url != file.url else { return false }
-        return attempt(moved)
     }
 
     /// After an edit to the note on disk, refresh the list cache (and so this
@@ -1584,7 +1575,7 @@ private struct SessionDetailPane: View {
                 // on disk. On failure keep the answer visible (leave answerBody /
                 // answerState as they are) so the Q&A isn't lost, and don't post —
                 // a reload would drop the unsaved answer.
-                if SessionArchive.appendFollowUp(question: q, answer: body, to: file) {
+                if SessionArchive.save(to: file, { SessionArchive.appendFollowUp(question: q, answer: body, to: $0) }) {
                     // Refresh the parent list cache (and so this pane's `detail`),
                     // not just a pane-local copy, or the appended Q&A would vanish on
                     // navigating away and back or via search.

@@ -593,6 +593,18 @@ enum SessionArchive {
         return (try? fm.removeItem(at: folderURL)) != nil
     }
 
+    /// Run a save against `file`, and once more against where it is now if it
+    /// has moved (filed into a folder meanwhile) — a long Ask, Summarise,
+    /// research or follow-up can outlast the note's path. A deleted note has
+    /// nowhere to go, so the save fails rather than recreating it.
+    static func save(
+        to file: SessionFile, in directory: URL = SessionArchive.directory, _ attempt: (SessionFile) -> Bool
+    ) -> Bool {
+        if attempt(file) { return true }
+        guard let moved = relocated(file, in: directory), moved.url != file.url else { return false }
+        return attempt(moved)
+    }
+
     /// `file` where it is now: itself if it's still there, else the note with the
     /// same file name elsewhere in the archive (moved into or out of a folder
     /// meanwhile), or nil if it's gone.

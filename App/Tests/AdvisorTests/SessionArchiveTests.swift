@@ -659,3 +659,53 @@ private func makeFolderedArchive(
     try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
     #expect(SessionArchive.relocated(original, in: dir) == nil)
 }
+
+/// An Ask answer or a Summary for a saved note still lands if the note is filed
+/// into a folder while it is being produced (code review 2026-10-06): the save
+/// follows the note to where it is now, and never recreates it at the old path.
+@Test func req_saved_note_moved_save() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")
+    let folder = dir.appendingPathComponent("Work")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let name = "2026-06-18-090000.md"
+    let date = try #require(SessionArchive.date(from: name))
+    let original = SessionFile(url: dir.appendingPathComponent(name), date: date, folder: nil)
+    let moved = folder.appendingPathComponent(name)
+    // Asked at the top level; filed into Work before the answer arrived.
+    try "---\ncontext: Effects\n---\n\n# Transcript\n\n- 17:00:00 hi\n"
+        .write(to: moved, atomically: true, encoding: .utf8)
+
+    #expect(SessionArchive.save(to: original, in: dir) {
+        SessionArchive.appendFollowUp(question: "Who owns it?", answer: "Priya.", to: $0)
+    })
+    #expect(SessionArchive.save(to: original, in: dir) { SessionArchive.upsertSummary("We agreed.", to: $0) })
+
+    let saved = try String(contentsOf: moved, encoding: .utf8)
+    #expect(saved.contains("Priya."))
+    #expect(saved.contains("We agreed."))
+    #expect(!FileManager.default.fileExists(atPath: original.url.path))
+
+    // Deleted rather than moved: nothing to follow, and nothing recreated.
+    try FileManager.default.removeItem(at: moved)
+    #expect(!SessionArchive.save(to: original, in: dir) { SessionArchive.upsertSummary("x", to: $0) })
+    #expect(!FileManager.default.fileExists(atPath: original.url.path))
+    #expect(!FileManager.default.fileExists(atPath: moved.path))
+}
+
+/// A save the note itself declines (it is still there; the edit no longer
+/// applies) fails once — it is not retried somewhere else.
+@Test func aDeclinedSaveOnANoteThatIsStillThereIsNotRetried() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("advisor-archive-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let name = "2026-06-18-090000.md"
+    let file = SessionFile(url: dir.appendingPathComponent(name), date: try #require(SessionArchive.date(from: name)), folder: nil)
+    try "x".write(to: file.url, atomically: true, encoding: .utf8)
+
+    var attempts: [URL] = []
+    #expect(!SessionArchive.save(to: file, in: dir) { attempts.append($0.url); return false })
+    #expect(attempts == [file.url])
+}
