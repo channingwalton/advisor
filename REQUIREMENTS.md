@@ -64,6 +64,10 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - Denied credential paths remain unreadable through both symlink aliases and their resolved targets. `#sandbox-symlink-read`
   - Recursive searches reject roots containing a resolved denied path. `#sandbox-symlink-search`
   - Ordinary files remain readable, and scoped searches without denied descendants remain permitted. `#sandbox-symlink-permitted`
+  - Denied paths stay unreadable through the real CLI, including reads the SDK would approve before `canUseTool` (inside the working directory, or by an allow rule in the user's settings). `#sandbox-sdk-gate`
+  - A search pattern cannot redirect a search outside its checked root (absolute, `~` and `..` patterns are refused). `#sandbox-glob-pattern`
+  - Only web, ToolSearch, read/search and gated connector tools run; every other tool is refused. `#sandbox-tool-allowlist`
+  - File tools take absolute or `~` paths (not relative ones), so the policy judges the file the CLI opens. `#sandbox-explicit-paths`
 - N8. **Codex session ordering (issue #81):**
   - Warm-ups and requests execute FIFO per session, preserving initial instructions and the conversation thread on later requests. `#codex-session-fifo`
   - Reset cancels active and queued work; subsequent requests start fresh and ignore late events from abandoned turns. `#codex-session-reset`

@@ -216,7 +216,11 @@ credential directories stay denied at their targets too). Connector tools fail
 closed — anything not recognised as a read/search is treated as an action and
 gated. File search (Grep/Glob) must be scoped to a specific subdirectory — an
 unscoped home-wide search, or a subtree containing a resolved credential path,
-is refused so a recursive pattern can't reach a denied path.
+is refused so a recursive pattern can't reach a denied path. File tools take
+absolute or `~/…` paths, and search patterns must stay inside the folder being searched.
+Any other Claude Code tool (skills, scheduling, sub-agents, …) is refused. The
+policy is checked before Claude Code's own permission rules, so allow rules in
+your Claude settings can't widen it.
 
 On **Codex**, which has no per-call hook, the sandbox is at the process
 boundary: the Codex CLI runs under a macOS Seatbelt profile built from the same

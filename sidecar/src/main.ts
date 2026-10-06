@@ -1,5 +1,4 @@
 import { createInterface } from "node:readline";
-import { homedir } from "node:os";
 import { Agent } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, loadConfig, modelArg } from "./config.js";
@@ -29,7 +28,6 @@ import {
   warmClassifier,
 } from "./trigger.js";
 
-const HOME = homedir();
 let config: AdvisorConfig = loadConfig();
 
 // A fire-and-forget promise that rejects — or a stray synchronous throw in a
@@ -97,7 +95,6 @@ function makeLane(name: string): Lane {
       systemPrompt: buildResearchSystem(),
       model: modelArg(config),
       allowedTools: TOOLS,
-      cwd: HOME,
       allowMcpActions: config.allowMcpActions,
     }),
     busy: false,

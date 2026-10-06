@@ -180,7 +180,7 @@ Independent sessions still run concurrently.
 
 ## Agent sandboxing (2026-06-13)
 
-Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: web tools auto-allowed; Read/Grep/Glob restricted to non-sensitive paths under `$HOME` (denylist: .ssh, .aws, .claude, .codex, keychains, …); Bash/Write/Edit/etc. denied and disallowed. Verified: `/etc/passwd` read denied, notes queries unaffected. A hard OS boundary (OrbStack/Docker container, app spawning `docker run -i`) remains a future option — note the OAuth credentials sit inside any such boundary.
+Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: web tools auto-allowed; Read/Grep/Glob restricted to non-sensitive paths under `$HOME` (denylist: .ssh, .aws, .claude, .codex, keychains, …); Bash/Write/Edit/etc. denied and disallowed. Verified: `/etc/passwd` read denied, notes queries unaffected. (That check used a path outside the working directory — exactly the case that does reach `canUseTool`. Reads inside it, and the user's own settings allow rules, never did; see the PreToolUse gate below, 2026-10-06.) A hard OS boundary (OrbStack/Docker container, app spawning `docker run -i`) remains a future option — note the OAuth credentials sit inside any such boundary.
 
 Two refinements after review (`sandbox.test.ts` pins them): **Grep/Glob are gated more tightly than Read** because they recurse — validating only the root path lets a recursive pattern (`Glob {path:$HOME, pattern:".ssh/**"}`, `Grep {path:$HOME, pattern:"PRIVATE KEY"}`) reach secrets in a denied descendant. So a search root may not sit *at or above* any denied path; an unscoped `$HOME` search is illegal and the agent must target a specific subtree. **Comparisons are case-folded** — macOS's default filesystem is case-insensitive, so `~/.SSH/id_rsa` reaches the same file as `~/.ssh`; a case-sensitive denylist check would let the variant through. The path-separator guard still keeps distinct siblings (e.g. `.ssh-notes`) allowed.
 
@@ -195,6 +195,57 @@ deepest-existing-ancestor resolution as requested paths. Searches rooted at
 lexical; Codex already resolves its own policy paths. Regression tests use real
 symlinks and synthetic credentials, including credential files, symlinked
 parents, missing leaves, and ordinary permitted siblings.
+
+### Enforced by a PreToolUse gate (2026-10-06, code review)
+
+`canUseTool` was never the whole boundary. The SDK resolves a tool call through
+hooks → deny rules → ask rules → permission mode → allow rules → `canUseTool`,
+and the allow-rules step approves two things on its own: **reads inside the
+working directory** (the agents ran with `cwd = $HOME`, so every `$HOME` read)
+and **allow rules from the user's settings** (`settingSources: ["user"]` imports
+them — a real `~/.claude/settings.json` allowed `Read(~/.claude/**)`). Both
+reached the model without `canUseTool` being asked, so the denylist held only
+for paths outside `$HOME`. A third hole sat in the policy itself: the CLI's Glob
+searches an *absolute* pattern's own base directory instead of `path`, so
+`{path: ~/Documents, pattern: ~/.ssh/*}` passed the root check and listed the
+denied folder. All three were reproduced against the bundled CLI.
+
+The fix keeps one policy, `toolDecision`, and enforces it in two places:
+
+- **`sandboxGate`, a PreToolUse hook** Advisor registers itself. Hooks run before
+  every other step, and a hook deny holds in every permission mode — the docs'
+  recommended place for a check that must see every call. The gate only denies:
+  a permitted call gets no decision and carries on through the normal flow, so
+  `canUseTool` still applies the same policy as a second check. It fails closed.
+- **The policy is an allowlist.** Web, ToolSearch (how the CLI loads deferred
+  connector tools — refusing it cut agents off from MCP), the MCP resource tools,
+  `mcp__*` through `mcpPermission`, and Read/Grep/Glob. Everything else the CLI
+  advertises — Skill, Task*/Team*/Workflow, Cron*, ScheduleWakeup,
+  AskUserQuestion, worktrees — is refused, where before several ran without
+  asking.
+- **Paths must be absolute or `~`-based** (`~` expanded to home as the CLI
+  does — it expands Read's before the gate but hands Glob/Grep's `path` over
+  unexpanded). Relative paths are refused: they resolve against the CLI's cwd,
+  so the policy could judge a different file than the one opened. A search
+  must name its `path`. **Glob patterns and Grep `glob` filters must be
+  relative** — no leading `/`, no `~`, no `..`, no absolute brace alternative —
+  so the search stays in the checked root.
+- **The agents' cwd is an empty folder of Advisor's own**
+  (`~/Library/Application Support/Advisor/agent-cwd`, `agentCwd()`), so the CLI's
+  implicit in-cwd approval points at nothing. Codex keeps `$HOME`; its boundary
+  is the Seatbelt profile.
+
+Behaviour change: reads the user's own allow rules had silently permitted
+(`~/.claude/**`, `~/dotfiles/**`) are now refused, as the denylist always
+intended. `sandbox.sdk.test.ts` pins the boundary against the real CLI: a local
+fake model endpoint scripts each tool call in a synthetic home and the test
+inspects the tool result sent back — the only place a leak shows. It runs in
+`npm test` (a couple of seconds; the lockfile pins the SDK and its platform
+CLI). The agents' folder is created on first spawn, and a failure there fails
+that turn rather than the sidecar's startup. Rejected: moving only the cwd (the
+settings allow rules still bypass), and validating the Glob pattern's effective
+root (it would copy the CLI's internal pattern split, which can change between
+versions; refusing the shapes doesn't depend on it).
 
 ## Connector tools (2026-06-13)
 

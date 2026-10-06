@@ -23,7 +23,7 @@ decision.
   questions and transcript; ask-and-append), preferences.
 - `sidecar/` — Node 22 + TypeScript + Claude Agent SDK. Trigger classifier
   (persistent delta-fed session on the shared model), parallel research lanes,
-  query lane, `canUseTool` sandbox. NDJSON over stdio to the app (protocol in
+  query lane, tool sandbox. NDJSON over stdio to the app (protocol in
   `src/protocol.ts`, both directions).
 
 ## Build & test
@@ -77,11 +77,16 @@ drove the #21 rework and #12 churn).
 - The app must stay generic: no personal paths (vault, etc.) in code — the
   user's own Claude config (`~/.claude/CLAUDE.md`) carries personal context,
   loaded via `settingSources: ["user"]`.
-- Claude agents are sandboxed in `sidecar/src/agent.ts` (`canUseTool`): web +
-  MCP read/search + non-sensitive `$HOME` reads only (symlinks resolved before
-  the denylist check); MCP tools fail closed — anything not recognised as a
-  read/search is gated by the `allowMcpActions` preference. Do not weaken this
-  silently. Codex (`sidecar/src/codex.ts`) has no per-call hook, so it is
+- Claude agents are sandboxed in `sidecar/src/agent.ts` by one policy,
+  `toolDecision`: an allowlist of web + ToolSearch + MCP read/search +
+  non-sensitive `$HOME` reads by absolute or `~` path (symlinks resolved before the
+  denylist check; Glob patterns must stay relative); MCP tools fail closed —
+  anything not recognised as a read/search is gated by the `allowMcpActions`
+  preference. It is enforced by the `sandboxGate` PreToolUse hook, because the
+  SDK approves in-cwd reads and the user's settings allow rules before
+  `canUseTool` is ever asked; `canUseTool` repeats the check. Verify sandbox
+  changes against the real CLI (`sandbox.sdk.test.ts`), not just the predicate.
+  Do not weaken this silently. Codex (`sidecar/src/codex.ts`) has no per-call hook, so it is
   sandboxed at the process boundary instead: `sidecar/src/codexSandbox.ts`
   builds a Seatbelt profile from the same `deniedPaths()` list and the CLI runs
   under `sandbox-exec` via `codexPathOverride`. Its own `sandboxMode:

@@ -1,4 +1,4 @@
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, type HookCallback, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { homedir } from "node:os";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,6 +9,15 @@ type PermissionResult =
   | { behavior: "deny"; message: string };
 
 const HOME = homedir();
+
+/// The Claude agents' working directory: an empty folder of Advisor's own. The
+/// CLI approves reads inside its working directory without consulting the
+/// sandbox, so this must not be $HOME — the PreToolUse gate catches those reads
+/// anyway; this keeps the implicit approval pointing at nothing. Created on
+/// first spawn. (Codex keeps $HOME: its sandbox is the Seatbelt profile.)
+export function agentCwd(home: string): string {
+  return path.join(home, "Library", "Application Support", "Advisor", "agent-cwd");
+}
 
 /// Paths (relative to $HOME) the agents may never read, even inside $HOME.
 const DENY_NAMES = [
@@ -172,6 +181,9 @@ export interface AgentSessionOptions {
   /// Allow MCP connector tools that take actions (send/create/...). Read/search
   /// connector tools are always allowed.
   allowMcpActions?: boolean;
+  /// The home directory the sandbox policy is relative to. Defaults to the
+  /// user's; injectable so tests can run the real CLI against a synthetic home.
+  home?: string;
 }
 
 /// The SDK entry point. Aliased so it can be injected (default: the real
@@ -236,6 +248,129 @@ export function mcpPermission(toolName: string, allowMcpActions: boolean): "allo
   if (MCP_ACTION_PATTERN.test(name)) return "deny";
   if (MCP_READ_PATTERN.test(name)) return "allow";
   return "deny";
+}
+
+/// Tools that need no path check. Everything else the CLI offers that isn't
+/// Read/Grep/Glob or an MCP connector tool — Skill, Task*/Team*/Workflow, Cron*,
+/// AskUserQuestion, worktrees, … — is refused. ToolSearch stays: it is how the CLI
+/// loads deferred connector tools, so refusing it would cut agents off from MCP.
+const OPEN_TOOLS = new Set([
+  "WebSearch", "WebFetch", "ToolSearch",
+  // SDK MCP resource enumeration/read — pure reads. (Both the bare and
+  // `…Tool`-suffixed names the SDK may use.)
+  "ListMcpResources", "ReadMcpResource", "ListMcpResourcesTool", "ReadMcpResourceTool",
+]);
+
+export interface SandboxPolicy {
+  home: string;
+  /// The CLI's working directory.
+  cwd: string;
+  allowMcpActions: boolean;
+  /// Injectable for tests; production resolves symlinks on the real filesystem.
+  realpath?: (p: string) => string;
+}
+
+export type ToolDecision = { behavior: "allow" } | { behavior: "deny"; message: string };
+
+/// A path argument as the CLI will open it, or null when the policy can't be sure
+/// which file that is. A leading `~` is the home directory, as the CLI expands it
+/// (Read's before the gate; Glob/Grep's `path` reaches the gate unexpanded). A
+/// relative path resolves against the CLI's cwd, so it is refused and the agent
+/// retries with an absolute one.
+function absolutePath(p: unknown, home: string): string | null {
+  if (typeof p !== "string") return null;
+  const expanded = p === "~" ? home : p.startsWith("~/") ? path.join(home, p.slice(2)) : p;
+  return path.isAbsolute(expanded) ? expanded : null;
+}
+
+/// A Glob pattern (or Grep `glob` filter) that stays inside the root the policy
+/// checked. The CLI searches an absolute pattern's own base directory instead of
+/// `path`, so a permitted `path` with pattern `~/.ssh/*` listed the denied
+/// directory (code review 2026-10-06). Refuse a pattern, or any brace
+/// alternative of it (`{a, /etc/*}`), that starts with `/` or `~`, and any `..`
+/// — the folder belongs in `path`. A `~` inside a name is literal (`*~`). Grep's
+/// `glob` is optional (undefined passes).
+function patternStaysInRoot(p: unknown): boolean {
+  if (p === undefined) return true;
+  if (typeof p !== "string") return false;
+  return !(/(^|[{,])\s*[/~]/.test(p) || p.includes(".."));
+}
+
+/// The sandbox policy for one tool call. Shared by the PreToolUse gate and
+/// canUseTool so the two can never disagree.
+export function toolDecision(toolName: string, input: unknown, policy: SandboxPolicy): ToolDecision {
+  const allow: ToolDecision = { behavior: "allow" };
+  if (OPEN_TOOLS.has(toolName)) return allow;
+  // User-configured MCP connectors (Slack, Jira, ...): reads/searches allowed;
+  // action tools only when enabled in preferences. Fail closed (mcpPermission).
+  if (toolName.startsWith("mcp__")) {
+    return mcpPermission(toolName, policy.allowMcpActions) === "allow" ? allow : {
+      behavior: "deny",
+      message:
+        `${toolName} is not an allowed read/search connector tool. ` +
+        `Advisor allows read/search connector tools only, unless "Allow connector actions" is enabled in Preferences.`,
+    };
+  }
+  const args = (input !== null && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const { home, cwd, realpath = fs.realpathSync } = policy;
+  const deniedPath: ToolDecision = {
+    behavior: "deny",
+    message: `Access denied: ${toolName} needs an absolute path to a non-sensitive file or folder in the home directory`,
+  };
+  switch (toolName) {
+    case "Read": {
+      const file = absolutePath(args.file_path, home);
+      return file !== null && readPathAllowed(home, cwd, file, realpath) ? allow : deniedPath;
+    }
+    case "Grep":
+    case "Glob": {
+      if (!patternStaysInRoot(toolName === "Glob" ? args.pattern : args.glob)) {
+        return {
+          behavior: "deny",
+          message: `Access denied: ${toolName} patterns must be relative — no absolute, ~ or .. patterns. Put the folder in \`path\`.`,
+        };
+      }
+      const root = absolutePath(args.path, home);
+      return root !== null && searchRootAllowed(home, cwd, root, realpath) ? allow : deniedPath;
+    }
+    default:
+      return { behavior: "deny", message: `${toolName} is not permitted in Advisor` };
+  }
+}
+
+/// PreToolUse gate (code review 2026-10-06). The SDK approves some calls before
+/// canUseTool is ever asked — reads inside its working directory, and allow rules
+/// from the user's own settings (loaded via settingSources) — so a policy living
+/// only in canUseTool was silently skipped for them. Hooks run first, and a hook
+/// deny holds in every permission mode. Deny-only: a permitted call returns no
+/// decision and continues through the normal flow, where canUseTool applies the
+/// same policy again. Fails closed on any error.
+export function sandboxGate(
+  policy: SandboxPolicy,
+  onDeny: (tool: string, input: unknown, message: string) => void = () => {}
+): HookCallback {
+  return async (input) => {
+    if (input.hook_event_name !== "PreToolUse") return {};
+    let decision: ToolDecision;
+    try {
+      decision = toolDecision(input.tool_name, input.tool_input, policy);
+    } catch (err) {
+      decision = { behavior: "deny", message: `Advisor sandbox error: ${err}` };
+    }
+    if (decision.behavior === "allow") return {};
+    // A rejected hook is non-blocking for the CLI, so a logging failure must
+    // not turn this deny into a pass.
+    try {
+      onDeny(input.tool_name, input.tool_input, decision.message);
+    } catch { /* the deny still stands */ }
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: decision.message,
+      },
+    };
+  };
 }
 
 /**
@@ -303,7 +438,13 @@ export class AgentSession implements Agent {
       log(`${this.opts.name}: recycling session (abandoned task at queue head)`);
       this.reset();
     }
-    this.ensure();
+    try {
+      this.ensure();
+    } catch (err) {
+      // A failed turn, not a rejection, so callers' failure handling applies.
+      log(`${this.opts.name}: could not start the agent: ${err}`);
+      return { text: "", error: `could not start the agent: ${err}` };
+    }
     const cold = this.firstRunAfterSpawn;
     this.firstRunAfterSpawn = false;
     const p: PendingTask = {
@@ -345,59 +486,35 @@ export class AgentSession implements Agent {
     return Promise.race([answer, timeout]).finally(() => clearTimeout(timer));
   }
 
-  /// Sandbox policy: web tools allowed; Read/Grep/Glob only inside readRoots;
-  /// everything else (Bash, Write, Edit, ...) denied.
+  /// The sandbox policy (toolDecision) for this session's working directory.
+  private get policy(): SandboxPolicy {
+    return {
+      home: this.opts.home ?? HOME,
+      cwd: this.opts.cwd ?? agentCwd(this.opts.home ?? HOME),
+      allowMcpActions: this.opts.allowMcpActions ?? false,
+    };
+  }
+
+  private logDenied = (tool: string, input: unknown, message: string): void => {
+    log(`${this.opts.name}: denied ${tool} ${JSON.stringify(input)?.slice(0, 200)}: ${message}`);
+  };
+
+  /// Second check after the PreToolUse gate, for the calls the SDK asks about.
   private canUseTool = async (
     toolName: string,
     input: Record<string, unknown>
   ): Promise<PermissionResult> => {
-    const allow: PermissionResult = { behavior: "allow", updatedInput: input };
-    // SDK MCP resource enumeration/read — pure reads, always allowed. (Both the
-    // bare and `…Tool`-suffixed names the SDK may use.)
-    if (toolName === "ListMcpResources" || toolName === "ReadMcpResource"
-        || toolName === "ListMcpResourcesTool" || toolName === "ReadMcpResourceTool") {
-      return allow;
-    }
-    // User-configured MCP connectors (Slack, Jira, ...): reads/searches allowed;
-    // action tools only when enabled in preferences. Fail closed (mcpPermission).
-    if (toolName.startsWith("mcp__")) {
-      if (mcpPermission(toolName, this.opts.allowMcpActions ?? false) === "allow") return allow;
-      log(`${this.opts.name}: denied MCP tool ${toolName}`);
-      return {
-        behavior: "deny",
-        message:
-          `${toolName} is not an allowed read/search connector tool. ` +
-          `Advisor allows read/search connector tools only, unless "Allow connector actions" is enabled in Preferences.`,
-      };
-    }
-    switch (toolName) {
-      case "WebSearch":
-      case "WebFetch":
-        return allow;
-      case "Read":
-        return readPathAllowed(HOME, this.opts.cwd ?? HOME, input.file_path)
-          ? allow
-          : this.denyPath(toolName, input.file_path);
-      case "Grep":
-      case "Glob":
-        return searchRootAllowed(HOME, this.opts.cwd ?? HOME, input.path)
-          ? allow
-          : this.denyPath(toolName, input.path);
-      default:
-        return { behavior: "deny", message: `${toolName} is not permitted in Advisor` };
-    }
+    const decision = toolDecision(toolName, input, this.policy);
+    if (decision.behavior === "allow") return { behavior: "allow", updatedInput: input };
+    this.logDenied(toolName, input, decision.message);
+    return decision;
   };
-
-  private denyPath(tool: string, p: unknown): PermissionResult {
-    log(`${this.opts.name}: denied ${tool} on ${String(p)}`);
-    return {
-      behavior: "deny",
-      message: `Access denied: ${tool} may only read non-sensitive files in the home directory`,
-    };
-  }
 
   private ensure(): void {
     if (this.input) return;
+    // The CLI can't spawn in a missing folder (agentCwd is created on first
+    // use). A failure here fails this run (see run()), not the sidecar's startup.
+    fs.mkdirSync(this.policy.cwd, { recursive: true });
     log(`${this.opts.name}: spawning SDK subprocess (cold-start)`);
     this.firstRunAfterSpawn = true;
     const q = new AsyncQueue<SDKUserMessage>();
@@ -417,8 +534,11 @@ export class AgentSession implements Agent {
         // Auto-allowed tools (no permission check) — web only.
         allowedTools: this.opts.allowedTools.filter((t) => t.startsWith("Web")),
         disallowedTools: ["Bash", "Write", "Edit", "NotebookEdit", "Task", "KillShell"],
-        cwd: this.opts.cwd,
+        cwd: this.policy.cwd,
         permissionMode: "default",
+        // The sandbox: the gate runs before the SDK's own approvals; canUseTool
+        // re-checks the calls the SDK asks about.
+        hooks: { PreToolUse: [{ hooks: [sandboxGate(this.policy, this.logDenied)] }] },
         canUseTool: this.canUseTool,
         // Load the user's own Claude configuration (CLAUDE.md etc.) — that is
         // where personal context like vault locations belongs, not in Advisor.

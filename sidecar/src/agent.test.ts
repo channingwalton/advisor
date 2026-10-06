@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AgentSession, AsyncQueue, type QueryFn } from "./agent.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { AgentSession, AsyncQueue, agentCwd, type QueryFn } from "./agent.js";
 
 // A controllable fake of the SDK's `query()` stream: an async-iterable of
 // messages the test pushes into `messages`, plus an `interrupt()` spy. Each call
@@ -30,7 +33,11 @@ function makeFakeQuery(): { queryFn: QueryFn; spawns: FakeSpawn[] } {
   return { queryFn, spawns };
 }
 
-const opts = { name: "test", systemPrompt: "", allowedTools: [] };
+// A synthetic home, so sessions create their default working folder there
+// rather than in the real ~/Library.
+const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-agent-home-")));
+process.on("exit", () => fs.rmSync(home, { recursive: true, force: true }));
+const opts = { name: "test", systemPrompt: "", allowedTools: [], home };
 const success = (result: string) => ({ type: "result", subtype: "success", result });
 const textBlock = (text: string) => ({
   type: "assistant",
@@ -178,4 +185,52 @@ test("passes the SDK a stderr callback that logs CLI stderr", async () => {
 
   spawns[0].messages.push(success("done"));
   await r1p;
+});
+
+// The SDK approves reads inside its cwd before canUseTool is asked, so the
+// session must register the PreToolUse gate and run from Advisor's own empty
+// folder rather than $HOME (code review 2026-10-06).
+test("#sandbox-sdk-gate registers the PreToolUse gate and runs in Advisor's own folder", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const r1p = session.run("task1", undefined, 100);
+  const { options } = spawns[0].args as {
+    options: { cwd?: string; hooks?: { PreToolUse?: { hooks: ((...a: unknown[]) => Promise<unknown>)[] }[] } };
+  };
+  assert.equal(options.cwd, agentCwd(home));
+  assert.ok(options.cwd!.startsWith(home + path.sep));
+  const gate = options.hooks?.PreToolUse?.[0]?.hooks[0];
+  assert.equal(typeof gate, "function");
+  const out = (await gate!(
+    { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "cat ~/.ssh/id_rsa" } },
+    "toolu_1",
+    { signal: new AbortController().signal },
+  )) as { hookSpecificOutput?: { permissionDecision?: string } };
+  assert.equal(out.hookSpecificOutput?.permissionDecision, "deny");
+  spawns[0].messages.push(success("done"));
+  await r1p;
+});
+
+// The working directory is created by the session that needs it, not as a
+// startup side effect of main.ts — a missing folder would make every spawn fail,
+// and an unwritable one crashed the sidecar before its error handlers existed.
+test("creates its working directory before spawning, and reports a failure as a failed run", {
+  skip: process.getuid?.() === 0 ? "root ignores the read-only folder" : false,
+}, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "advisor-cwd-"));
+  t.after(() => { fs.chmodSync(root, 0o755); fs.rmSync(root, { recursive: true, force: true }); });
+  const cwd = path.join(root, "a", "agent-cwd");
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession({ ...opts, cwd }, queryFn);
+  const r1p = session.run("task1", undefined, 100);
+  assert.ok(fs.statSync(cwd).isDirectory());
+  spawns[0].messages.push(success("done"));
+  await r1p;
+
+  fs.chmodSync(root, 0o555);
+  const blocked = new AgentSession({ ...opts, cwd: path.join(root, "b", "agent-cwd") }, queryFn);
+  // A result, not a rejection: callers such as classify() count it as a failed
+  // turn (and bound retries) instead of bypassing their failure handling.
+  const r2 = await blocked.run("task2", undefined, 100);
+  assert.match(r2.error ?? "", /EACCES/);
 });

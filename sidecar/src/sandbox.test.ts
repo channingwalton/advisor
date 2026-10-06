@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readPathAllowed, searchRootAllowed, mcpPermission } from "./agent.js";
+import type { HookInput } from "@anthropic-ai/claude-agent-sdk";
+import {
+  readPathAllowed, searchRootAllowed, mcpPermission, toolDecision, sandboxGate, type SandboxPolicy,
+} from "./agent.js";
 
 const HOME = "/home/u";
 
@@ -208,4 +211,121 @@ test("MCP gate fails closed for unrecognised tools when actions are disabled", (
 test("MCP gate allows everything when actions are enabled", () => {
   assert.equal(mcpPermission("mcp__claude_ai_Slack__slack_send_message", true), "allow");
   assert.equal(mcpPermission("mcp__unison__run", true), "allow");
+});
+
+const POLICY: SandboxPolicy = { home: HOME, cwd: HOME, allowMcpActions: false, realpath: idFs };
+const decide = (tool: string, input: unknown, policy = POLICY) => toolDecision(tool, input, policy).behavior;
+
+test("#sandbox-tool-allowlist allows web, read/search, ToolSearch and MCP resource tools", () => {
+  // ToolSearch is how the CLI loads deferred connector tools — refusing it would
+  // cut agents off from every MCP connector.
+  for (const t of ["WebSearch", "WebFetch", "ToolSearch", "ListMcpResourcesTool", "ReadMcpResourceTool"]) {
+    assert.equal(decide(t, {}), "allow", t);
+  }
+});
+
+test("#sandbox-tool-allowlist refuses every other tool the CLI offers", () => {
+  for (const t of [
+    "Bash", "Write", "Edit", "NotebookEdit", "Agent", "Task", "Skill", "TaskCreate", "TeamCreate",
+    "Workflow", "AskUserQuestion", "CronCreate", "ScheduleWakeup", "EnterWorktree", "SendMessage",
+    "SomeFutureTool",
+  ]) {
+    assert.equal(decide(t, {}), "deny", t);
+  }
+});
+
+test("#sandbox-tool-allowlist gates MCP tools through the connector policy", () => {
+  assert.equal(decide("mcp__x__getItem", {}), "allow");
+  assert.equal(decide("mcp__x__deleteItem", {}), "deny");
+  assert.equal(decide("mcp__x__deleteItem", {}, { ...POLICY, allowMcpActions: true }), "allow");
+});
+
+test("#sandbox-explicit-paths Read needs an absolute or ~ path to a permitted file", () => {
+  // A relative path resolves against the CLI's cwd, so the policy could judge a
+  // different file than the one read. A leading ~ is the home directory, as the
+  // CLI expands it.
+  assert.equal(decide("Read", { file_path: "/home/u/Documents/notes.txt" }), "allow");
+  assert.equal(decide("Read", { file_path: "~/Documents/notes.txt" }), "allow");
+  assert.equal(decide("Read", { file_path: "Documents/notes.txt" }), "deny");
+  assert.equal(decide("Read", { file_path: "~/.ssh/id_rsa" }), "deny");
+  assert.equal(decide("Read", { file_path: "~root/notes.txt" }), "deny");
+  assert.equal(decide("Read", { file_path: "/home/u/.ssh/id_rsa" }), "deny");
+  assert.equal(decide("Read", {}), "deny");
+  assert.equal(decide("Read", null), "deny");
+});
+
+test("#sandbox-explicit-paths Grep and Glob need an absolute, permitted root", () => {
+  assert.equal(decide("Glob", { path: "/home/u/Documents", pattern: "*.md" }), "allow");
+  assert.equal(decide("Grep", { path: "/home/u/Documents", pattern: "TODO" }), "allow");
+  // The CLI passes a Glob/Grep `path` to the gate unexpanded.
+  assert.equal(decide("Glob", { path: "~/Documents", pattern: "*.md" }), "allow");
+  assert.equal(decide("Grep", { path: "~/Documents", pattern: "TODO" }), "allow");
+  for (const input of [
+    { pattern: "*.md" }, // no path: would search the CLI's cwd, not a checked root
+    { path: "Documents", pattern: "*.md" },
+    { path: "~/.ssh", pattern: "*" },
+    { path: "~", pattern: "*" }, // the whole home: at or above every denied path
+    { path: "/home/u/.ssh", pattern: "*" },
+  ]) {
+    assert.equal(decide("Glob", input), "deny", JSON.stringify(input));
+    assert.equal(decide("Grep", { ...input, pattern: "x" }), "deny", JSON.stringify(input));
+  }
+});
+
+test("#sandbox-glob-pattern refuses patterns that could search outside the checked root", () => {
+  // The CLI searches an absolute pattern's own base directory, not `path`.
+  for (const pattern of [
+    "/home/u/.ssh/*", "~/.ssh/*", "../.ssh/*", "**/../../.ssh/*", "{/home/u/.ssh/*,x}", "{a,/etc/*}",
+    "{a, /etc/*}", "{a, ~/.ssh/*}",
+  ]) {
+    assert.equal(decide("Glob", { path: "/home/u/Documents", pattern }), "deny", pattern);
+    assert.equal(decide("Grep", { path: "/home/u/Documents", pattern: "KEY", glob: pattern }), "deny", pattern);
+  }
+});
+
+test("#sandbox-glob-pattern keeps ordinary relative patterns", () => {
+  // A ~ inside a name is literal (editor backups `*~`); only a leading one is home.
+  for (const pattern of ["**/*.md", "*.{md,txt}", "notes/**/2026-*.md", "**/*~"]) {
+    assert.equal(decide("Glob", { path: "/home/u/Documents", pattern }), "allow", pattern);
+    assert.equal(decide("Grep", { path: "/home/u/Documents", pattern: "x", glob: pattern }), "allow", pattern);
+  }
+});
+
+function preToolUse(tool_name: string, tool_input: unknown): HookInput {
+  return {
+    hook_event_name: "PreToolUse", tool_name, tool_input, tool_use_id: "toolu_1",
+    session_id: "s", transcript_path: "/dev/null", cwd: HOME,
+  } as HookInput;
+}
+
+test("#sandbox-sdk-gate the PreToolUse gate denies what the policy refuses", async () => {
+  const denied: string[] = [];
+  const gate = sandboxGate(POLICY, (tool) => denied.push(tool));
+  const signal = new AbortController().signal;
+  const out = await gate(preToolUse("Read", { file_path: "/home/u/.ssh/id_rsa" }), "toolu_1", { signal });
+  const decision = (out as { hookSpecificOutput?: Record<string, unknown> }).hookSpecificOutput;
+  assert.equal(decision?.hookEventName, "PreToolUse");
+  assert.equal(decision?.permissionDecision, "deny");
+  assert.match(String(decision?.permissionDecisionReason), /Access denied/);
+  assert.deepEqual(denied, ["Read"]);
+});
+
+test("#sandbox-sdk-gate the PreToolUse gate passes permitted calls on without approving them", async () => {
+  // No decision, not "allow": the call continues through the SDK's normal flow,
+  // where canUseTool applies the same policy again.
+  const gate = sandboxGate(POLICY);
+  const signal = new AbortController().signal;
+  const out = await gate(preToolUse("Read", { file_path: "/home/u/Documents/notes.txt" }), "toolu_1", { signal });
+  assert.deepEqual(out, {});
+});
+
+test("#sandbox-sdk-gate the PreToolUse gate fails closed when the policy or its logging throws", async () => {
+  // A rejected hook is non-blocking for the CLI, so any error must still deny.
+  const signal = new AbortController().signal;
+  const exploding = new Proxy({}, { get() { throw new Error("boom"); } });
+  const out1 = await sandboxGate(POLICY)(preToolUse("Read", exploding), "toolu_1", { signal });
+  assert.equal((out1 as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput?.permissionDecision, "deny");
+  const loud = sandboxGate(POLICY, () => { throw new Error("log failed"); });
+  const out2 = await loud(preToolUse("Read", { file_path: "/home/u/.ssh/id_rsa" }), "toolu_1", { signal });
+  assert.equal((out2 as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput?.permissionDecision, "deny");
 });

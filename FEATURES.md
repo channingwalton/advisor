@@ -137,7 +137,8 @@ Advisor researches across whatever you've connected:
   read/search-only connectors, and read-only home-directory access. No shell,
   no writes. Credential paths (`~/.ssh`, `~/.aws`, `~/.claude`, keychains, …)
   are denied — case-insensitively, with symlinks resolved so a link can't slip
-  past the denylist.
+  past the denylist. Enforced ahead of Claude Code's own permission rules, so
+  allow rules in your Claude settings can't widen it.
 - **Sandboxed research (Codex)** — coarser, because the Codex SDK has no
   per-call hook: the Codex CLI runs under a macOS Seatbelt profile built from
   the same credential-path denylist, so it and every process it starts (shell
