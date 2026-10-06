@@ -6,15 +6,13 @@ import {
   documentQuestionTask,
   sessionContextPrefix,
   summaryTask,
-  transcriptLine,
-  TranscriptSource,
 } from "./prompts.js";
-import { cardOutcome, boundedPush } from "./cards.js";
 import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { guardedRun } from "./guardedRun.js";
 import { Lane, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
+import { AutoPipeline } from "./autoPipeline.js";
 import {
   cardKind,
   classify,
@@ -24,7 +22,6 @@ import {
   researchKind,
   researchTask,
   resetClassifier,
-  Trigger,
   warmClassifier,
 } from "./trigger.js";
 
@@ -106,12 +103,6 @@ let queryLane: Lane = makeLane("query");
 const transcript = new Transcript();
 let busy = false; // user queries (priority lane)
 const cardIDs = new ProcessCardIDs();
-let auto = true;
-/// True between session_start and session_end. Gates the auto-classifier so a
-/// classify already scheduled or in flight when the session ends can't enqueue
-/// fresh research — which would stream cards into a closed/replaced session.
-/// User queries (Ask box, right-click) are deliberately not gated by this.
-let sessionActive = false;
 
 const cardDeps: RunCardDeps = {
   transcript,
@@ -287,165 +278,25 @@ async function runSummariseLive(msg: Extract<Inbound, { type: "summarise_live" }
 
 // MARK: auto-trigger pipeline
 
-const DEBOUNCE_MS = 1500;
-const COVERED_TTL_MS = 10 * 60 * 1000;
-
-/// New-since-last-classify utterances, with consecutive same-source lines
-/// merged so the classifier sees sentences, not STT fragments. The classifier
-/// session is persistent, so it has already seen everything earlier — feeding
-/// only the delta means each line is judged once on a successful classify.
-///
-/// This does NOT advance the classifier cursor — it returns `end` (the window's
-/// exclusive upper bound) and lets runClassify commit it only after a successful
-/// classify. On a failed/timed-out classify the cursor stays put so the window
-/// is re-fed next pass rather than skipped (issue #43). Because classify is
-/// serialised (the `classifying` guard), no second delta runs during the await,
-/// so deferring the commit can neither double-feed nor skip lines.
-function classifierDelta(): { text: string; anchorId?: string; end: number } {
-  const fresh = transcript.entries.slice(transcript.cursor("classifier"));
-  const end = transcript.entries.length;
-  if (fresh.length === 0) return { text: "", end };
-  const blocks: { source: TranscriptSource; text: string }[] = [];
-  for (const e of fresh) {
-    const last = blocks[blocks.length - 1];
-    if (last && last.source === e.source) {
-      last.text += " " + e.text;
-    } else {
-      blocks.push({ source: e.source, text: e.text });
-    }
-  }
-  // Anchor every trigger from this pass to the last line of the window — the
-  // sentence that completed it. Removes research-latency drift; residual error
-  // is at most the debounce window.
-  return {
-    text: blocks.map((b) => transcriptLine(b.source, b.text)).join("\n"),
-    anchorId: fresh[fresh.length - 1].id,
-    end,
-  };
-}
-
-let debounceTimer: NodeJS.Timeout | undefined;
-let classifying = false;
-let rerunWanted = false;
-/// Consecutive classify failures (timeout / dead session / unparseable output).
-/// On failure the classifier cursor is NOT advanced, so the window is re-fed on
-/// the next pass. Bounded: after MAX_CLASSIFY_RETRIES straight failures we give
-/// up on that window and advance anyway, so a persistently failing classifier
-/// can't stall the pipeline or grow the re-fed window without bound.
-const MAX_CLASSIFY_RETRIES = 3;
-let classifyFailStreak = 0;
-const covered = new Map<string, number>();
-const researchQueue: Trigger[] = [];
-
-/// Cap the backlog so a long, noisy session can't grow it without bound.
-const MAX_RESEARCH_QUEUE = 20;
-function enqueueResearch(item: Trigger): void {
-  for (const dropped of boundedPush(researchQueue, item, MAX_RESEARCH_QUEUE)) {
-    log(`research queue full — dropped oldest: ${dropped.subject}`);
-  }
-}
-
-function normalise(subject: string): string {
-  return subject.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
-}
-
-function coveredSubjects(): string[] {
-  const now = Date.now();
-  for (const [k, t] of covered) {
-    if (now - t > COVERED_TTL_MS) covered.delete(k);
-  }
-  return [...covered.keys()];
-}
-
-function scheduleClassify(): void {
-  if (!auto || !sessionActive) return;
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => void runClassify().catch(guard("classify")), DEBOUNCE_MS);
-}
-
-async function runClassify(): Promise<void> {
-  if (!sessionActive) return;
-  if (classifying) {
-    rerunWanted = true;
-    return;
-  }
-  classifying = true;
-  try {
-    const { text: window, anchorId, end } = classifierDelta();
-    if (!window) return;
-    log(`classify start (window ${window.length} chars)`);
-    const ct0 = Date.now();
-    const result = await classify(window, coveredSubjects());
-    if (!result.ok) {
-      // Failed to classify (timeout / dead session / unparseable). Leave the
-      // cursor un-advanced so this window is re-fed next pass instead of being
-      // silently dropped (issue #43). Bounded: after MAX_CLASSIFY_RETRIES
-      // straight failures, give up and advance past it so a persistently
-      // failing classifier can't stall the pipeline or grow the window forever.
-      if (++classifyFailStreak >= MAX_CLASSIFY_RETRIES) {
-        log(`classify failed ${classifyFailStreak}x — giving up on this window, advancing cursor`);
-        transcript.setCursor("classifier", end);
-        classifyFailStreak = 0;
-      } else {
-        log(`classify failed (${Date.now() - ct0}ms, attempt ${classifyFailStreak}) — re-feeding window next pass`);
-      }
-      return;
-    }
-    classifyFailStreak = 0;
-    // Success (including a genuine "found nothing"): commit the cursor past this
-    // window so its lines are judged exactly once.
-    transcript.setCursor("classifier", end);
-    const { triggers } = result;
-    log(`classify ${Date.now() - ct0}ms → ${triggers.length} trigger(s)`);
-    // The session may have ended during the classify await — drop its triggers
-    // so no research is enqueued for a session that's gone.
-    if (!sessionActive) return;
-    for (const t of triggers) {
-      const key = normalise(t.subject);
-      if (!key || covered.has(key)) continue;
-      covered.set(key, Date.now());
-      log(`trigger(${t.kind}): ${t.subject}`);
-      enqueueResearch({ ...t, anchorId });
-    }
-    drainResearch();
-  } finally {
-    classifying = false;
-    if (rerunWanted) {
-      rerunWanted = false;
-      scheduleClassify();
-    }
-  }
-}
-
-function drainResearch(): void {
-  ensureLanes();
-  while (researchQueue.length > 0) {
+const pipeline = new AutoPipeline({
+  transcript,
+  classify,
+  freeLane: () => {
+    ensureLanes();
     // Only dispatch to the first maxLanes lanes (shrinking takes effect as lanes finish).
-    const lane = researchLanes.slice(0, maxLanes).find((l) => !l.busy);
-    if (!lane) return; // a lane finishing will call drainResearch again
-    const t = researchQueue.shift()!;
-    lane.busy = true;
-    const t0 = Date.now();
-    void runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId)
-      .finally(() => {
-        log(`research "${t.subject}" ${Date.now() - t0}ms`);
-        lane.busy = false;
-        drainResearch();
-      })
-      .catch(guard(`research "${t.subject}"`));
-  }
-}
+    return researchLanes.slice(0, maxLanes).find((l) => !l.busy);
+  },
+  research: (lane, t) =>
+    runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId),
+});
 
 // MARK: protocol handling
 
 function handle(msg: Inbound): void {
   switch (msg.type) {
     case "session_start":
-      sessionActive = true;
       transcript.clear();
-      covered.clear();
-      classifyFailStreak = 0;
-      researchQueue.length = 0;
+      pipeline.start();
       // Seed the live session prompt; the app may update it mid-session.
       sessionContext = msg.context ?? "";
       // Re-read preferences and rebuild sessions so prompt/model changes apply.
@@ -469,7 +320,7 @@ function handle(msg: Inbound): void {
     case "utterance":
       transcript.push({ id: msg.id, source: msg.source, text: msg.text, ts: msg.ts });
       log(`utterance(${msg.source}): ${msg.text.slice(0, 60)}`);
-      scheduleClassify();
+      pipeline.heard();
       break;
     case "note":
       // An editorial note rides the same transcript stream the agents read, so
@@ -477,7 +328,7 @@ function handle(msg: Inbound): void {
       // Classify too: the user opted for notes to be able to trigger research.
       transcript.push({ id: msg.id, source: "note", text: msg.text, ts: msg.ts });
       log(`note: ${msg.text.slice(0, 60)}`);
-      scheduleClassify();
+      pipeline.heard();
       break;
     case "query":
       if (busy) {
@@ -515,13 +366,13 @@ function handle(msg: Inbound): void {
       break;
     case "config":
       if (typeof msg.auto === "boolean") {
-        auto = msg.auto;
-        log(`auto triggers: ${auto}`);
+        pipeline.setAuto(msg.auto);
+        log(`auto triggers: ${msg.auto}`);
       }
       if (typeof msg.lanes === "number") {
         maxLanes = Math.max(1, Math.min(8, Math.floor(msg.lanes)));
         log(`research lanes: ${maxLanes}`);
-        drainResearch();
+        pipeline.drain();
       }
       break;
     case "cancel":
@@ -562,12 +413,7 @@ function handle(msg: Inbound): void {
       void runSummariseDocument(msg).catch(guard("summarise_document"));
       break;
     case "session_end":
-      // End the auto-pipeline: stop scheduling/accepting classifies and drop any
-      // queued-but-not-yet-dispatched research. In-flight research lanes keep
-      // running (the app's close prompt waits for or cancels those).
-      sessionActive = false;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      researchQueue.length = 0;
+      pipeline.end();
       log("session ended");
       break;
   }

@@ -31,6 +31,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 
 ### Answering
 - F8. Answer detected questions automatically.
+  - Turning Auto cards off starts no further automatic card: a classification still running or waiting, and research waiting for a lane, are dropped (dropped subjects can come up again). `#auto-off-stops-cards`
+  - Turning Auto cards back on classifies only what is said from then on. `#auto-resume-new-speech`
 - F9. Surface background context for detected entities (relevant notes, tickets, docs, prior discussion).
 - F10. Fact-check claims against web/internal sources, citing the source; say "couldn't verify" rather than guess when a claim can't be confirmed.
 - F11. Search across: web, Obsidian Vault (`~/Documents/Notes`), work tools via MCP (Jira, Confluence, Slack), local files/repos.

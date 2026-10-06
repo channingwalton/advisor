@@ -257,7 +257,7 @@ Advisor no longer knows about the vault: agents load the user's own Claude confi
 
 ## Right-click transcript actions (2026-06-12)
 
-Selected transcript text can be acted on directly: right-click → **Answer / Context / Fact check**. These are exactly the auto-classifier's kinds (`question`→answer, `context`, `factcheck`), gated by the same `config.triggers` toggles, so the manual menu and the automatic pipeline never diverge. Preferences posts `advisorConfigChanged` on save and the transcript view reloads its trigger toggles on receipt, so toggling a kind updates the menu live rather than only after a relaunch. The prompt templates live once in `trigger.ts` (`researchTask`/`cardKind`), shared by `drainResearch` and the manual path. The action rides the existing `query` lane (now carrying optional `action` + `triggerId`); `triggerId` anchors the resulting card under the clicked line, the same way auto cards anchor via the classifier's `anchorId`. The free-text Ask box still sends a bare `query` (kind `query`, no anchor) — unchanged.
+Selected transcript text can be acted on directly: right-click → **Answer / Context / Fact check**. These are exactly the auto-classifier's kinds (`question`→answer, `context`, `factcheck`), gated by the same `config.triggers` toggles, so the manual menu and the automatic pipeline never diverge. Preferences posts `advisorConfigChanged` on save and the transcript view reloads its trigger toggles on receipt, so toggling a kind updates the menu live rather than only after a relaunch. The prompt templates live once in `trigger.ts` (`researchTask`/`cardKind`), shared by the auto pipeline (`drainResearch`, now `AutoPipeline.drain`) and the manual path. The action rides the existing `query` lane (now carrying optional `action` + `triggerId`); `triggerId` anchors the resulting card under the clicked line, the same way auto cards anchor via the classifier's `anchorId`. The free-text Ask box still sends a bare `query` (kind `query`, no anchor) — unchanged.
 
 Selection capture needs the real highlighted span, which SwiftUI's `Text` + `.textSelection` hides from a `.contextMenu`; the transcript line is therefore an `NSTextView` (`SelectableTranscriptText`) whose `menu(for:)` builds the action items over `selectedRange` (falling back to the whole line). Building it via the convenience `NSTextView(frame:)` (not a hand-assembled TextKit stack) so the view owns its text storage — a manual stack leaves storage/layoutManager unretained and they deallocate, blanking the line. The space-to-pause monitor now ignores only *editable* text views, so a focused (non-editable) transcript line still toggles playback.
 
@@ -1315,6 +1315,31 @@ which keeps short-range referents but still loses earlier topics.
 `runCard` and the transcript/cursor bookkeeping moved out of `main.ts` into
 `lanes.ts` (`Transcript`, `runCard` with injected deps, like `guardedRun`), so
 the recycle is tested through the real card flow (`lanes.test.ts`).
+
+## Auto cards off means off (2026-10-06, code review)
+
+The toggle only set a flag that `scheduleClassify` checked, so switching it off
+mid-flow still produced cards: the classify waiting out its 1.5 s pause fired
+anyway, a classify already running enqueued its triggers when it returned, and
+research queued behind busy lanes kept dispatching as lanes freed. Off now stops
+all three — the timer is cleared, the queue dropped (its subjects un-covered, so
+they can come up again), and a running classify's result discarded. Cards
+already researching finish; cancelling those is the per-card ✕.
+
+Turning it back on moves the classifier's cursor to the end of the transcript:
+the stretch spoken while it was off is not classified on re-enable, which would
+research topics that have gone stale (chosen over catching up).
+
+A result is discarded by an **epoch** the pipeline bumps on every toggle and on
+session start/end, checked when a classify returns — so a classify from before an
+off-and-on can't drag the cursor back over the skipped stretch, and one from a
+previous session can't commit its cursor or cards into the next (the old
+`sessionActive` re-check covered only the end, not end-then-start).
+
+The pipeline moved out of `main.ts` into `autoPipeline.ts` (`AutoPipeline`, with
+the classifier, lane choice and research injected), so it is tested directly
+(`autoPipeline.test.ts`), including the issue #43 re-feed-on-failure behaviour
+that had no test before.
 
 ## Versioning and the release cut (2026-07-04)
 

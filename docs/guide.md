@@ -31,6 +31,10 @@ History, Sessions (idle collapses the cluster to a single Listen pill).
 - **Stop** is resumable — it pauses capture but keeps the session live, and the
   cluster offers **Resume** to pick it back up with full context. The session is
   finalised when the recording window closes.
+- **Auto cards** turns the automatic answer/context/fact-check cards on and
+  off. Off takes effect at once — nothing waiting to be researched starts —
+  though cards already researching finish. Turned back on, it picks up from
+  what is said next, not the stretch while it was off.
 - The **mic** button in the record cluster mutes the local microphone while the
   session keeps running — system audio is still captured and transcribed; tap
   again to unmute.

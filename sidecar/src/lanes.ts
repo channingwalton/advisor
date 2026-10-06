@@ -57,10 +57,15 @@ export class Transcript {
     this.cursors.delete(reader);
   }
 
+  /// The entries past `reader`'s cursor, and the end index to commit once read.
+  unseen(reader: string): { fresh: readonly TranscriptEntry[]; end: number } {
+    return { fresh: this.items.slice(this.cursor(reader)), end: this.items.length };
+  }
+
   /// The entries `lane` hasn't been sent, framed for its prompt, marking them sent.
   delta(lane: string): string {
-    const fresh = this.items.slice(this.cursor(lane));
-    this.cursors.set(lane, this.items.length);
+    const { fresh, end } = this.unseen(lane);
+    this.cursors.set(lane, end);
     if (fresh.length === 0) return "";
     const text = fresh.map((e) => transcriptLine(e.source, e.text)).join("\n");
     return `Conversation since my last message:\n<transcript>\n${text}\n</transcript>\n\n`;
@@ -106,7 +111,7 @@ export async function runCard(
     // wedged (interrupt is best-effort), so without this every later trigger
     // routed to this lane would burn a full timeout indefinitely (issue #46).
     // reset() drops the session; the lane's next card re-spawns it clean. For
-    // research lanes, this runs before drainResearch's `.finally` clears
+    // research lanes, this runs before AutoPipeline.drain's `.finally` clears
     // `lane.busy`, so the re-dispatch always sees a fresh session. The warm session is kept on
     // the success path (failed === false). The fresh session has seen none of
     // the conversation, so forget the lane's cursor: its next card replays it all.
