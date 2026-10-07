@@ -49,6 +49,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - The saved note keeps a card's last completed answer while a follow-up or re-summarise runs, and after one is cancelled. `#card-settled-note`
   - A failed re-summarise keeps the previous summary, in the window and the note. `#card-settled-summary`
   - An Ask answer or Summary for a saved note still saves if the note is filed into a folder meanwhile, and a deleted note is never recreated. `#saved-note-moved-save`
+  - An Ask or Summarise on a saved note can be stopped while it runs; nothing is saved, and a stopped question returns to the field. `#sessions-answer-cancel`
 - F17. Session tags (issue #15): a user-managed library of coloured tags (Preferences), applied to a session from the live toolbar or the browser, shown as coloured pills on session rows and searchable. Stored by name in the note's frontmatter.
 - F17a. Folder tag defaults (issue #76): folders can hold tags from the library; a new recording started from that folder inherits them, with per-session editing still available. Existing sessions and sessions moved into the folder are unchanged.
 - F17b. Owned session folders (issue #78):

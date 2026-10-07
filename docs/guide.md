@@ -171,7 +171,9 @@ Ask a question about the selected session in the field at the bottom: the
 answer streams in and, once finished, is appended to that session's note under a
 `# Follow-ups` heading, so the saved transcript grows with the questions you ask
 of it. (The session currently being recorded is read-only here until it has
-fully saved.)
+fully saved.) While an answer or a Summarise is running, the ✕ on its panel stops
+it: nothing is saved, and a stopped question goes back in the field to edit or
+send again.
 
 ## Preferences
 

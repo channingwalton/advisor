@@ -54,3 +54,20 @@ private final class HandlerCapture {}
 
     #expect(weakCapture == nil)
 }
+
+/// Stopping a Sessions Ask or Summarise removes its handler (via
+/// `discardDocumentRequest`), so the answer's later frames — its `done` above all,
+/// which would save it to the note — reach nothing.
+@MainActor
+@Test func req_sessions_answer_cancel() {
+    let handlers = DocumentRequestHandlers()
+    var updates: [String] = []
+
+    handlers.register("ask") { _, state in updates.append(state) }
+    handlers.receive(id: "ask", body: "partial", state: "streaming")
+    handlers.remove("ask")
+    handlers.receive(id: "ask", body: "the whole answer", state: "done")
+
+    #expect(updates == ["streaming"])
+    #expect(handlers.count == 0)
+}

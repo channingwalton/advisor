@@ -1832,6 +1832,21 @@ replied to, and the paragraph-to-run grouping was written twice
   that the Recording window keeps its earlier card chrome; `contentMaxWidth` is
   gone.
 
+**Stopping Ask and Summarise in Sessions (2026-10-06).** The recording window could
+stop any card (✕), including the Ask box's query card and the live summary, but
+the Sessions window's own Ask and Summarise ran in the Answer panel with no stop —
+the field stayed locked until they finished. The panel now has a ✕ while one runs:
+`discardDocumentRequest` (the path Skip already uses for saved research) drops the
+handler, so no late frame can save it, and interrupts the document lane. Nothing
+reaches the note (`req_sessions_answer_cancel` pins the dropped handler), and a
+stopped Ask's question returns to the field, ready to edit or resend. The panel
+(`AnswerPanel`) now keeps its header outside the scroll view, so the ✕ can't be
+scrolled away or sit over text, and it shows while a request runs even before
+any text arrives.
+Follow-ups on cards still can't be stopped in either window (their ✕ is hidden
+while replying) — a separate change, now safe since a cancelled follow-up
+restores the card's answer.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

@@ -932,6 +932,15 @@ private extension View {
     }
 }
 
+/// The Answer panel's request in flight — an Ask or a Summarise on the saved
+/// note — kept so it can be stopped.
+private struct AnswerRequest {
+    /// The sidecar request id.
+    let id: String
+    /// The question asked, to put back in the field if stopped; nil for a Summarise.
+    let question: String?
+}
+
 /// A follow-up streaming into a saved card.
 private struct SavedReply {
     /// The card's body with the follow-up turn so far.
@@ -988,6 +997,8 @@ private struct SessionDetailPane: View {
     /// True while the in-flight `liveAnswer` is a summary rather than a Q&A, so its
     /// header reads "Summary" (issue #30). The Ask path clears it.
     @State private var summarising = false
+    /// The Ask or Summarise in flight, so the panel's stop button can end it.
+    @State private var answerRequest: AnswerRequest?
 
     /// Experiment: hide transcript paragraphs/headings so only cards show.
     @State private var hideTranscript = false
@@ -1167,6 +1178,7 @@ private struct SessionDetailPane: View {
         let sent = sidecar.summariseDocument(transcript: document) { body, state in
             answerBody = body
             answerState = state
+            if !isAsking { answerRequest = nil }
             if state == "done" {
                 // Issue #51: only clear and reload once the summary is on disk. On
                 // failure keep it visible (leave answerBody / answerState) so it
@@ -1183,12 +1195,29 @@ private struct SessionDetailPane: View {
                 }
             }
         }
-        if sent == nil {
+        if let sent {
+            answerRequest = AnswerRequest(id: sent, question: nil)
+        } else {
             askNote = "Sidecar not running — summary not requested."
             answerBody = ""
             answerState = ""
             summarising = false
         }
+    }
+
+    /// Stop the Ask or Summarise in flight: the sidecar request is dropped (its
+    /// handler too, so nothing late can save it), the panel closes, and an Ask's
+    /// question goes back in the field (it is disabled while asking, so empty).
+    /// Nothing reaches the note.
+    private func cancelAnswer() {
+        guard let request = answerRequest else { return }
+        ctx.sidecar?.discardDocumentRequest(request.id)
+        answerRequest = nil
+        if let asked = request.question { question = asked }
+        answerBody = ""
+        answerState = ""
+        summarising = false
+        askNote = ""
     }
 
     /// Persist a tag change. The live/just-finished note is tagged through its
@@ -1474,7 +1503,8 @@ private struct SessionDetailPane: View {
     /// it so scrolled text doesn't collide with the field.
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !answerBody.isEmpty { liveAnswer }
+            // While running, even before any text, so Stop is always there.
+            if isAsking || !answerBody.isEmpty { liveAnswer }
             askField
             if !askNote.isEmpty {
                 Text(askNote).font(.system(size: 11.5)).foregroundStyle(Theme.factRed)
@@ -1496,29 +1526,17 @@ private struct SessionDetailPane: View {
     }
 
     private var liveAnswer: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    if isAsking { ProgressView().controlSize(.small).scaleEffect(0.7) }
-                    Text(answerState == "failed"
-                        ? (summarising ? "Couldn't summarise" : "Couldn't answer")
-                        : (summarising ? "Summary" : "Answer"))
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(answerState == "failed"
-                            ? Theme.factRed
-                            : (summarising ? Theme.summaryTeal : Theme.accent))
-                }
-                MarkdownText(markdown: answerBody, style: .answer)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-        }
-        .frame(maxHeight: 220)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Theme.surfaceCard, in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
-        .shadow(color: Theme.cardShadow, radius: 12, y: 4)
+        AnswerPanel(
+            title: answerState == "failed"
+                ? (summarising ? "Couldn't summarise" : "Couldn't answer")
+                : (summarising ? "Summary" : "Answer"),
+            titleColor: answerState == "failed"
+                ? Theme.factRed
+                : (summarising ? Theme.summaryTeal : Theme.accent),
+            markdown: answerBody,
+            isRunning: isAsking,
+            stop: answerRequest == nil ? nil : cancelAnswer,
+            stopHelp: summarising ? "Stop summarising" : "Stop answering")
     }
 
     private var canAsk: Bool {
@@ -1570,6 +1588,7 @@ private struct SessionDetailPane: View {
         let sent = sidecar.askDocument(question: q, document: document) { body, state in
             answerBody = body
             answerState = state
+            if !isAsking { answerRequest = nil }
             if state == "done" {
                 // Issue #51: only clear the answer and reload once the append is
                 // on disk. On failure keep the answer visible (leave answerBody /
@@ -1587,12 +1606,13 @@ private struct SessionDetailPane: View {
                 }
             }
         }
-        if sent == nil {
+        guard let sent else {
             askNote = "Sidecar not running — question not sent."
             answerBody = ""
             answerState = ""
             return
         }
+        answerRequest = AnswerRequest(id: sent, question: q)
         question = ""
     }
 }
