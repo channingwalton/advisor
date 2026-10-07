@@ -38,7 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             forName: .advisorConfigChanged, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.applyAppearance(AdvisorConfig.load().appearance)
+            // Delivered on the main queue, so this is on the main actor — the
+            // closure's type just can't say so.
+            MainActor.assumeIsolated {
+                self?.applyAppearance(AdvisorConfig.load().appearance)
+            }
         }
     }
 
