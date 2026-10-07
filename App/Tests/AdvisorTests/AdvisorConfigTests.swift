@@ -12,6 +12,7 @@ import Testing
     let c = try JSONDecoder().decode(AdvisorConfig.self, from: json)
     #expect(c.provider == "codex")            // the one present key
     #expect(c.model == "")                    // the rest fall back to defaults
+    #expect(c.effort == "")
     #expect(c.authMode == "subscription")
     #expect(c.appearance == "system")
     #expect(c.allowMcpActions == false)
@@ -43,6 +44,7 @@ import Testing
     c.allowMcpActions = true
     c.provider = "codex"
     c.model = "gpt-5"
+    c.effort = "low"
     c.sttLocale = "en_GB"
     c.authMode = "apiKey"
     c.appearance = "dark"
@@ -58,7 +60,17 @@ import Testing
     let d = AdvisorConfig()
     #expect(d.provider == "claude")
     #expect(d.model == "")
+    #expect(d.effort == "")
     #expect(d.triggerSensitivity == "balanced")
     #expect(d.allowMcpActions == false)
     #expect(d.triggers == AdvisorConfig.Triggers(question: true, context: true, factcheck: true))
+}
+
+// The sidecar drops an unknown effort level to "" (inherit); the app must agree,
+// or the picker shows a blank selection while Default is what actually runs.
+@Test func configDecodeDropsUnknownEffortToDefault() throws {
+    let unknown = try JSONDecoder().decode(AdvisorConfig.self, from: Data(#"{"effort":"ultra"}"#.utf8))
+    #expect(unknown.effort == "")
+    let known = try JSONDecoder().decode(AdvisorConfig.self, from: Data(#"{"effort":"max"}"#.utf8))
+    #expect(known.effort == "max")
 }

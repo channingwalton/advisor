@@ -1,4 +1,4 @@
-import { query, type HookCallback, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, type EffortLevel, type HookCallback, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { homedir } from "node:os";
 import fs from "node:fs";
 import path from "node:path";
@@ -171,6 +171,9 @@ export interface AgentSessionOptions {
   name: string;
   systemPrompt: string;
   model?: string;
+  /// How much the model thinks (SDK effort level). Unset = the CLI's own
+  /// choice, which includes the user's `effortLevel` from their settings.
+  effort?: EffortLevel;
   allowedTools: string[];
   cwd?: string;
   /// SDK setting sources to load. Defaults to ["user"] (the user's own Claude
@@ -456,7 +459,7 @@ export class AgentSession implements Agent {
       cold,
       firstTextLogged: false,
     };
-    log(`${this.opts.name}: run start (cold=${cold}, queue=${this.pending.length})`);
+    log(`${this.opts.name}: run start (cold=${cold}, queue=${this.pending.length}, effort=${this.opts.effort ?? "default"})`);
     const answer = new Promise<TaskResult>((res) => {
       p.resolve = res;
     });
@@ -531,6 +534,7 @@ export class AgentSession implements Agent {
         // (stream kept for interrupt())
         systemPrompt: this.opts.systemPrompt,
         model: this.opts.model,
+        effort: this.opts.effort,
         // Auto-allowed tools (no permission check) — web only.
         allowedTools: this.opts.allowedTools.filter((t) => t.startsWith("Web")),
         disallowedTools: ["Bash", "Write", "Edit", "NotebookEdit", "Task", "KillShell"],

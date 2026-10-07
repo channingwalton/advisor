@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TaskResult } from "./agent.js";
 import type { Outbound } from "./protocol.js";
-import { runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
+import { mergeConfig } from "./config.js";
 
 /// A session that records each prompt and answers from a script; `reset()` is
 /// counted so a test can see the lane recycle.
@@ -68,4 +69,18 @@ test("#context-lane-recycle a warm lane is sent only what it hasn't seen", async
   assert.equal(lane.resets, 0);
   assert.doesNotMatch(lane.prompts[1], /Cedar/);
   assert.match(lane.prompts[1], /Who owns it\?/);
+});
+
+// Every card lane (research, query, reply, document, summary) is built from
+// these options, so the effort preference must ride them.
+test("card lane options carry the configured model, effort and connector setting", () => {
+  const o = cardLaneOptions(mergeConfig({ model: "opus", effort: "low", allowMcpActions: true }), "research0");
+  assert.equal(o.name, "research0");
+  assert.equal(o.model, "opus");
+  assert.equal(o.effort, "low");
+  assert.equal(o.allowMcpActions, true);
+});
+
+test("card lane options inherit the user's effort when none is configured", () => {
+  assert.equal(cardLaneOptions(mergeConfig({}), "query").effort, undefined);
 });

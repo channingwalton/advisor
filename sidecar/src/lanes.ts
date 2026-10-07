@@ -1,7 +1,23 @@
-import { Agent } from "./agent.js";
+import { Agent, type AgentSessionOptions } from "./agent.js";
+import { AdvisorConfig, effortArg, modelArg } from "./config.js";
 import { guardedRun } from "./guardedRun.js";
-import { sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
+import { buildResearchSystem, sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
 import { Outbound } from "./protocol.js";
+
+const CARD_TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
+
+/// The session options for a card lane — research, query, reply, document or
+/// summary. The classifier is built separately and takes no effort setting.
+export function cardLaneOptions(config: AdvisorConfig, name: string): AgentSessionOptions {
+  return {
+    name,
+    systemPrompt: buildResearchSystem(),
+    model: modelArg(config),
+    effort: effortArg(config),
+    allowedTools: CARD_TOOLS,
+    allowMcpActions: config.allowMcpActions,
+  };
+}
 
 /// A session that answers cards. Research/query lanes are pooled and persist
 /// (warm) across cards; reply/summary/document lanes are transient.

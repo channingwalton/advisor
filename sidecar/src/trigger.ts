@@ -179,6 +179,7 @@ function ensureSession(): Agent {
         triggers: { question: true, context: true, factcheck: true },
         provider: "claude",
         model: "",
+        effort: "",
         allowMcpActions: false,
       } as AdvisorConfig);
     session = createAgent(config.provider, {
@@ -187,7 +188,9 @@ function ensureSession(): Agent {
       model: modelArg(config),
       allowedTools: [],
       // The classifier only reads the transcript window — it needs none of the
-      // user's Claude config, so don't load it on every classify.
+      // user's Claude config, so don't load it on every classify. No effort
+      // setting either: it already answers in ~1.5 s, and more thought would
+      // only delay every card.
       settingSources: [],
     });
   }

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import type { EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 import { log } from "./protocol.js";
 
 /// A provider id (registry key in providers.ts). Plain string so new providers
@@ -19,7 +20,12 @@ export interface AdvisorConfig {
   provider: Provider;
   /// Model id for the provider, or "" = the provider's own default.
   model: string;
+  /// How much the card lanes think (an SDK effort level), or "" = inherit the
+  /// user's own Claude setting. Not applied to the classifier. Claude only.
+  effort: EffortLevel | "";
 }
+
+const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
 const DEFAULTS: AdvisorConfig = {
   triggerSensitivity: "balanced",
@@ -27,11 +33,17 @@ const DEFAULTS: AdvisorConfig = {
   allowMcpActions: false,
   provider: "claude",
   model: "",
+  effort: "",
 };
 
 /// The model id to pass to the SDK, or undefined to use the provider's default.
 export function modelArg(c: AdvisorConfig): string | undefined {
   return c.model || undefined;
+}
+
+/// The effort level to pass to the SDK, or undefined to inherit the user's own.
+export function effortArg(c: AdvisorConfig): EffortLevel | undefined {
+  return c.effort || undefined;
 }
 
 const CONFIG_PATH = `${homedir()}/Library/Application Support/Advisor/config.json`;
@@ -58,6 +70,9 @@ export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
     allowMcpActions: bool(raw.allowMcpActions, DEFAULTS.allowMcpActions),
     provider: str("provider", DEFAULTS.provider),
     model: str("model", DEFAULTS.model),
+    // An unknown level (a typo, or one from a newer app) inherits rather than
+    // reaching the SDK as an invalid option.
+    effort: EFFORT_LEVELS.find((l) => l === raw.effort) ?? DEFAULTS.effort,
   };
 }
 

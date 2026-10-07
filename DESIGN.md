@@ -1847,6 +1847,36 @@ Follow-ups on cards still can't be stopped in either window (their ✕ is hidden
 while replying) — a separate change, now safe since a cancelled follow-up
 restores the card's answer.
 
+## Effort preference (2026-10-07)
+
+Card latency is the main complaint. The log since 2026-09-01 (184 research
+cards): trigger to first card text median 30.5 s (p90 52.7 s), to finished 33.4 s;
+speech to trigger only ~2 s. The 2026-06-13 two-pass prompt ("From your notes:"
+first) mostly doesn't hold — 155 of 184 cards arrived as one block at the end.
+
+One cause: card lanes load the user's settings (`settingSources: ["user"]`), so
+they inherit the user's `effortLevel`. Verified against the real CLI with a fake
+model endpoint (`effort.sdk.test.ts`): with `effortLevel: "xhigh"` in settings
+and no SDK `effort`, the request carries `output_config.effort: "xhigh"`; an
+explicit `effort` overrides it.
+
+So Preferences ▸ Agent has an **Effort** picker (`effort` in `config.json`,
+mirrored in `Preferences.swift` and `config.ts`): Default (inherit, so nothing
+changes until the user picks) or low / medium / high / xhigh / max. It applies
+to every card lane — research, query, reply, document, summary — via
+`cardLaneOptions` in `lanes.ts`. Not to the classifier: it doesn't load user
+settings, already answers in ~1.5 s, and more thought would delay every card.
+Claude only; Codex ignores it. Every level is offered whatever the model,
+because the CLI lowers an unsupported one rather than failing the turn (xhigh
+is sent as high to Sonnet 4.6; Haiku 4.5 gets no effort at all). An unknown
+level in `config.json` falls back to Default in the sidecar. Each run's level is
+logged on its `run start` line, so card timings can be compared by level from
+the log.
+
+This is a measuring knob, not the whole fix: token streaming
+(`includePartialMessages`) and fast local note hits before web research remain
+open.
+
 ## Revisit as it grows
 
 Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

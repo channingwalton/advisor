@@ -180,7 +180,8 @@ send again.
 ⌘, opens settings: parallel agent count, connector action permissions, trigger
 sensitivity (conservative/balanced/eager) and per-kind toggles, the agent
 backend (one provider + model shared by the classifier, research, and
-manual-query lanes), saved contexts, the **tag** library (add / rename / recolour
+manual-query lanes), the card **effort** (how much Claude thinks before
+answering a card — see below), saved contexts, the **tag** library (add / rename / recolour
 / delete, each with a preset colour; renaming updates the tag on every session
 already using it), appearance (system/light/dark), system-audio capture, the
 speech-recognition locale, and the session storage folder (choose where
@@ -188,6 +189,14 @@ transcripts are saved; changing it offers to move existing ones across).
 
 Settings are stored in `~/Library/Application Support/Advisor/config.json`;
 agent settings apply at the next session start.
+
+**Effort** is the main speed dial for cards. "Default" uses the effort level
+in your own Claude Code settings (`effortLevel` in `~/.claude/settings.json`),
+which may be set high for coding. Low is fastest; Max is slowest. It applies to
+every card, follow-up, Ask and Summarise, but not to the trigger classifier. A
+level the chosen model can't use is lowered to one it can (Extra high becomes
+High on Sonnet; Haiku ignores effort). Claude only. Each run's level appears
+in the log's `run start` lines, so card timings can be compared by level.
 
 ## Providers and authentication
 

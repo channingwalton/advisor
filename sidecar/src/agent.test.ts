@@ -234,3 +234,38 @@ test("creates its working directory before spawning, and reports a failure as a 
   const r2 = await blocked.run("task2", undefined, 100);
   assert.match(r2.error ?? "", /EACCES/);
 });
+
+// The effort preference must reach the SDK, and be visible in the log so card
+// latency can be compared by level. Unset, the option is omitted so the CLI
+// keeps the user's own Claude setting.
+test("passes the effort level to the SDK and logs it on each run", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession({ ...opts, effort: "low" }, queryFn);
+  const written: string[] = [];
+  const orig = process.stderr.write;
+  process.stderr.write = ((chunk: unknown) => {
+    written.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  let r1p;
+  try {
+    r1p = session.run("task1", undefined, 1000);
+  } finally {
+    process.stderr.write = orig;
+  }
+  const { options } = spawns[0].args as { options: { effort?: string } };
+  assert.equal(options.effort, "low");
+  assert.ok(written.some((s) => s.includes("test: run start") && s.includes("effort=low")), written.join(""));
+  spawns[0].messages.push(success("done"));
+  await r1p;
+});
+
+test("omits the effort option when none is set", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const r1p = session.run("task1", undefined, 1000);
+  const { options } = spawns[0].args as { options: Record<string, unknown> };
+  assert.equal(options.effort, undefined);
+  spawns[0].messages.push(success("done"));
+  await r1p;
+});

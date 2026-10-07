@@ -36,6 +36,10 @@ struct AdvisorConfig: Codable, Equatable {
     /// = the provider's own default. Mirrors sidecar/src/config.ts.
     var provider = "claude"
     var model = ""
+    /// How much the card lanes think (an Agent SDK effort level), or "" = the
+    /// user's own Claude Code setting. Claude only; the classifier ignores it.
+    /// Mirrors sidecar/src/config.ts, which drops an unknown level to "".
+    var effort = ""
     /// App-side only: STT locale identifier (e.g. en_GB). "" = follow the
     /// device default locale (`Locale.current`), resolved in AppleSpeechEngine.
     var sttLocale = ""
@@ -71,7 +75,7 @@ struct AdvisorConfig: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
-        case provider, model, sttLocale, authMode, appearance, contexts, tags, sessionDir
+        case provider, model, effort, sttLocale, authMode, appearance, contexts, tags, sessionDir
         case acceptedTermsVersion
     }
 
@@ -87,6 +91,10 @@ struct AdvisorConfig: Codable, Equatable {
         sttLocale = try c.decodeIfPresent(String.self, forKey: .sttLocale) ?? ""
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        // An unknown level falls back to Default, as the sidecar does, so the
+        // picker never shows a blank selection for a level that isn't running.
+        let rawEffort = try c.decodeIfPresent(String.self, forKey: .effort) ?? ""
+        effort = AgentEffort.levels.contains { $0.0 == rawEffort } ? rawEffort : ""
         authMode = try c.decodeIfPresent(String.self, forKey: .authMode) ?? "subscription"
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? "system"
         contexts = try c.decodeIfPresent([SavedContext].self, forKey: .contexts) ?? []
@@ -155,6 +163,17 @@ struct AgentProvider: Identifiable {
         AgentProvider(
             id: "codex", label: "Codex",
             models: [("", "Default (from ~/.codex/config.toml)")]),
+    ]
+}
+
+/// Effort levels offered in Preferences: (tag, label), tag "" = the user's own
+/// Claude Code setting. The CLI lowers a level the model can't use (xhigh →
+/// high on Sonnet; Haiku ignores effort), so every level is safe to offer.
+enum AgentEffort {
+    static let levels: [(String, String)] = [
+        ("", "Default (your Claude Code setting)"),
+        ("low", "Low — fastest"), ("medium", "Medium"), ("high", "High"),
+        ("xhigh", "Extra high"), ("max", "Max — slowest"),
     ]
 }
 
@@ -565,7 +584,7 @@ struct PreferencesView: View {
     var body: some View {
         TabView {
             AgentSettingsView(
-                provider: $config.provider, model: $config.model,
+                provider: $config.provider, model: $config.model, effort: $config.effort,
                 authMode: $config.authMode, allowMcpActions: $config.allowMcpActions,
                 agentLanes: $agentLanes
             )
@@ -609,6 +628,7 @@ struct PreferencesView: View {
 private struct AgentSettingsView: View {
     @Binding var provider: String
     @Binding var model: String
+    @Binding var effort: String
     @Binding var authMode: String
     @Binding var allowMcpActions: Bool
     @Binding var agentLanes: Int
@@ -617,6 +637,12 @@ private struct AgentSettingsView: View {
         Form {
             Section("Agent backend") {
                 AgentBackendView(provider: $provider, model: $model)
+                Picker("Effort", selection: $effort) {
+                    ForEach(AgentEffort.levels, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Text("How much Claude thinks before answering a card. Lower is faster; a level the model can't use is lowered to one it can. Claude only.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 AuthModeView(provider: provider, authMode: $authMode)
                 Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
                 Toggle("Allow connector actions", isOn: $allowMcpActions)

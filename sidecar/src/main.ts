@@ -1,8 +1,7 @@
 import { createInterface } from "node:readline";
 import { createAgent } from "./providers.js";
-import { AdvisorConfig, loadConfig, modelArg } from "./config.js";
+import { AdvisorConfig, loadConfig } from "./config.js";
 import {
-  buildResearchSystem,
   documentQuestionTask,
   sessionContextPrefix,
   summaryTask,
@@ -11,7 +10,7 @@ import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { guardedRun } from "./guardedRun.js";
-import { Lane, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, Lane, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
 import { AutoPipeline } from "./autoPipeline.js";
 import {
   cardKind,
@@ -67,8 +66,6 @@ function guard(op: string): (err: unknown) => void {
 /// the next research/query/reply without rebuilding the persistent lanes.
 let sessionContext = "";
 
-const TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
-
 /// Parallel research lanes: triggers fan out across persistent sessions.
 /// Pool grows lazily up to maxLanes (settable from the app).
 let maxLanes = 3;
@@ -80,13 +77,7 @@ const researchLanes: Lane[] = [];
 function makeLane(name: string): Lane {
   return {
     name,
-    session: createAgent(config.provider, {
-      name,
-      systemPrompt: buildResearchSystem(),
-      model: modelArg(config),
-      allowedTools: TOOLS,
-      allowMcpActions: config.allowMcpActions,
-    }),
+    session: createAgent(config.provider, cardLaneOptions(config, name)),
     busy: false,
   };
 }

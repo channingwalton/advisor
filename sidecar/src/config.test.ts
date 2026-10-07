@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeConfig, modelArg } from "./config.js";
+import { effortArg, mergeConfig, modelArg } from "./config.js";
 
 test("mergeConfig fills defaults for empty input", () => {
   const c = mergeConfig({});
@@ -61,4 +61,25 @@ test("mergeConfig tolerates a non-object triggers value", () => {
     context: true,
     factcheck: true,
   });
+});
+
+test("mergeConfig defaults effort to \"\" (inherit the user's Claude setting)", () => {
+  assert.equal(mergeConfig({}).effort, "");
+});
+
+test("mergeConfig keeps each known effort level", () => {
+  for (const level of ["low", "medium", "high", "xhigh", "max"]) {
+    assert.equal(mergeConfig({ effort: level }).effort, level);
+  }
+});
+
+test("mergeConfig drops an unknown or non-string effort to the default", () => {
+  // A typo or a level from a newer app must not reach the SDK as a bad option.
+  assert.equal(mergeConfig({ effort: "turbo" }).effort, "");
+  assert.equal(mergeConfig({ effort: 3 }).effort, "");
+});
+
+test("effortArg returns the level, or undefined to inherit", () => {
+  assert.equal(effortArg(mergeConfig({ effort: "low" })), "low");
+  assert.equal(effortArg(mergeConfig({})), undefined);
 });
