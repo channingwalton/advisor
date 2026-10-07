@@ -8,8 +8,9 @@ description = "Clean, build, and test the app and sidecar"
 run = [
     "cd App && swift package clean",
     "rm -rf sidecar/dist",
-    "cd App && swift build",
-    "cd App && swift test",
+    # Warnings fail the check (tsc has no warnings of its own to promote).
+    "cd App && swift build -Xswiftc -warnings-as-errors",
+    "cd App && swift test -Xswiftc -warnings-as-errors",
     "cd sidecar && npm ci --include=dev",
     "cd sidecar && npm run build",
     "cd sidecar && npm test",

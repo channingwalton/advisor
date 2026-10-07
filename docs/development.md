@@ -53,7 +53,7 @@ Audio Recording permissions. A packaged app prompts as Advisor; a bare
 If `mise` is installed, common tasks are available from the repo root:
 
 ```sh
-mise run commit-check   # clean build and test both sides (alias: mise run cc)
+mise run commit-check   # clean build and test both sides; Swift warnings fail it (alias: mise run cc)
 mise run run            # run the debug build
 mise run dmg            # create App/dist/Advisor-<version>.dmg
 mise run release        # dmg + sync website version line + commit + tag vVERSION

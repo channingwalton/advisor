@@ -47,7 +47,9 @@ in a dev checkout) — keep new runtime-resource lookups going through it.
 
 CI (`.github/workflows/ci.yml`) builds and tests both sides on push to `main`
 and on PRs (App on `macos-26`, sidecar on `ubuntu-latest`). Always build both
-sides locally before committing too.
+sides locally before committing too. The commit check and CI build Swift with
+`-warnings-as-errors`; a plain `swift build` doesn't, and `devtool check` hides
+compiler output when it passes — so a warning only shows by failing the check.
 
 ## Verifying UI changes
 
