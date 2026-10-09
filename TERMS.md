@@ -34,16 +34,19 @@ can:
 - perform connector actions (send / create / update / …) — but only if you
   enable "Allow connector actions" in Preferences, which is off by default.
 
-On the Codex backend two of those bounds are enforced differently and one is
-weaker. Advisor runs the Codex CLI inside a macOS sandbox that applies the same
+On the Codex backend those bounds are enforced differently, and some more
+coarsely. Advisor runs the Codex CLI inside a macOS sandbox that applies the same
 blocked locations and the same write restriction to the CLI and to everything it
 starts, including the read-only shell commands the Codex agent can run (the
-Claude backend has no shell). However, connectors configured in your own
-`~/.codex/config.toml` are not gated by the "Allow connector actions"
-preference, and the Codex agent can read its own stored provider credentials in
-`~/.codex`, which must stay readable for it to sign in. If either matters to
-you, use the Claude backend, which applies every restriction in-process and per
-tool call.
+Claude backend has no shell). Codex cannot tell a connector read from an action,
+so with "Allow connector actions" off it gets no connectors at all (those in
+your own `~/.codex/config.toml`, those its plugins bring, and ChatGPT apps), and
+with it on it gets all of them, actions included. A connector you add to
+`~/.codex/config.toml` during a recording may be available to Codex until the
+next recording. The Codex agent can also read its own stored provider
+credentials in `~/.codex`, which must stay readable for it to sign in. If any of
+this matters to you, use the Claude backend, which applies every restriction
+in-process and per tool call.
 
 You decide which connectors Advisor can reach and which permissions are
 enabled, and you are responsible for those choices and for the consequences of
