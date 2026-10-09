@@ -20,27 +20,35 @@ decision.
   transcript lines with a right-click action menu — AI actions, corrections,
   and editorial NOTE cards), session markdown writer,
   a Sessions browser (master/detail: date-grouped list + detail with cards,
-  questions and transcript; ask-and-append), preferences.
-- `sidecar/` — Node 22 + TypeScript + Claude Agent SDK. Trigger classifier
-  (persistent delta-fed session on the shared model), parallel research lanes,
-  query lane, tool sandbox. NDJSON over stdio to the app (protocol in
-  `src/protocol.ts`, both directions).
+  questions and transcript; folders with per-folder context and tags, session
+  tags, search, ask-and-append, summarise), saved contexts, first-run terms,
+  quit/close teardown (`QuitSequence`, `SessionClose`), preferences.
+- `sidecar/` — Node 22 + TypeScript, two agent backends: Claude Agent SDK and
+  Codex SDK (`src/providers.ts`, kept in step with the app's Preferences).
+  Trigger classifier (persistent delta-fed session on the shared model) driving
+  automatic cards (`autoPipeline.ts`); pooled research and query lanes plus
+  short-lived reply, document and summary lanes (`lanes.ts`); tool sandbox.
+  NDJSON over stdio to the app (protocol in `src/protocol.ts`, both directions).
 
 ## Build & test
 
 ```sh
 cd App && swift build                  # app
+cd App && swift test                   # app tests
 cd sidecar && npm run build            # tsc (npm install --include=dev first)
-sh test/replay.sh                      # replay fragments through the pipeline
-cd App && sh package.sh                # → dist/Advisor.app (self-contained, ad-hoc signed)
+cd sidecar && npm test                 # tsc + node --test (incl. sandbox.sdk against the real CLI)
+mise run commit-check                  # clean build + test both sides, warnings as errors (as CI)
+sh sidecar/test/replay.sh              # replay fragments through the pipeline (needs jq + built dist)
+cd App && sh package.sh                # → dist/Advisor.app (self-contained; sign-local.sh: Developer ID › "Advisor Dev" › ad-hoc)
 cd App && sh install.sh                # clean build + install to ~/Applications
 cd App && sh dmg.sh                    # signed + notarised DMG (runs sign.sh; one notary round)
-mise run release                       # DMG + sync www version line + commit + tag vVERSION
+mise run release                       # DMG + sync www version line and DMG link + commit + tag vVERSION
 ```
 
 Versioning: the repo-root `VERSION` file is the single source of truth —
 `package.sh` stamps it into the bundle (build number = commit count) and
-`dmg.sh` names the DMG from it. Bump `VERSION` before `mise run release`.
+`dmg.sh` names the DMG from it. Bump and commit `VERSION` before
+`mise run release` — it refuses an uncommitted bump.
 
 Resource paths resolve via `AppResources` (bundle when packaged, `repoRoot`
 in a dev checkout) — keep new runtime-resource lookups going through it.
@@ -97,15 +105,16 @@ drove the #21 rework and #12 churn).
   credentials, which the profile must leave readable for login. See DESIGN.md.
 - User preferences: `~/Library/Application Support/Advisor/config.json`
   (mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts` —
-  change both together; `sttLocale` is App-side only, deliberately absent from
-  the sidecar config).
+  change both together; keys commented "App-side only" in Preferences.swift,
+  e.g. `sttLocale`, `sessionDir`, are deliberately absent from the sidecar config).
 - Auth defaults to the user's Claude Code / Codex CLI login (subscription);
   never make an API key *required*. An opt-in API-key fallback exists
-  (Preferences "Authentication" toggle): keys live in the macOS Keychain
+  (Preferences "Authentication" picker): keys live in the macOS Keychain
   (`Keychain.swift`), injected as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` at
   sidecar spawn (`SidecarManager.apiKeyEnv`), never in `config.json`.
-- Sessions/transcripts are user data in `~/Library/Application Support/Advisor/`
-  — read freely when debugging, never commit their contents.
+- Sessions/transcripts are user data, by default in
+  `~/Library/Application Support/Advisor/sessions` (the `sessionDir` preference
+  can move them) — read freely when debugging, never commit their contents.
 - Known limit (don't fight it): overlapping simultaneous speakers on a mono
   feed can't be fully transcribed.
-- Disable able blue focus ring on buttons
+- Disable the blue focus ring on buttons (`.focusEffectDisabled()`).

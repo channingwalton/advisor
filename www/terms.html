@@ -42,9 +42,10 @@
     <ul>
       <li>search and fetch content from the web;</li>
       <li>read from and search connectors (MCP servers) you have configured;</li>
-      <li>read non-sensitive files in your home folder;</li>
-      <li>perform connector actions (send / create / update / &hellip;) — but only if you enable &ldquo;Allow MCP actions&rdquo; in Preferences, which is off by default.</li>
+      <li>read non-sensitive files in your home folder — agents are blocked from credential and key locations such as <code>~/.ssh</code>, <code>~/.aws</code>, <code>~/.gnupg</code> and your keychains, and cannot write to or delete anything outside their own working state;</li>
+      <li>perform connector actions (send / create / update / &hellip;) — but only if you enable &ldquo;Allow connector actions&rdquo; in Preferences, which is off by default.</li>
     </ul>
+    <p>On the Codex backend two of those bounds are enforced differently and one is weaker. Advisor runs the Codex CLI inside a macOS sandbox that applies the same blocked locations and the same write restriction to the CLI and to everything it starts, including the read-only shell commands the Codex agent can run (the Claude backend has no shell). However, connectors configured in your own <code>~/.codex/config.toml</code> are not gated by the &ldquo;Allow connector actions&rdquo; preference, and the Codex agent can read its own stored provider credentials in <code>~/.codex</code>, which must stay readable for it to sign in. If either matters to you, use the Claude backend, which applies every restriction in-process and per tool call.</p>
     <p>You decide which connectors Advisor can reach and which permissions are enabled, and you are responsible for those choices and for the consequences of actions agents take within the permissions you have granted. Advisor&rsquo;s sandboxing of agents is best-effort, not a guarantee: AI systems can behave unpredictably, so do not attach connectors or enable actions whose misuse you are not prepared to accept.</p>
 
     <h2>4. AI output can be wrong</h2>
@@ -54,7 +55,7 @@
     <p>Advisor records and transcribes audio: your microphone and, if enabled, other applications&rsquo; audio on your Mac. Laws on recording conversations vary by country and in some places require the consent of everyone being recorded. You are solely responsible for using Advisor lawfully — including telling participants they are being recorded and obtaining consent where required. We accept no responsibility for recordings you choose to make.</p>
 
     <h2>6. Your data</h2>
-    <p>Sessions, transcripts and settings are stored locally on your Mac, and transcription happens on-device. We do not receive or store your recordings or transcripts. Conversation excerpts and queries are sent to the AI provider you configured, under that provider&rsquo;s own terms and privacy policy. You are responsible for backing up your data.</p>
+    <p>Sessions, transcripts and settings are stored locally on your Mac, and transcription happens on-device. We do not receive or store your recordings or transcripts. Text is sent to the AI provider you configured, under that provider&rsquo;s own terms and privacy policy: while Auto cards is on, the live transcript (including notes you add) is sent as the conversation goes on; cards and questions also send the session&rsquo;s context and the conversation so far; questions about a saved session send its transcript; and the contents of any home-folder files or connector results agents read are sent too. You are responsible for backing up your data.</p>
 
     <h2>7. Third-party services</h2>
     <p>Advisor relies on your accounts with third parties — your AI provider (Anthropic or OpenAI) and any connectors you attach. Your use of those services is governed by their terms, and any charges they levy are yours to pay. We are not responsible for the availability, behaviour or output of third-party services.</p>
@@ -74,7 +75,7 @@
     <p>If you are a consumer in the UK, digital content must be as described, fit for purpose and of satisfactory quality, and you may be entitled to a repair, replacement or refund if it is faulty. These terms do not limit those rights.</p>
 
     <h2>12. Termination</h2>
-    <p>This licence ends automatically if you materially breach these terms; when it ends you must stop using Advisor and delete your copies. You can end the agreement at any time by deleting Advisor.</p>
+    <p>You can end the agreement at any time by deleting Advisor.</p>
 
     <h2>13. Changes to these terms</h2>
     <p>We may update these terms — the version and date appear at the top, and the current version is always on this page. Advisor will ask you to accept material changes before continuing.</p>

@@ -24,7 +24,8 @@ flowchart LR
   chronological feed of sentences with research cards inlined, and writes each
   session to markdown. Speech-to-text is Apple SpeechAnalyzer (macOS 26+),
   on-device.
-- **Sidecar** (`sidecar/`): Node 22 + TypeScript + Claude Agent SDK. Watches the
+- **Sidecar** (`sidecar/`): Node 22 + TypeScript, running its agents on the
+  Claude Agent SDK or the Codex SDK (the provider chosen in Preferences). Watches the
   transcript, decides what is worth researching (questions, topics, claims —
   including questions about the user's own notes), researches in parallel
   persistent sessions, and streams answer cards back. Uses your local CLI
@@ -42,6 +43,14 @@ cd sidecar && npm install --include=dev && npm run build
 cd ../App && swift build
 .build/debug/Advisor
 ```
+
+Tests: `cd App && swift test` and `cd sidecar && npm test`. The sidecar suite
+includes `sandbox.sdk.test.ts`, which checks the tool sandbox against the real
+bundled Claude CLI (a local fake model, no network). `mise run commit-check`
+(below) runs the same clean build and tests as CI. To watch the trigger
+classifier on a real transcript, `sh sidecar/test/replay.sh` feeds
+`sidecar/test/fragments.txt` through the built sidecar and prints the triggers
+and cards (needs `jq` and a CLI login).
 
 Requires: macOS 26+ (Apple Silicon), Xcode toolchain, Node 22+, a logged-in
 Claude Code or Codex CLI. First run prompts for Microphone and Screen & System
@@ -63,8 +72,9 @@ mise run install        # install to ~/Applications/Advisor.app
 ## Packaging
 
 `App/package.sh` assembles a self-contained `Advisor.app` — release build plus
-the Node runtime and the built sidecar. It signs with a stable local identity
-when one exists, otherwise it falls back to ad-hoc signing. Node is **not**
+the Node runtime and the built sidecar. It signs through `sign-local.sh`, which
+uses a Developer ID cert if present, else a self-signed `Advisor Dev` cert (see
+below), else ad-hoc signing. Node is **not**
 required on the target Mac.
 
 **On the build machine** (Apple Silicon), you need:
@@ -100,7 +110,7 @@ To avoid that, create a one-off self-signed code-signing certificate named
 Certificate…* → name `Advisor Dev`, Identity Type *Self-Signed Root*, Certificate
 Type *Code Signing*). `package.sh` and `install.sh` sign with it automatically,
 the Designated Requirement stays constant, and you grant the permissions just
-once. (A Developer ID cert, if present, is preferred over the self-signed one.)
+once.
 
 **Install a local build on another Mac** (macOS 26+, Apple Silicon):
 
@@ -147,7 +157,7 @@ the bundled Node sidecar and `$HOME` reads.)
 The repo-root `VERSION` file is the single source of truth. `package.sh` stamps
 it into the bundle as `CFBundleShortVersionString`, with `CFBundleVersion` set
 from the commit count, and `dmg.sh` names its output `Advisor-<version>.dmg`. To
-release: bump `VERSION`, then
+release: bump `VERSION` and commit the bump, then
 
 ```sh
 mise run release
@@ -155,9 +165,10 @@ mise run release
 
 which builds the DMG, rewrites the version/size line and DMG link on
 `www/index.html`, commits that sync, and tags `vVERSION`. It refuses to run if
-the tag already exists (bump `VERSION` first) or if `www/index.html` has
-uncommitted changes (so the release commit contains only the sync). Push the
-commit and tag yourself.
+the tag already exists (bump `VERSION` first), if `VERSION` has uncommitted
+changes (the tag must point at a commit carrying the version it names), or if
+`www/index.html` has uncommitted changes (so the release commit contains only
+the sync). Push the commit and tag yourself.
 
 ## Website
 

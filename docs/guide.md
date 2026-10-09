@@ -8,8 +8,9 @@ safety and logs. For the short version see
 ## Recording
 
 Advisor opens on the **Sessions** browser (see [below](#sessions-browser)).
-Click **Record** (top right) to open a recording window; only one recording
-window exists at a time, so clicking Record again just brings it forward.
+Click the red **New Recording** button at the top of its sidebar, beside the
+window controls (or press ⌘N), to open a recording window; only one recording
+window exists at a time, so doing it again just brings it forward.
 
 In the recording window, click **Listen**. Words appear live in grey as they're
 spoken, replaced by finalised sentences; cards appear inline when the assistant
@@ -25,12 +26,16 @@ inline on a faint fill, so a past session reads just as it did live.
 ### Toolbar
 
 The toolbar keeps only in-session controls: the record cluster (waveform,
-timer, stop, mic mute), audio source, **Context**, Auto cards, Float, Export,
-History, Sessions (idle collapses the cluster to a single Listen pill).
+timer, mic mute, stop) and audio source on the left; on the right the target
+folder (when recording into one), **Name**, **Context**, **Tags**, **Auto
+cards**, **Hide transcript**, **Summarise**, **Float** and **Export**. Idle
+collapses the cluster to a single **Listen** pill.
 
 - **Stop** is resumable — it pauses capture but keeps the session live, and the
   cluster offers **Resume** to pick it back up with full context. The session is
-  finalised when the recording window closes.
+  finalised when the recording window closes. If cards are still researching,
+  closing asks whether to **Wait** for them or **Stop and Close**. Closing — and
+  quitting with ⌘Q — lets the last speech reach the note before it's saved.
 - **Auto cards** turns the automatic answer/context/fact-check cards on and
   off. Off takes effect at once — nothing waiting to be researched starts —
   though cards already researching finish. Turned back on, it picks up from
@@ -38,17 +43,30 @@ History, Sessions (idle collapses the cluster to a single Listen pill).
 - The **mic** button in the record cluster mutes the local microphone while the
   session keeps running — system audio is still captured and transcribed; tap
   again to unmute.
-- **Context** (before or during a session) holds an optional **name** — a short
-  label that titles the session in the browser — and a **session prompt** (who's
+- **Name** (before or during a session) is an optional short label that titles
+  the session in the browser.
+- **Context** (before or during a session) holds the **session prompt** (who's
   present, the topic, what to focus on). Fill it before Listen or edit it live to
-  steer the agents; each edit applies to the next card. It clears when the
-  session stops.
+  steer the agents; each edit applies to the next card. **Load** fills it from a
+  saved context; **Save…** stores the current text as one. Name, context and
+  tags clear when the recording window closes, not on Stop.
 - **Tags** (before or during a session) applies tags from your library (pick
   from the list; create them in Preferences).
+- **Hide transcript** (eye icon) shows only the cards; click again to bring the
+  transcript back.
+- **Summarise** adds a Summary card recapping the conversation so far, or
+  updates the existing one.
 - **Float** keeps the window on top.
 - **Export** (share icon) copies the current session note to a location you
   choose.
-- **History** (clock icon) brings the Sessions browser forward.
+
+### Keyboard shortcuts
+
+- **⌘N** — New Recording (or bring the recording window forward).
+- **Space** — Listen, Stop or Resume (not while typing in a field).
+- **Esc** — Stop.
+- **⌘↵** — Ask, from the query box (Return works too).
+- **⌘,** — Preferences.
 
 ### The transcript
 
@@ -71,6 +89,9 @@ sentence) to:
 
 Once a card has finished, a follow-up box appears on it — ask a question about
 the card and the answer is appended in place, so a card becomes a short thread.
+(Summary cards are a one-shot recap and take no follow-ups.) While a card is
+still researching, the ✕ beside *Researching* (**Skip this card**) stops it; the
+card stays, marked cancelled.
 A card never loses an answer it has already given: while a follow-up or a
 re-summarise runs, the saved note keeps the previous answer; cancelling one puts
 it back, and a failed re-summarise keeps the old summary with a line saying it
@@ -89,9 +110,8 @@ cards embedded inline in the conversation just as the window shows them.
 
 ## Sessions browser
 
-The **Sessions** browser is the app's main window: it opens at launch, and the
-recording window's **History** button brings it forward. It's a master/detail
-window over past sessions.
+The **Sessions** browser is the app's main window: it opens at launch. It's a
+master/detail window over past sessions.
 
 ### The list
 
@@ -188,8 +208,11 @@ already using it), appearance (system/light/dark), system-audio capture, the
 speech-recognition locale, and the session storage folder (choose where
 transcripts are saved; changing it offers to move existing ones across).
 
-Settings are stored in `~/Library/Application Support/Advisor/config.json`;
-agent settings apply at the next session start.
+Most settings are stored in `~/Library/Application Support/Advisor/config.json`;
+agent settings apply at the next session start, appearance straight away.
+**Parallel agents** and **Capture system audio** live in the app's own defaults
+instead: the agent count applies straight away, system audio from the next
+Listen or Resume.
 
 **Effort** is the main speed dial for cards. "Default" uses the effort level
 in your own Claude Code settings (`effortLevel` in `~/.claude/settings.json`),

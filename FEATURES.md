@@ -42,10 +42,13 @@ surfaces a card inline, anchored to the moment it relates to:
 - **Cited sources** — cards cite their sources inline, as links or file paths.
 - **Tunable triggers** — set sensitivity (conservative / balanced / eager) and
   toggle each card kind (answer / context / fact-check) on or off.
+- **Auto cards switch** — turn automatic cards off from the toolbar while
+  transcription carries on. Off takes effect at once (nothing waiting starts;
+  cards already researching finish); back on, it picks up from what's said
+  next.
 - **Two-tier speed** — a fast classifier decides *whether* to act in under a
   second, leaving the research agent the rest of the budget to answer
   (aspiration: a useful card within a few seconds).
-- Choose AI provider: Claude/Codex subscription/API
 
 ## Ask anything
 
@@ -54,7 +57,8 @@ surfaces a card inline, anchored to the moment it relates to:
 - **Right-click transcript actions** — select any transcript text and run
   **Answer / Context / Fact check** on it directly — the same actions the
   assistant triggers automatically — with the card anchored under that line.
-  The menu also copies the selected text.
+  The menu also fixes a misheard word (**Correct** that instance or **Replace
+  all** in the session) and copies the selected text.
 - **Editorial notes** — right-click a transcript line ▸ *Add note here…* to
   inject your own note as a distinct NOTE card anchored at that line. The
   assistant treats it as authoritative context — it can itself trigger
@@ -97,25 +101,32 @@ The app opens on a master/detail browser of your past sessions:
   / Fact check), add a note or correct a word — all saved to the note.
 - **Ask-and-append** — ask a question about a past session; the answer streams
   in and is appended to that session's note under a **Follow-ups** heading, so
-  the saved transcript grows with the questions you ask of it.
-- **Rename, export, reveal & delete** — give a session a short name for an
-  easier-to-scan list, export a copy of its markdown, reveal its markdown file
-  in Finder, or delete it (behind a confirmation). Available from the detail
-  header's `…` menu and from each list row's right-click menu.
+  the saved transcript grows with the questions you ask of it. Stop an Ask or
+  Summarise while it runs and nothing is saved; a stopped question returns to
+  the field.
+- **Rename, export, share, reveal & delete** — give a session a short name for
+  an easier-to-scan list, export a copy of its markdown, **Share…** it through
+  the macOS share sheet, reveal its markdown file in Finder, or delete it
+  (behind a confirmation). Available from the toolbar's `…` menu and from each
+  list row's right-click menu, which also has *Move to Folder*.
 
 ## Organisation
 
 - **Folders** — organise sessions into folders in the Sessions sidebar, with
   children indented under their folder. Each folder header has a record button
-  to start a recording straight into that folder, and can carry a **folder
-  context** that seeds the session prompt of recordings started there (stored
-  as a hidden `.context.md` that travels with renames and storage-dir moves).
-  Re-file existing sessions later via *Move to Folder*.
+  to start a recording straight into that folder. Re-file existing sessions
+  later by dragging them onto a folder or via *Move to Folder*.
+- **Folder defaults** — a folder can carry a **folder context** that seeds the
+  session prompt of recordings started there (stored as a hidden `.context.md`
+  that travels with renames and storage-dir moves; **Load** fills it from a
+  saved context) and **default tags** those recordings inherit. Both stay
+  editable per session.
 - **Tags** — a user-managed library of coloured tags. Apply them from the live
   toolbar or the browser; they show as coloured dots on session rows and are
   searchable (type `#tag` to filter). Renaming a tag updates it everywhere.
-- **Saved contexts** — pre-canned context prompts you can pick from instead of
-  retyping common setups to use to guide a recording session.
+- **Saved contexts** — pre-canned context prompts for common setups: **Load**
+  one into a session's or folder's context instead of retyping it, or
+  **Save…** the recording window's current context as a new one.
 - **Markdown sessions** — every session is saved as a portable markdown file
   with cards embedded inline, in a folder you choose.
 
@@ -124,8 +135,9 @@ The app opens on a master/detail browser of your past sessions:
 Advisor researches across whatever you've connected:
 
 - **Web search** — built in.
-- **Your notes & connectors** — your local file system, work tools such as Jira,
-  Confluence, Slack, etc. as configured in your AI connectors, read-only by default, independent of Advisor
+- **Your notes & connectors** — your notes and work tools such as Jira,
+  Confluence and Slack, through the connectors your AI provider already has
+  (configured outside Advisor); read-only by default on Claude.
 - **Local files** — read-only access to non-sensitive files in your home
   directory.
 
@@ -167,9 +179,13 @@ Advisor researches across whatever you've connected:
 ## Preferences & appearance
 
 - **Settings** (⌘,) — parallel agent count, connector permissions, trigger
-  sensitivity and per-kind toggles, agent backend and model, saved contexts,
-  the tag library, system-audio capture, STT locale, and the session storage
-  folder.
+  sensitivity and per-kind toggles, agent backend, model and card effort, saved
+  contexts, the tag library, system-audio capture, STT locale, and the session
+  storage folder.
+- **Effort** — how much Claude thinks before answering a card: Low is fastest,
+  Max slowest, and **Default** follows your own Claude Code setting. Applies to
+  every card, follow-up, Ask and Summarise, not the trigger classifier; a level
+  the model can't use is lowered to one it can. Claude only.
 - **Appearance** — system, light, or dark.
 
 ## Packaging

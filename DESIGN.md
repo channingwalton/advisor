@@ -1,112 +1,168 @@
 # Advisor — Design
 
-**Status:** Draft v1 — 2026-06-11
+**Status:** Living document. The sections down to *Trade-offs made* describe the
+system as it is (checked against the code 2026-10-09, v0.4.3). *Milestones* and
+the dated sections after it are the decision history, kept as written; where a
+later change overturned an entry, the entry carries a forward pointer.
+
 **Input:** [REQUIREMENTS.md](REQUIREMENTS.md)
 
 ## Overview
 
 Two processes on one machine:
 
-```
-┌─────────────────────────── Swift app ────────────────────────────┐
-│                                                                  │
-│  AudioCapture ──► Transcription ──► SessionStore (markdown)      │
-│   mic: AVAudioEngine   Apple              │                      │
-│   sys: ScreenCaptureKit  SpeechAnalyzer   ▼                      │
-│                            │         OverlayUI (NSPanel)         │
-│                            │              ▲                      │
-│                            ▼              │ cards/results        │
-│                      SidecarManager ──────┘                      │
-└────────────────────────────┼─────────────────────────────────────┘
-                   NDJSON over stdio
-┌────────────────────────────┼──────────────── TS sidecar ─────────┐
-│                            ▼                                     │
-│  TriggerDetector ──────────► ResearchAgent (Claude Agent SDK)    │
-│                               tools: web search, Vault (RO),     │
-│                               Jira/Confluence/Slack MCP, files   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph app["Swift app (App/)"]
+    mic["AudioCapture<br/>mic: AVAudioEngine or AVCaptureSession"]
+    sys["SystemAudioCapture<br/>ScreenCaptureKit"]
+    stt["AppleSpeechEngine ×2<br/>SpeechAnalyzer, on-device"]
+    rec["Recorder<br/>clean-up + echo dedup"]
+    store["TranscriptStore<br/>utterances · cards · notes"]
+    feed["Feed / FeedView<br/>Recording + Sessions windows"]
+    writer["SessionWriter<br/>markdown notes"]
+    sm["SidecarManager<br/>spawn · supervise · auth"]
+  end
+  subgraph sidecar["Node sidecar (sidecar/)"]
+    main["main.ts<br/>protocol dispatch"]
+    auto["AutoPipeline<br/>debounce · classify · dedup · queue"]
+    cls["Classifier (trigger.ts)<br/>persistent session"]
+    lanes["Card lanes (lanes.ts)<br/>research pool · query · transient"]
+    backend["Agent backend<br/>Claude Agent SDK or Codex"]
+    tools["WebSearch · WebFetch · Read/Grep/Glob<br/>+ the user's own connectors, sandboxed"]
+  end
+  mic --> stt
+  sys --> stt
+  stt --> rec --> store
+  store --> feed
+  store --> writer
+  rec -- utterances --> sm
+  sm -- cards --> store
+  sm <-->|NDJSON over stdio| main
+  main --> auto --> cls
+  auto --> lanes
+  main --> lanes
+  lanes --> backend --> tools
 ```
 
 The Swift app owns everything realtime and visual; the sidecar owns everything that thinks. Only text crosses the boundary.
 
 ## Components
 
+Detail and rationale live in the dated sections below; this is the map.
+
 ### Swift app
 
-**AudioCapture.** Two concurrent sources: mic via `AVAudioEngine` tap; system audio via `ScreenCaptureKit` (`SCStream` audio-only, macOS 13+). Each resampled to 16 kHz mono PCM into a ring buffer, tagged `me` (mic) / `them` (system). Echo risk (own voice on both channels during calls): suppress `mic` segments that overlap >80 % in time with near-identical `sys` text; revisit if insufficient.
+**Capture.** Mic via an `AVAudioEngine` tap on the default input, or an `AVCaptureSession` for a chosen non-default mic (`AudioCapture`; see *Non-default mic selection*). System audio via a `ScreenCaptureKit` audio-only stream (`SystemAudioCapture`, with a permission preflight). Both delivered as 16 kHz mono Float32, tagged `me` (mic) / `them` (system). Apple's echo cancellation is off (see M2).
 
-**Transcription.** Apple SpeechAnalyzer/SpeechTranscriber (macOS 26), on-device. True streaming with built-in endpointing — no hand-rolled VAD — one analyzer per source (mic/system). Final results drop `um`/`uh`/`er`/`erm` fillers and collapse immediately repeated words before they reach the live feed, saved note or sidecar. Emits `Utterance{id, source, text, t0, t1}`. (Originally whisper.cpp; see the dated sections below for the switch and removal.)
+**Transcription.** Apple SpeechAnalyzer/SpeechTranscriber (macOS 26), on-device, one engine per source (`AppleSpeechEngine`), locale from the `sttLocale` preference. Streaming with built-in endpointing; volatile (in-progress) text shows at the feed tail. `Recorder` takes each final result, drops `um`/`uh`/`er`/`erm` and immediately repeated words (`cleanedTranscript`) and non-speech junk, then dedupes echo: while system audio is captured a mic final is held 1.5 s, and dropped if its distinctive words (>3 chars) overlap ≥0.7 (on the smaller set) with a `them` line from the last 15 s — or, for a short reply with no distinctive word, exactly matches one. A `them` line arriving later also removes a matching mic line from the previous 12 s. Emits `Utterance{id, time, source, text, latencyMs}` (`text` is mutable for corrections). Start, recovery and teardown run on one serial lifecycle queue. (Originally whisper.cpp; see *STT engine switch* and *Whisper removed*.)
 
-**SidecarManager.** Spawns the Node sidecar and supervises it: on a crash it restarts with exponential backoff (1/2/4/8 s, capped 8 s, ≤5 attempts; a crash that follows a >60 s healthy run resets the budget, so only a tight loop exhausts it), then replays the session context the running conversation depends on — `session_start` plus the lane/auto config (not the utterance history; the classifier session is gone, so new utterances resume in a fresh sidecar session). A deliberate `stop()` is distinguished from a crash and cancels any pending restart. Sends to a dead sidecar surface on the status line rather than failing silently; budget exhausted → status asks the user to stop and start listening again. Transport: newline-delimited JSON over stdin/stdout. Chosen over WebSocket: no port management, lifecycle tied to parent, trivially debuggable. The sidecar's stderr is funnelled into the app's log file (see Logging) rather than left to vanish in a packaged app.
+**AppServices.** Launch-lifetime owner of the shared `TranscriptStore` (utterances, cards, editorial notes, volatile text, status), `SidecarManager` and `SessionWriter`, started from the Sessions scene so saved sessions can be queried with no recording open. The `Recorder` belongs to the recording window and is held weakly. Scenes (`AdvisorApp.swift`): **Sessions** (the main window, opens at launch), **Recording** (a single-instance SwiftUI `Window`, ⌘N; never auto-opens) and **Settings**. There is no menu-bar item and no `NSPanel`: the recording window's **Float** toggle raises it to `.floating` level on all Spaces. A first-run terms sheet gates recording (`TermsAcceptance`).
+
+**Recording window** (`TranscriptView`, `ListeningToolbar`, `AskBar`, `RecordControl`). Toolbar: Listen / Stop / Resume with the timer (Stop is resumable), mic mute, audio source, then the folder indicator, Name, Context and Tags chips, Auto cards, Hide Transcript, Summarise, Float and Export. The Ask bar sends free-text queries. Closing the window ends the session; if cards are still researching, `WindowCloseGuard` (`SessionClose.swift`) asks whether to wait for them or stop them. ⌘Q runs the same close through `QuitSequence` (`AppServices.shutdown`, 5 s deadline, then a synchronous save, sidecar stop and `_exit`).
+
+**Feed** (`Feed`, `FeedView`). One model and view for both windows: transcript runs (paragraphs with their time in the margin), cards anchored under the line that triggered them, editorial NOTE cards (`FeedNoteView`) and headings, in chronological order. The live feed follows the tail unless the user scrolls up. Right-click a line for AI actions (Answer / Context / Fact check), a correction, or Add note. Cards collapse, copy, skip or delete, and take follow-ups. Each window supplies its behaviour through `FeedActions`.
+
+**Sessions browser** (`SessionsView`, `SessionArchive`, `SessionDetail`, `TranscriptDoc`, `NoteEdit`, `AnswerPanel`). Master/detail: search (a `#tag` term filters by tag) and a date-grouped list with folders (each folder can hold a default context and tags, and has its own record button); the detail renders the saved note through the shared feed. Ask and Summarise stream into the Answer panel and can be stopped; research actions, follow-ups, corrections and notes work on saved notes too. Edits splice the note's lines (`NoteEdit`) and decline if the note changed underneath; the note still being recorded is read-only there.
+
+**SessionWriter** (with `SessionMarkdown`). One markdown note per session, `yyyy-MM-dd-HHmmss.md`, in the session folder (the `sessionDir` preference, default `~/Library/Application Support/Advisor/sessions/`) or a folder sub-directory of it. Frontmatter: `name`, `started`, `ended`, `context`, `tags`. Body: an optional `# Summary`, then `# Transcript` with cards and NOTE blocks inline as blockquotes at their place in the conversation; the Sessions browser appends Ask answers under `# Follow-ups`. Each card is written as `Card.persisted`: a finished card as it stands, one mid-follow-up or mid-re-summarise as its last completed answer, one still on its first run not at all. Rewritten on a 2 s debounce; transcripts only, no audio; the vault is never written. **Export** copies the note byte-identical (`SessionWriter.export`).
+
+**SidecarManager.** Spawns the Node sidecar and supervises it: on a crash it fails every still-researching card and pending document request, restarts with exponential backoff (1/2/4/8 s, capped 8 s, ≤5 attempts; a crash after a >60 s healthy run resets the budget), then replays `session_start` plus the lane/auto config (not the utterance history — the classifier session is gone). A deliberate `stop()` cancels any pending restart. Authentication: subscription by default; in API-key mode the Keychain key is injected as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` at spawn (`apiKeyEnv`), and each session start re-reads it, replacing the process if it changed. Saved-session requests route back by request id (`discardDocumentRequest` drops one and cancels it). Sends to a dead sidecar surface on the status line. Transport: newline-delimited JSON over stdin/stdout — no port management, lifecycle tied to the parent, trivially debuggable. The sidecar's stderr goes into the app's log file.
 
 **Logging.** All app and sidecar diagnostics go through `FileLog` (`Log.swift`) to `~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so the file shows up under Console.app → Log Reports and survives a packaged run (where stderr goes nowhere). The app is the *sole* writer: its own lines arrive via `appLog.write`, the sidecar's stderr is captured by `SidecarManager` and funnelled in via `appLog.appendSidecar` (lines reassembled across chunk boundaries, each wall-clock-timestamped). One serial queue → no write contention and a single chronological timeline that interleaves app and `[sidecar +Xs]` lines. Mirrored to stderr too for dev runs. Rotates by size (5 MB), keeping one previous file (`advisor.log.1`).
 
-**OverlayUI.** Non-activating `NSPanel` (`.floating`, `.nonactivatingPanel`) hosting SwiftUI: vertical card feed (newest top), collapsible live transcript drawer, query box, listening indicator. Menu-bar item: start/stop listening, open session history. Panel never takes key focus except when the query box is clicked.
+**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, saved contexts and tags never reach the sidecar). Tabs: Agent (provider, model, effort, authentication, connector actions), Triggers, Transcription, Contexts, Tags, General.
 
-**SessionStore.** One markdown file per session in `~/Library/Application Support/Advisor/sessions/YYYY-MM-DD-HHmmss.md` (second precision, so a same-minute restart can't overwrite the prior transcript): YAML frontmatter (start/end) then the conversation, with finished cards (`done`/`failed`) embedded inline as `>`-quoted "chat" blocks at their place in the stream — the same format the window shows (`SessionMarkdown.inline`). Written incrementally; transcripts only, no audio (decided). Vault is never written. The toolbar **Export** button (share icon → save panel) is just *share the current note*: it flushes and copies the on-disk file to a chosen location, byte-identical (`SessionWriter.export`).
+### TS sidecar
 
-### TS sidecar (Claude Agent SDK)
+**main.ts.** Reads NDJSON from stdin and dispatches it; holds the live session prompt (seeded by `session_start`, replaced by `session_context`, prefixed to each task), the lane pools and the transient-lane runners. Sends `hello` on startup. Stray rejections and exceptions are logged, not fatal (issue #45).
 
-**TriggerDetector.** Maintains rolling transcript window (~2 min). On each utterance (debounced 1.5 s of silence-or-topic-shift), one classify call (on the shared model — see the 2026-06-13 backend note below) classifies: `question | entity | claim | none` + extracted subject. Dedup: don't re-trigger on a subject already carded in the last 10 min.
+**AutoPipeline** (`autoPipeline.ts`). Each utterance or note restarts a 1.5 s quiet debounce; then the classifier gets only the lines past its cursor, consecutive same-source lines merged. The cursor commits only on a successful classify (a failed window is re-fed, up to 3 times). New subjects are deduped for 10 minutes (normalised in any script), queued (≤20) and dispatched to free research lanes, anchored to the last line of the window. Turning Auto cards off drops the pending classify, queued research and any in-flight classify result.
 
-**ResearchAgent.** Per trigger, an Agent SDK query with budget caps (max turns ~6, streaming). Tools: web search; read-only filesystem MCP rooted at `~/Documents/Notes` and configured repo dirs; Atlassian + Slack MCPs. System prompt per trigger type (answer / context / fact-check). Fact-check answers must cite or return "couldn't verify" — never guess. Emits card immediately as placeholder, then streams body updates.
+**Classifier** (`trigger.ts`). A persistent session on the shared provider and model, with no tools and none of the user's settings; returns triggers of kind `question | context | factcheck` (only the kinds enabled in Preferences, at most 2 per pass) with a subject and query, steered by the sensitivity preference (conservative / balanced / eager). Warmed at session start; 30 s timeout. A `question` becomes an `answer` card.
 
-**QueryHandler.** F14 on-demand queries: same agent, full current-session transcript as context, results stream to a pinned card.
+**Card lanes** (`lanes.ts`). Every card-answering session takes `cardLaneOptions`: one system prompt (`buildResearchSystem()`: persona plus fixed operating rules — lead with the answer, notes first then web, no narration, cite, say "couldn't verify", never ask), the tools `WebSearch`, `WebFetch`, `Read`, `Grep`, `Glob` plus the user's own connectors, and the effort preference. The per-task instruction comes from `researchTask` (answer / context / fact-check), `replyTask`, `summaryTask`, `documentQuestionTask` or `documentResearchTask`. Two kinds of lane:
+
+- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and one query lane. `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation.
+- *Transient, one-shot* — card follow-ups (≤3 at once), the live summary, and saved-session tasks (ask, research, follow-up, summarise; ≤2 at once). Created per request, disposed after, never holding a pool slot.
+
+**Query lane.** The Ask box (a `query` card with no anchor, so it sorts in at the time of asking) and right-click actions (the action's kind, anchored under the clicked line). One at a time — a second gets an `error` frame. Gets its conversation through its own cursor, like a research lane.
+
+**guardedRun / cancel** (`guardedRun.ts`, `cancel.ts`). One run skeleton for every card, reply, summary and document task: stream, then a terminal frame, all suppressed once the id is cancelled. `cancel` interrupts whichever lane holds the id and answers on the right channel (`card_update` or `document_answer`).
+
+**Agent backends** (`agent.ts`, `codex.ts`, `providers.ts`). One `Agent` interface (`run` / `reset` / `interrupt`) behind a provider registry; one provider and model serve every lane. `AgentSession` is a long-lived Claude Agent SDK session fed by streaming input, loading the user's own Claude configuration (`settingSources: ["user"]` — where personal context such as notes locations belongs), `maxTurns` 40, 180 s per task. `CodexAgentSession` wraps `@openai/codex-sdk` (measured far slower for cards — see the 2026-06-13 sections).
+
+**Sandbox.** Claude: one policy, `toolDecision` — web, `ToolSearch`, connector reads/searches, and non-sensitive `$HOME` reads by absolute or `~` path; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. Codex: the same denylist as a Seatbelt profile, the CLI running under `sandbox-exec` (`codexSandbox.ts`). See *Agent sandboxing* and *Codex runs under a Seatbelt profile*.
 
 ## IPC contract (NDJSON, one object per line)
 
-Swift → sidecar:
+Types live in `sidecar/src/protocol.ts`. Swift → sidecar:
 
 ```json
 {"type":"session_start","sessionId":"...","ts":...,"context":"..."}
 {"type":"session_context","text":"<live edit of the session prompt>"}
-{"type":"utterance","id":"u123","source":"them","text":"...","ts":...}
-{"type":"query","id":"q7","text":"...","action":"answer|context|factcheck","triggerId":"u123"}
+{"type":"utterance","id":"<utterance uuid>","source":"me|them","text":"...","ts":...}
+{"type":"note","id":"...","text":"<editorial note>","ts":...}
+{"type":"query","id":"q7","text":"...","action":"answer|context|factcheck","triggerId":"<utterance uuid>"}
 {"type":"config","auto":true,"lanes":3}
-{"type":"cancel","cardId":"c9"}
-{"type":"card_reply","cardId":"c9","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","transcript":"them: ...\nme: ..."}
-{"type":"ask_document","id":"d3","question":"...","document":"<the whole saved transcript note>"}
-{"type":"research_document","id":"d4","action":"answer|context|factcheck","text":"<selected passage>","document":"<the whole saved transcript note>"}
-{"type":"reply_document","id":"d5","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","document":"<the whole saved transcript note>"}
+{"type":"cancel","cardId":"<card or request id>"}
+{"type":"card_reply","cardId":"...","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","transcript":"them: ...\nme: ..."}
+{"type":"summarise_live","cardId":"<existing summary card, on re-summarise>","transcript":"..."}
+{"type":"ask_document","id":"d3","question":"...","document":"<the whole saved note>"}
+{"type":"research_document","id":"d4","action":"answer|context|factcheck","text":"<selected passage>","document":"<the whole saved note>"}
+{"type":"reply_document","id":"d5","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","document":"<the whole saved note>"}
+{"type":"summarise_document","id":"d6","transcript":"<the whole saved note>"}
 {"type":"session_end"}
 ```
+
+`action`/`triggerId` on `query` are set by right-click actions and absent for the Ask box; `config` may carry either field alone.
 
 Sidecar → Swift:
 
 ```json
-{"type":"card","id":"c9","trigger":"u123","kind":"answer|context|factcheck|query","title":"...","body":"...","state":"pending|streaming|done|failed|cancelled"}
-{"type":"card_update","id":"c9","body":"...","state":"streaming"}
-{"type":"document_answer","id":"d3","body":"...","state":"pending|streaming|done|failed"}
+{"type":"hello","version":1}
+{"type":"card","id":"...","trigger":"<utterance uuid>","kind":"answer|context|factcheck|query|summary","title":"...","body":"...","state":"pending|streaming|done|failed|cancelled"}
+{"type":"card_update","id":"...","body":"...","state":"pending|streaming|done|failed|cancelled"}
+{"type":"document_answer","id":"d3","body":"...","state":"pending|streaming|done|failed|cancelled"}
 {"type":"error","fatal":false,"message":"..."}
 ```
 
-Versioned with a `hello` exchange at startup.
-Card ids are opaque: new cards include a random sidecar-process incarnation
-prefix, so a restarted process cannot collide with cards retained by Swift.
+The sidecar sends `hello` once at startup; the app ignores it — there is no version handshake. The app also accepts optional `sources` and `verdict` fields on card frames, which the sidecar doesn't send yet. Card ids are opaque: they carry a random per-process prefix, so a restarted sidecar cannot collide with cards the app still holds.
 
-## Latency budget (best efforts; ≤5 s utterance → useful card is the aspiration)
+## Latency
 
-| Stage | Budget |
+The aspiration is ≤5 s from utterance to a useful card. As measured, it is not met (figures from the M4 note, the 2026-06-13 latency investigation and the 2026-10-07 *Effort preference* log):
+
+| Stage | Now |
 |---|---|
-| SpeechAnalyzer endpoint + final result | 0.3–1.0 s |
-| Trigger classify (shared model) | 0.5 s |
-| Placeholder card visible | **≤2 s total** |
-| Agent first useful content (streamed) | +2–3 s |
+| Final transcript | SpeechAnalyzer endpointing; mic finals held 1.5 s more while system audio is captured (echo dedup) |
+| Quiet before classify | 1.5 s debounce |
+| Classify (warm persistent session) | ~1–1.5 s; the 5–10 s cold spawn is paid by a warm-up at session start |
+| Speech → trigger | ~2 s |
+| Placeholder card | at dispatch, as soon as a research lane is free |
+| Trigger → first card text | median 30.5 s (p90 52.7 s) |
+| Trigger → finished card | 33.4 s |
 
-The placeholder-then-stream pattern is what makes the budget achievable; a full agentic search with tool calls will often exceed 3 s on its own.
+The placeholder-then-stream pattern keeps the card visible early, but text streams per assistant block, not per token, and the two-pass "From your notes:" prompt mostly doesn't produce an early block (155 of 184 cards arrived as one block). Token streaming and fast local note hits remain open — see *Effort preference*.
 
 ## Error handling
 
-Sidecar crash → supervisor restarts with exponential backoff (≤5; a healthy run resets the budget), replays the session context (`session_start` + lane/auto config), status line shows the crash and the restart attempt; budget exhausted → status asks the user to stop and start listening again. Apple STT result-stream failure (for example Speech helper disconnect `NSCocoaErrorDomain` 4099) → status line shows recovery, audio sources drain before both speech engines restart, then sources resume; simultaneous mic/sys failures are coalesced, and a failed restart stops listening with the error. Recorder start, recovery, and teardown share one serial lifecycle queue so Stop/close cannot overlap or be outlived by suspended setup. LLM/tool failure → card flips to `failed` with reason; never silent. Anthropic key missing/invalid → blocking banner at session start, not mid-conversation.
+- **Sidecar crash** → in-flight cards fail and pending document requests fail; supervised restart with backoff and session replay (above); the status line shows the crash and each attempt; once the budget is spent it asks the user to stop and start listening again. Inside the sidecar, a stray rejection or exception is logged rather than killing the process.
+- **Apple STT result-stream failure** (for example a Speech helper disconnect, `NSCocoaErrorDomain` 4099) → the status line shows recovery, audio sources drain before both speech engines restart, then sources resume; simultaneous mic/system failures coalesce, and a failure during that restart stops listening with the error.
+- **Agent failure or timeout** → the card flips to `failed` with the reason, never silently; a failed pooled lane is reset and replays the conversation on its next card; a failed classify is re-fed (bounded).
+- **Authentication** → no blocking banner. An API key is checked when entered in Preferences (`AuthValidator`), and re-read at each session start; a key that later fails surfaces as a failed card.
 
 ## Trade-offs made
 
 | Decision | Alternative | Why |
 |---|---|---|
 | stdio NDJSON | WebSocket/gRPC | Simplest; lifecycle coupling is a feature here |
-| Trigger via Haiku call | Local heuristics/model | Quality >> ~$0.001/utterance; revisit if cost ticker says otherwise |
-| Segment-based whisper | True streaming decode | Far simpler; overlap mitigates word splits; M0 validates latency |
-| Placeholder + stream cards | Wait for complete answer | Only way to feel responsive within budget |
+| Apple SpeechAnalyzer, on-device | whisper.cpp (removed 2026-06-14) | Streaming endpointing, no hallucination from noise, far less echo, no native build or model to ship |
+| Classifier on the shared model, persistent session fed only new lines | A dedicated Haiku call; local heuristics | One provider/model knob; ~1–1.5 s warm; quality over cost (cost tracking was removed 2026-06-14) |
+| Persistent pooled lanes with per-lane cursors | A fresh agent per card | Skips the 5–10 s cold spawn; follow-ups resolve referents from session memory |
+| Placeholder + stream cards | Wait for complete answer | The card is visible at dispatch, even though the answer isn't |
+| Float toggle on an ordinary window | Non-activating `NSPanel` overlay | Simpler and behaves like any window; revisit if focus-stealing annoys |
+| The user's own Claude config and connectors | Built-in vault/Jira/Slack integrations | Keeps the app generic: personal context lives in `~/.claude`, not in Advisor |
 | Markdown session files | SQLite | Human-readable, greppable, matches "local markdown" decision; revisit if search over history gets slow |
 
 ## Milestones
@@ -116,7 +172,7 @@ Sidecar crash → supervisor restarts with exponential backoff (≤5; a healthy 
 - **M2: ✅ 2026-06-12.** System audio (ScreenCaptureKit) + me/them tagging + best-effort echo dedup (text overlap vs last 15 s of `them`; `me` delayed 1 s). Apple AEC abandoned: fails (-10875) on multichannel Studio Display output, and mutes the mic when it does initialise. Dedup imperfect but accepted — attribution is cosmetic for Advisor's purpose; duplicates are further caught by trigger-level dedup (M4).
 - **M3: ✅ 2026-06-12.** Sidecar + IPC + on-demand query (F14) end-to-end. `sidecar/` (Node 22 + Agent SDK, NDJSON over stdio, web search + Vault read-only, Claude Code auth); Swift `SidecarManager` + cards pane + query box. Verified live. Note: his npm config has `omit=dev` — install with `npm install --include=dev`.
 - **M4: ✅ 2026-06-12.** TriggerDetector + automatic cards (F8–F10). Haiku classifier in a *persistent* streaming-input Agent SDK session (~1 s/classify after first; cold spawn per call was ~10 s — the original design's 0.5 s budget was unrealistic via the SDK). Aggressive on questions (incl. musings), conservative on factcheck; named systems/acronyms trigger context. Subject dedup 10 min; research queue sequential. Remaining latency: research agent still cold-spawns per card (~10–30 s incl. tool use) — candidate for the same persistent-session treatment.
-- **M5: ✅ 2026-06-13.** Persistent research/query sessions (per-lane transcript-delta cursors; follow-up questions resolve referents from session memory). Cost reporting via per-task `total_cost_usd` deltas → ticker in toolbar. Session markdown files in `~/Library/Application Support/Advisor/sessions/` (debounced rewrite; late cards included). "Float" toggle (floating window, all spaces; named per macOS convention) instead of a full NSPanel overlay — revisit if focus-stealing annoys. "Sessions" button opens the folder in lieu of an in-app history view.
+- **M5: ✅ 2026-06-13.** Persistent research/query sessions (per-lane transcript-delta cursors; follow-up questions resolve referents from session memory). Cost reporting via per-task `total_cost_usd` deltas → ticker in toolbar. (Superseded 2026-06-14: cost tracking and the ticker were removed end to end, commit `f663cf3`.) Session markdown files in `~/Library/Application Support/Advisor/sessions/` (debounced rewrite; late cards included). "Float" toggle (floating window, all spaces; named per macOS convention) instead of a full NSPanel overlay — revisit if focus-stealing annoys. "Sessions" button opens the folder in lieu of an in-app history view. (Superseded 2026-06-18: an in-app Sessions browser replaced it — see *Sessions browser (master/detail) + ask-and-append*.)
 
 ## Post-M5 tuning (2026-06-13, after first real-meeting test)
 
@@ -314,7 +370,7 @@ Every lane — trigger classifier, research lanes, manual query lane — runs on
 
 Auth follows the same principle as Claude — **no API key**: the Codex SDK reuses the user's Codex CLI login (`~/.codex/auth.json`). The platform binary ships transitively via `@openai/codex-sdk` → `@openai/codex` → `@openai/codex-darwin-arm64` in `node_modules`, so packaging needs no global `codex` install. Codex has no system-prompt parameter, so Advisor's system prompt is prepended to the first turn of each thread; later turns inherit it from thread context.
 
-**Sandbox — deliberately coarser than Claude's, documented not hidden.** Claude runs under a per-call `canUseTool` policy (path denylist for reads, action-pattern gate for MCP). The Codex SDK exposes no per-call hook, so `CodexAgentSession` maps to `sandboxMode: "read-only"` + `approvalPolicy: "never"` (no writes, edits, escalation, or network-mutating commands), with web search + network enabled only when the component has a `Web*` tool (research/query yes, classifier no). Residual gaps versus Claude: a read-only Codex *shell* command can still read sensitive dotfiles (`~/.ssh` etc.) — there is no path denylist — and Codex MCP servers come from `~/.codex/config.toml`, so they are not gated by `allowMcpActions`. Accept for a single-user local tool; revisit if Codex gains per-tool callbacks.
+**Sandbox — deliberately coarser than Claude's, documented not hidden.** Claude runs under a per-call `canUseTool` policy (path denylist for reads, action-pattern gate for MCP). The Codex SDK exposes no per-call hook, so `CodexAgentSession` maps to `sandboxMode: "read-only"` + `approvalPolicy: "never"` (no writes, edits, escalation, or network-mutating commands), with web search + network enabled only when the component has a `Web*` tool (research/query yes, classifier no). Residual gaps versus Claude: a read-only Codex *shell* command can still read sensitive dotfiles (`~/.ssh` etc.) — there is no path denylist — and Codex MCP servers come from `~/.codex/config.toml`, so they are not gated by `allowMcpActions`. Accept for a single-user local tool; revisit if Codex gains per-tool callbacks. (Superseded 2026-08-10: the Codex CLI now runs under a Seatbelt profile built from the same path denylist — see *Codex runs under a Seatbelt profile*.)
 
 **One shared backend, not per-component (2026-06-13).** The three independent lane choices (classifier, research, query) collapsed into one top-level `{provider, model}` used by every lane. Rationale: the per-component split was never used in practice — research and query already shared a model, and a separately-tuned classifier added a knob without a payoff. A scalar `model` (`""` = provider default) replaces the per-provider `models` map; switching provider now forgets the prior model (the UI resets it on change) rather than remembering one per provider. Consequence accepted: the classifier no longer defaults to Haiku — it follows the shared model (default Sonnet), trading a little classify latency/cost for a single knob. **No config migration** — still early testing, so a stale `config.json` is simply dropped (its unrecognised keys ignored, missing keys defaulted) rather than normalised. Both sides keep a tolerant decoder (sidecar `mergeConfig()`, Swift `init(from:)`) only so missing keys default instead of throwing.
 
@@ -399,7 +455,9 @@ cluster — waveform + timer + pause/stop + mic mute — audio-source menu, Cont
 chip, Auto-cards switch, Float, Export, Sessions; idle collapses to a single
 Listen pill), `AskBar` (sparkle input + ⌘↵), and `ListeningCardView` (type/verdict
 pill, Researching state, copy/collapse/expand + dismiss, themed Markdown body,
-trigger-quote + sources footer, follow-up input). The transcript is a centred
+trigger-quote + sources footer, follow-up input). (Superseded 2026-10-06:
+`FeedCardView` replaced `ListeningCardView` in both windows — see *One feed for
+both windows*.) The transcript is a centred
 812 pt column with a day divider and flowing paragraphs that group consecutive
 utterances, breaking only on a >1 s gap or an injected card, with a blinking
 interim line.
@@ -414,7 +472,8 @@ card changes. The session-prompt box moved from a fixed strip below the toolbar
 into the Context-chip popover; mic mute moved into the record cluster.
 
 The summarise control (a transient AskBar action) was removed shortly after —
-post-meeting summaries remain out of scope (REQUIREMENTS).
+post-meeting summaries remain out of scope (REQUIREMENTS). (Reversed 2026-06-22:
+an on-demand Summarise control returned — see *Summarise a conversation*.)
 
 ### 2026-06-18 — Markdown export + one session format (inline cards)
 
@@ -562,7 +621,9 @@ rule never bites) and started once from the Sessions scene's `.task`. It publish
 `SessionsView` is unchanged. The **`Recorder`** (the audio device) stays
 window-owned — built on demand by the recording window — and `AppServices` holds it
 only `weak`, purely so the terminate cleanup (`onTerminate`, registered once in
-`start()`) can stop it before `_exit(0)`.
+`start()`) can stop it before `_exit(0)`. (Superseded 2026-10-06: `onTerminate` is
+gone — ⌘Q runs `QuitSequence`, which calls `AppServices.shutdown`, the same close
+as the window's; see *⌘Q saves the recording's tail* below.)
 
 **Close = clean stop.** Closing the recording window mid-session ends *that*
 session — `onDisappear` runs the stop branch (stop audio, `session_end`,
@@ -1119,7 +1180,11 @@ right-click actions and `#32` corrections still map to the right utterances
 Transcript cards use the recessed `surfaceCardInset` fill (vs `surfaceCard` for
 answer/context cards) so transcript reads as a quieter, sunken surface and answer
 cards stand out — the visual hierarchy is fill-tint, not chrome. Applied to both
-the live feed and saved sessions so the two stay identical.
+the live feed and saved sessions so the two stay identical. (Reversed: the
+Sessions window dropped the run cards for plain text with margin times on
+2026-10-04 — see *Sessions window restyle* — and the recording window followed on
+2026-10-06, both now rendering `FeedTranscriptRun`; see *One feed for both
+windows*.)
 
 ## Editorial notes injected into the transcript (2026-06-24, issue #34)
 
@@ -1155,7 +1220,9 @@ Persistence mirrors the inline-card format: `SessionMarkdown.noteBlock` writes a
 to a `.note` block (distinct from `.card`) so the Sessions browser re-renders it
 in the same green chrome (`SessionsView.noteBlock`). The green styling is
 duplicated live (`EditorialNoteView`) vs saved, mirroring the existing
-`transcriptCard`/`cardBlock` live-vs-browser split. Notes aren't counted as cards
+`transcriptCard`/`cardBlock` live-vs-browser split. (Superseded 2026-10-06: one
+`FeedNoteView` renders notes in both windows — see *One feed for both windows*.)
+Notes aren't counted as cards
 or questions in `SessionDetail`, and (known minor gap) aren't yet in the browser
 search haystack.
 
@@ -1218,10 +1285,13 @@ so a Preferences edit shows without a relaunch. Load copies the text — the fol
 keeps its own `.context.md`, not a link to the saved context.
 
 Inheritance reuses the `#35` `pendingFolder` bridge: when the recording window opens
-via a folder's record button, `seedContextFromPendingFolder` sets `sessionContext`
-from that folder's saved context — at `setup` for a fresh window, and via a
-`pendingFolder` onChange for an already-open one. It's a **seed, not a lock**: the
-user edits it freely per session, and it's gated on `sessionStart == nil` so it never
+via a folder's record button, `seedDefaultsFromPendingFolder` seeds the recording
+draft's context from that folder's saved context (`RecordingDraft.seedFromFolder`,
+loading `FolderRecordingDefaults` in `TranscriptWindowContext.swift`; since #76 the
+same seed also carries the folder's default tags) — at `setup` for a fresh window,
+and via a `pendingFolder` onChange for an already-open one. It's a **seed, not a
+lock**: the user edits it freely per session, and it's skipped once `sessionStart`
+is set so it never
 disturbs (or pushes stale context to the sidecar for) a live session.
 
 ## Failed classify no longer drops its window (2026-07-03, issue #43)
@@ -1444,6 +1514,9 @@ worth not re-litigating:
   both ends. The handler lives in a side-effect-free `cancel.ts` so it is testable
   without main.ts's stdin/lane globals. The document-cancel path is latent today
   (the history-browser ask UI has no cancel affordance) but no longer a dead end.
+  (Superseded 2026-10-06: Skip on a saved research card and the Sessions Answer
+  panel's ✕ now use it, through `SidecarManager.discardDocumentRequest` — see
+  *Stopping Ask and Summarise in Sessions* under *One feed for both windows*.)
 
 - **One cancel-aware run skeleton (`guardedRun`, #66).** `runCard`,
   `runCardReply`, `runDocumentTask` and `runSummariseLive` had repeated the same
@@ -1884,4 +1957,4 @@ open.
 
 ## Revisit as it grows
 
-Echo suppression approach (M2 will tell); Haiku trigger cost at daily use; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
+Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

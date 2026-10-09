@@ -136,8 +136,8 @@
       <li><h3>List</h3><p>Sessions are grouped by day, with search and a filter menu for this week and sort order. Each row shows the title, a one-line summary, the duration, the number of cards and the session's tags. Type #tag to filter by tag.</p></li>
       <li><h3>Detail</h3><p>The questions you asked and the transcript, with each card where it appeared, laid out exactly as in the recording window.</p></li>
       <li><h3>Same controls as recording</h3><p>Collapse, delete and follow up on cards, hide the transcript, and right-click a line to research it, add a note or correct a word. Every change is saved to the session's note.</p></li>
-      <li><h3>Ask a past session</h3><p>Ask a question about a saved session. The answer is added to its note under Follow-ups.</p></li>
-      <li><h3>Rename, export, show and delete</h3><p>From the session's … menu, or by right-clicking it in the list.</p></li>
+      <li><h3>Ask a past session</h3><p>Ask a question about a saved session. The answer is added to its note under Follow-ups. Stop a question or a summary while it runs and nothing is saved; a stopped question goes back in the field.</p></li>
+      <li><h3>Rename, export, share, show and delete</h3><p>From the session's … menu, or by right-clicking it in the list. Share sends the Markdown file through Mail, AirDrop, Messages and the rest of the macOS share sheet.</p></li>
     </ul>
   </div>
 </section>
@@ -149,8 +149,9 @@
       <p>Folders, tags and saved contexts.</p>
     </div>
     <ul class="items">
-      <li><h3>Folders</h3><p>Group sessions into folders. Each folder has its own record button, so a new session is saved straight into it. Move older sessions with Move to Folder.</p></li>
-      <li><h3>Folder context</h3><p>Give a folder a standing brief, such as the background to a weekly meeting. Sessions started there begin with it, and you can still edit it per session.</p></li>
+      <li><h3>Folders</h3><p>Group sessions into folders. Each folder has its own record button, so a new session is saved straight into it. Move older sessions by dragging them onto a folder or with Move to Folder.</p></li>
+      <li><h3>Folder context</h3><p>Give a folder a standing brief, such as the background to a weekly meeting. Sessions started there begin with it, and you can still edit it per session. Load fills it from one of your saved contexts.</p></li>
+      <li><h3>Folder tags</h3><p>Give a folder default tags. New sessions started there get them, and you can change them per session.</p></li>
       <li><h3>Tags</h3><p>Create coloured tags and apply them from the recording window or the Sessions window. Renaming a tag updates it everywhere.</p></li>
       <li><h3>Saved contexts</h3><p>Keep the context for meetings you have often, such as a stand-up, a customer call or an interview, and pick it instead of retyping it.</p></li>
       <li><h3>Plain Markdown</h3><p>Each session is a Markdown file with its cards included, in a folder you choose. There's no database, so any notes app can open them.</p></li>
@@ -180,7 +181,7 @@
     </div>
     <ul class="items">
       <li><h3>On your Mac</h3><p>Transcription runs on-device, and Advisor only listens after you press Listen.</p></li>
-      <li><h3>Claude</h3><p>Every tool call is checked against a policy that allows web search, connector reads and searches, and read-only access to your home folder. There's no shell and no file writing. Credential locations such as <code>~/.ssh</code>, <code>~/.aws</code> and keychains are blocked, and symlinks are resolved first so a link can't get round the list.</p></li>
+      <li><h3>Claude</h3><p>Every tool call is checked against a policy that allows web search, connector reads and searches, and read-only access to your home folder. There's no shell and no file writing. Credential locations such as <code>~/.ssh</code>, <code>~/.aws</code> and keychains are blocked, and symlinks are resolved first so a link can't get round the list. The policy is checked before Claude Code's own permission rules, so allow rules in your Claude settings can't widen it.</p></li>
       <li><h3>Connector actions on Claude</h3><p>A connector call that isn't recognised as a read or a search counts as an action, and actions are blocked unless you turn on Allow connector actions in Settings.</p></li>
       <li><h3>Codex</h3><p>Codex has no per-call check, so Advisor runs it inside a macOS sandbox built from the same list of blocked locations. Codex, and anything it starts, can't read those locations or write files outside its own state and temporary folders. It's coarser than the Claude policy: Codex can run read-only shell commands, can read its own login in <code>~/.codex</code>, and uses the connectors in your <code>~/.codex/config.toml</code>, which Allow connector actions doesn't cover.</p></li>
     </ul>
@@ -208,7 +209,8 @@
       <p>Everything is in one Settings window (⌘,).</p>
     </div>
     <ul class="items">
-      <li><h3>Options</h3><p>The number of parallel agents, connector permissions, how often cards appear and which kinds, provider and model, saved contexts, tags, system-audio capture, transcription language, and where sessions are stored.</p></li>
+      <li><h3>Options</h3><p>The number of parallel agents, connector permissions, how often cards appear and which kinds, provider and model, card effort, saved contexts, tags, system-audio capture, transcription language, and where sessions are stored.</p></li>
+      <li><h3>Effort</h3><p>How much Claude thinks before answering a card. Low is fastest and Max slowest; Default follows your own Claude Code setting. It covers cards, follow-ups, questions and summaries, and a level the model can't use is lowered to one it can. Claude only.</p></li>
       <li><h3>Appearance</h3><p>Light, dark, or follow the system.</p></li>
     </ul>
   </div>

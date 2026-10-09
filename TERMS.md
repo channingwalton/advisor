@@ -32,16 +32,18 @@ can:
   keychains, and cannot write to or delete anything outside their own working
   state;
 - perform connector actions (send / create / update / …) — but only if you
-  enable "Allow MCP actions" in Preferences, which is off by default.
+  enable "Allow connector actions" in Preferences, which is off by default.
 
 On the Codex backend two of those bounds are enforced differently and one is
 weaker. Advisor runs the Codex CLI inside a macOS sandbox that applies the same
 blocked locations and the same write restriction to the CLI and to everything it
-starts. However, connectors configured in your own `~/.codex/config.toml` are
-not gated by the "Allow MCP actions" preference, and the Codex agent can read
-its own stored provider credentials in `~/.codex`, which must stay readable for
-it to sign in. If either matters to you, use the Claude backend, which applies
-every restriction in-process and per tool call.
+starts, including the read-only shell commands the Codex agent can run (the
+Claude backend has no shell). However, connectors configured in your own
+`~/.codex/config.toml` are not gated by the "Allow connector actions"
+preference, and the Codex agent can read its own stored provider credentials in
+`~/.codex`, which must stay readable for it to sign in. If either matters to
+you, use the Claude backend, which applies every restriction in-process and per
+tool call.
 
 You decide which connectors Advisor can reach and which permissions are
 enabled, and you are responsible for those choices and for the consequences of
@@ -71,8 +73,12 @@ accept no responsibility for recordings you choose to make.
 
 Sessions, transcripts and settings are stored locally on your Mac, and
 transcription happens on-device. We do not receive or store your recordings or
-transcripts. Conversation excerpts and queries are sent to the AI provider you
-configured, under that provider's own terms and privacy policy. You are
+transcripts. Text is sent to the AI provider you configured, under that
+provider's own terms and privacy policy: while Auto cards is on, the live
+transcript (including notes you add) is sent as the conversation goes on;
+cards and questions also send the session's context and the conversation so
+far; questions about a saved session send its transcript; and the contents of
+any home-folder files or connector results agents read are sent too. You are
 responsible for backing up your data.
 
 ## 7. Third-party services
@@ -120,9 +126,7 @@ replacement or refund if it is faulty. These terms do not limit those rights.
 
 ## 12. Termination
 
-This licence ends automatically if you materially breach these terms; when it
-ends you must stop using Advisor and delete your copies. You can end the
-agreement at any time by deleting Advisor.
+You can end the agreement at any time by deleting Advisor.
 
 ## 13. Changes to these terms
 
