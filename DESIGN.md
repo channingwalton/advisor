@@ -92,7 +92,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Agent backends** (`agent.ts`, `codex.ts`, `providers.ts`). One `Agent` interface (`run` / `reset` / `interrupt`) behind a provider registry; one provider and model serve every lane. `AgentSession` is a long-lived Claude Agent SDK session fed by streaming input, with `includePartialMessages` so text reaches a card delta by delta, loading the user's own Claude configuration (`settingSources: ["user"]` — where personal context such as notes locations belongs), `maxTurns` 40, 180 s per task. `CodexAgentSession` wraps `@openai/codex-sdk` (measured far slower for cards — see the 2026-06-13 sections).
 
-**Sandbox.** Claude: one policy, `toolDecision` — web, `ToolSearch`, connector reads/searches, and non-sensitive `$HOME` reads by absolute or `~` path; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. Codex: the same denylist as a Seatbelt profile, the CLI running under `sandbox-exec` (`codexSandbox.ts`). See *Agent sandboxing* and *Codex runs under a Seatbelt profile*.
+**Sandbox.** Claude: one policy, `toolDecision` — web, `ToolSearch`, connector reads/searches, and non-sensitive `$HOME` reads by absolute or `~` path; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. Codex: the same denylist as a Seatbelt profile, the CLI running under `sandbox-exec` (`codexSandbox.ts`); connectors all or none, by the same preference (`codexClientOptions`). See *Agent sandboxing*, *Codex runs under a Seatbelt profile* and *Codex connectors follow the actions toggle*.
 
 ## IPC contract (NDJSON, one object per line)
 
@@ -370,7 +370,7 @@ Every lane — trigger classifier, research lanes, manual query lane — runs on
 
 Auth follows the same principle as Claude — **no API key**: the Codex SDK reuses the user's Codex CLI login (`~/.codex/auth.json`). The platform binary ships transitively via `@openai/codex-sdk` → `@openai/codex` → `@openai/codex-darwin-arm64` in `node_modules`, so packaging needs no global `codex` install. Codex has no system-prompt parameter, so Advisor's system prompt is prepended to the first turn of each thread; later turns inherit it from thread context.
 
-**Sandbox — deliberately coarser than Claude's, documented not hidden.** Claude runs under a per-call `canUseTool` policy (path denylist for reads, action-pattern gate for MCP). The Codex SDK exposes no per-call hook, so `CodexAgentSession` maps to `sandboxMode: "read-only"` + `approvalPolicy: "never"` (no writes, edits, escalation, or network-mutating commands), with web search + network enabled only when the component has a `Web*` tool (research/query yes, classifier no). Residual gaps versus Claude: a read-only Codex *shell* command can still read sensitive dotfiles (`~/.ssh` etc.) — there is no path denylist — and Codex MCP servers come from `~/.codex/config.toml`, so they are not gated by `allowMcpActions`. Accept for a single-user local tool; revisit if Codex gains per-tool callbacks. (Superseded 2026-08-10: the Codex CLI now runs under a Seatbelt profile built from the same path denylist — see *Codex runs under a Seatbelt profile*.)
+**Sandbox — deliberately coarser than Claude's, documented not hidden.** Claude runs under a per-call `canUseTool` policy (path denylist for reads, action-pattern gate for MCP). The Codex SDK exposes no per-call hook, so `CodexAgentSession` maps to `sandboxMode: "read-only"` + `approvalPolicy: "never"` (no writes, edits, escalation, or network-mutating commands), with web search + network enabled only when the component has a `Web*` tool (research/query yes, classifier no). Residual gaps versus Claude: a read-only Codex *shell* command can still read sensitive dotfiles (`~/.ssh` etc.) — there is no path denylist — and Codex MCP servers come from `~/.codex/config.toml`, so they are not gated by `allowMcpActions`. Accept for a single-user local tool; revisit if Codex gains per-tool callbacks. (Superseded 2026-08-10: the Codex CLI now runs under a Seatbelt profile built from the same path denylist — see *Codex runs under a Seatbelt profile*. And 2026-10-09: connectors follow `allowMcpActions`, all or none — see *Codex connectors follow the actions toggle*.)
 
 **One shared backend, not per-component (2026-06-13).** The three independent lane choices (classifier, research, query) collapsed into one top-level `{provider, model}` used by every lane. Rationale: the per-component split was never used in practice — research and query already shared a model, and a separately-tuned classifier added a knob without a payoff. A scalar `model` (`""` = provider default) replaces the per-provider `models` map; switching provider now forgets the prior model (the UI resets it on change) rather than remembering one per provider. Consequence accepted: the classifier no longer defaults to Haiku — it follows the shared model (default Sonnet), trading a little classify latency/cost for a single knob. **No config migration** — still early testing, so a stale `config.json` is simply dropped (its unrecognised keys ignored, missing keys defaulted) rather than normalised. Both sides keep a tolerant decoder (sidecar `mergeConfig()`, Swift `init(from:)`) only so missing keys default instead of throwing.
 
@@ -2035,11 +2035,75 @@ servers. A tool the user's settings switch on still comes through —
 `ENABLE_LSP_TOOL` adds LSP to a card lane with `noTools` — which is why the
 classifier also keeps `settingSources: []`.
 
-Codex is not covered: its classifier already has web search and network off,
-but keeps its shell (read-only, under the Seatbelt profile) and the MCP servers
-in `~/.codex/config.toml`. The SDK's `config: { mcp_servers: {} }` would pass
-`--config mcp_servers={}`; whether that clears the user's servers, and how to
-turn the shell off, is untested against the real Codex CLI.
+Codex was not covered: its classifier had web search and network off, but kept
+its shell (read-only, under the Seatbelt profile) and the user's MCP servers.
+See the next section.
+
+## Codex connectors follow the actions toggle (2026-10-09)
+
+The Claude backend lets connector reads and searches through and refuses
+actions unless "Allow connector actions" is on (`mcpPermission`). Codex has no
+per-call hook to do that, so every Codex lane had all the user's connectors,
+whatever the toggle said: the MCP servers in `~/.codex/config.toml`, the
+servers its plugins bring, and ChatGPT apps. The classifier had them too, and
+its shell.
+
+`codexClientOptions` now decides per session. With actions allowed nothing
+changes: everything is allowed, as on Claude. Without them (the default), and
+always for the classifier (`noTools`), a session gets no connectors:
+`features.apps` and `features.plugins` are off, and each server the user's
+config defines is disabled by name (`mcp_servers.<name>.enabled=false`). The
+names come from `codex mcp list --json -c features.plugins=false`, run through
+the same wrapper from the session's directory when the session first runs
+(about 0.5 s). If that fails, the card fails and the next card tries again.
+Reply, summary and document lanes are made for one card each, so they pay the
+0.5 s on every card; research and query lanes pay it once, research lanes past
+the first (which is warmed) on their first card. The classifier also loses the
+shell (`shell_tool`, `unified_exec`), goals, image generation and sub-agents
+(`multi_agent`).
+
+Found against the real Codex CLI 0.139.0, with a fake Responses endpoint and a
+synthetic `~/.codex` (`codex.sdk.test.ts`):
+
+- `config: { mcp_servers: {} }`, proposed above, does nothing: `--config`
+  overrides merge into the user's tables rather than replace them.
+- `codex exec --ignore-user-config` drops the servers but also the user's
+  model, and Preferences has no Codex model of its own, so on a ChatGPT login
+  the CLI's default (`gpt-5.4`) was refused. Tried and dropped.
+- Disabling a plugin's server by name makes a server with no command, which
+  the CLI rejects. `features.plugins=false` drops those servers instead, which
+  is why the listing runs with plugins off.
+- The tools offered depend on the model: `gpt-6.1-sol` gets sub-agents
+  (`multi_agent_v1`) and no `apply_patch` or `tool_search`; the CLI's default
+  for an API key the reverse.
+- No setting removes `update_plan`, `request_user_input`, `view_image` and,
+  for some models, `apply_patch` and `tool_search`. Each is inert for the
+  classifier: `update_plan` has no effect, `request_user_input` fails in exec
+  mode, `apply_patch` is refused by read-only mode and the Seatbelt profile,
+  `view_image` reads only what the profile allows, and `tool_search` has no
+  connectors to find. The test fails if a CLI upgrade offers anything else.
+
+One classify turn on the real ChatGPT login offered no shell, no MCP servers
+and no apps; it was offered `update_plan`, `request_user_input`, `view_image`
+and the sub-agent tools, which are now off too (checked on the fake only).
+That run had `features.apps=false` on, with no control run, so it doesn't show
+that apps would otherwise have appeared. The turn itself was refused: the
+vendored CLI 0.139.0 can't use the `gpt-6.1-sol` model the user's config names
+on a ChatGPT login, as with `gpt-5.6-sol` in August. The Codex backend needs a
+newer CLI before it runs here at all.
+
+Limits: a server name the SDK can't write as a dotted key (anything but
+letters, digits, `-` and `_`; `codex mcp add` refuses such names, but
+`config.toml` can quote one) fails the session rather than leave the server
+running. Each lane lists the servers when it first runs and again after a
+reset (which recycles a failed lane), but the CLI reads `config.toml` on every
+turn, so a server added mid-recording runs in lanes that started before it
+until they are reset or the next recording rebuilds them. Listing before every
+turn would add the 0.5 s to every research card and classify too. The other
+way round, a server removed mid-recording leaves an override naming a server
+with no command, which the CLI rejects: that turn fails, and a failed turn
+makes the session list again, so the next one runs. A task stopped while the
+listing runs shares it with the next task rather than starting another.
 
 ## Revisit as it grows
 

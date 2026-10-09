@@ -155,9 +155,11 @@ Advisor researches across whatever you've connected:
   per-call hook: the Codex CLI runs under a macOS Seatbelt profile built from
   the same credential-path denylist, so it and every process it starts (shell
   commands, MCP servers) can't read those paths or write anywhere but Codex's
-  own state and temp folders. Read-only shell *is* permitted, Codex can still
-  read its own `~/.codex` login, and MCP connectors come from your
-  `~/.codex/config.toml` rather than the "Allow connector actions" gate.
+  own state and temp folders. Read-only shell *is* permitted, and Codex can
+  still read its own `~/.codex` login. Codex can't let connector reads through
+  while refusing actions, so with "Allow connector actions" off it gets no
+  connectors at all (the MCP servers and plugins in your `~/.codex/config.toml`,
+  and ChatGPT apps); with it on, it gets all of them.
 - **Connectors fail closed (Claude)** — anything not recognised as a read or
   search is treated as an action and gated behind an opt-in "Allow connector
   actions" toggle.

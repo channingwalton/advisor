@@ -1,8 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { setImmediate } from "node:timers/promises";
-import { Thread, type ThreadEvent, type ThreadOptions } from "@openai/codex-sdk";
-import { CodexAgentSession, codexConstructorOptions, codexThreadOptions } from "./codex.js";
+import { type Codex, Thread, type ThreadEvent, type ThreadOptions } from "@openai/codex-sdk";
+import {
+  CodexAgentSession,
+  codexClientOptions,
+  codexConfigServers,
+  codexConstructorOptions,
+  codexThreadOptions,
+} from "./codex.js";
 import { AsyncQueue } from "./agent.js";
 import { handleCancel } from "./cancel.js";
 import { guardedRun } from "./guardedRun.js";
@@ -221,6 +230,104 @@ test("independent Codex sessions can run concurrently", async () => {
   assert.equal((await first).text, "first answer");
 });
 
+/// A Codex client whose setup (listing the user's servers, in the app) the
+/// test resolves or rejects, starting controlled threads.
+function controlledClient() {
+  const { calls, factory } = controlledThreads();
+  const setups: { resolve: (codex: Codex) => void; reject: (err: Error) => void }[] = [];
+  const create = (): Promise<Codex> => new Promise((resolve, reject) => setups.push({ resolve, reject }));
+  const client = { startThread: factory } as unknown as Codex;
+  return { calls, create, client, setups };
+}
+
+async function until(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 50 && !condition(); i++) await setImmediate();
+  assert.ok(condition(), "condition never held");
+}
+
+test("#codex-connectors a task stopped during client setup leaves the next task a thread with instructions", async () => {
+  const { calls, create, client, setups } = controlledClient();
+  const session = new CodexAgentSession(base, undefined, create);
+  const warm = session.run("warm-up", undefined, 10);
+  const first = session.run("first", undefined, 60_000);
+  assert.equal((await warm).error, "timed out");
+
+  // One setup serves both: the stopped task's must not start a second thread
+  // that later replaces the one the next task is on.
+  setups[0].resolve(client);
+  await until(() => calls.length === 1);
+  assert.equal(calls[0].input, "sp\n\nfirst");
+  complete(calls[0], "one");
+  assert.equal((await first).text, "one");
+
+  const second = session.run("second", undefined, 60_000);
+  await until(() => calls.length === 2);
+  assert.equal(calls[1].threadId, "conversation");
+  assert.equal(calls[1].input, "second");
+  complete(calls[1], "two");
+  assert.equal((await second).text, "two");
+  assert.equal(setups.length, 1);
+});
+
+test("#codex-connectors reset sets the client up again, so a recycled lane lists the servers again", async () => {
+  const { calls, create, client, setups } = controlledClient();
+  const session = new CodexAgentSession(base, undefined, create);
+  const first = session.run("first", undefined, 60_000);
+  setups[0].resolve(client);
+  await until(() => calls.length === 1);
+  complete(calls[0], "one");
+  await first;
+
+  session.reset();
+  const after = session.run("after", undefined, 60_000);
+  await until(() => setups.length === 2);
+  setups[1].resolve(client);
+  await until(() => calls.length === 2);
+  assert.equal(calls[1].input, "sp\n\nafter");
+  complete(calls[1], "two");
+  assert.equal((await after).text, "two");
+});
+
+test("#codex-connectors a failed client setup fails its task, and the next task sets up again", async () => {
+  const { calls, create, client, setups } = controlledClient();
+  const session = new CodexAgentSession(base, undefined, create);
+  const first = session.run("first", undefined, 60_000);
+  await until(() => setups.length === 1);
+  setups[0].reject(new Error("listing Codex MCP servers failed: broken"));
+  assert.match((await first).error ?? "", /broken/);
+  assert.equal(calls.length, 0, "no turn runs without the servers disabled");
+
+  const second = session.run("second", undefined, 60_000);
+  await until(() => setups.length === 2);
+  setups[1].resolve(client);
+  await until(() => calls.length === 1);
+  assert.equal(calls[0].input, "sp\n\nsecond");
+  complete(calls[0], "two");
+  assert.equal((await second).text, "two");
+});
+
+test("#codex-connectors a failed turn sets the client up again, so a removed server stops failing turns", async () => {
+  // A server removed from config.toml mid-recording leaves its override naming
+  // a server with no command, which the CLI rejects on every turn. The
+  // classifier is never reset, so the session must list again by itself.
+  const { calls, create, client, setups } = controlledClient();
+  const session = new CodexAgentSession(base, undefined, create);
+  const first = session.run("first", undefined, 60_000);
+  setups[0].resolve(client);
+  await until(() => calls.length === 1);
+  emit(calls[0], { type: "turn.failed", error: { message: "failed to load configuration: invalid transport" } });
+  calls[0].events.end();
+  assert.match((await first).error ?? "", /invalid transport/);
+
+  const second = session.run("second", undefined, 60_000);
+  await until(() => setups.length === 2);
+  setups[1].resolve(client);
+  await until(() => calls.length === 2);
+  assert.equal(calls[1].input, "sp\n\nsecond");
+  complete(calls[1], "two");
+  assert.equal((await second).text, "two");
+});
+
 test("codexThreadOptions sandboxes read-only with no approval", () => {
   const o = codexThreadOptions(base);
   assert.equal(o.sandboxMode, "read-only");
@@ -241,6 +348,97 @@ test("codexConstructorOptions passes apiKey only when OPENAI_API_KEY is set", ()
   // Absent or empty → no apiKey, so the SDK falls back to the Codex CLI login.
   assert.deepEqual(codexConstructorOptions({}), {});
   assert.deepEqual(codexConstructorOptions({ OPENAI_API_KEY: "" }), {});
+});
+
+/// Stands in for `codexConfigServers`: the servers the user's config defines.
+function servers(names: string[]) {
+  const calls: { codexPath: string; cwd: string }[] = [];
+  const list = async (codexPath: string, cwd: string): Promise<string[]> => {
+    calls.push({ codexPath, cwd });
+    return names;
+  };
+  return { calls, list };
+}
+const NO_CONNECTORS = { apps: false, plugins: false };
+
+test("#codex-connectors a card lane allowed connector actions keeps the user's connectors", async () => {
+  const { calls, list } = servers(["fff"]);
+  assert.deepEqual(await codexClientOptions({ ...base, allowMcpActions: true }, {}, "/w/codex", list), {
+    codexPathOverride: "/w/codex",
+  });
+  assert.deepEqual(calls, []);
+});
+
+test("#codex-connectors a card lane without connector actions disables each server and drops apps and plugins", async () => {
+  for (const allowMcpActions of [false, undefined]) {
+    const { calls, list } = servers(["fff", "openai-docs"]);
+    const o = await codexClientOptions({ ...base, allowMcpActions, cwd: "/work" }, {}, "/w/codex", list);
+    assert.deepEqual(o, {
+      codexPathOverride: "/w/codex",
+      config: {
+        features: NO_CONNECTORS,
+        mcp_servers: { fff: { enabled: false }, "openai-docs": { enabled: false } },
+      },
+    });
+    // Listed by the CLI the session runs, from the directory it runs in.
+    assert.deepEqual(calls, [{ codexPath: "/w/codex", cwd: "/work" }]);
+  }
+});
+
+test("#codex-connectors with no servers configured only apps and plugins are switched off", async () => {
+  assert.deepEqual(await codexClientOptions(base, {}, "/w/codex", servers([]).list), {
+    codexPathOverride: "/w/codex",
+    config: { features: NO_CONNECTORS },
+  });
+});
+
+test("#codex-connectors a server name that can't be a config key fails the session", async () => {
+  // `codex mcp add` refuses such names, but config.toml can quote one. Its
+  // override path would name a different key, leaving the server running.
+  await assert.rejects(codexClientOptions(base, {}, "/w/codex", servers(["a.b"]).list), /a\.b/);
+});
+
+test("#classifier-no-tools a Codex session with no tools also drops the shell, goals, image generation and sub-agents", async () => {
+  // noTools wins over allowMcpActions: the classifier needs no connectors at all.
+  const o = await codexClientOptions({ ...base, noTools: true, allowMcpActions: true }, {}, "/w/codex", servers(["fff"]).list);
+  assert.deepEqual(o.config, {
+    features: {
+      ...NO_CONNECTORS, shell_tool: false, unified_exec: false, goals: false, image_generation: false, multi_agent: false,
+    },
+    mcp_servers: { fff: { enabled: false } },
+  });
+});
+
+test("#codex-connectors codexClientOptions keeps the API key", async () => {
+  const o = await codexClientOptions({ ...base, noTools: true }, { OPENAI_API_KEY: "sk-x" }, "/w/codex", servers([]).list);
+  assert.equal(o.apiKey, "sk-x");
+});
+
+/// A stand-in Codex CLI: records its arguments and directory, then runs `body`.
+function stubCli(body: string): { cli: string; argsFile: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "advisor-codex-cli-"));
+  const cli = path.join(dir, "codex");
+  const argsFile = path.join(dir, "args");
+  fs.writeFileSync(cli, `#!/bin/sh\necho "$PWD $@" > '${argsFile}'\n${body}\n`, { mode: 0o755 });
+  return { cli, argsFile };
+}
+
+test("#codex-connectors codexConfigServers lists the configured servers, leaving out plugins'", async () => {
+  const { cli, argsFile } = stubCli(`echo '[{"name":"fff","enabled":true},{"name":"docs","enabled":false}]'`);
+  const cwd = fs.realpathSync(os.tmpdir());
+  assert.deepEqual(await codexConfigServers(cli, cwd), ["fff", "docs"]);
+  assert.equal(fs.readFileSync(argsFile, "utf8").trim(), `${cwd} mcp list --json -c features.plugins=false`);
+});
+
+test("#codex-connectors a failed server listing fails the session", async () => {
+  await assert.rejects(codexConfigServers(stubCli("echo broken >&2; exit 1").cli, os.tmpdir()), /broken/);
+  await assert.rejects(codexConfigServers(stubCli("echo not-json").cli, os.tmpdir()));
+});
+
+test("#codex-connectors a listed server without a name fails the session", async () => {
+  // Read as "undefined", it would pass the name check and disable nothing.
+  const { cli } = stubCli(`echo '[{"name":"fff"},{"id":"docs"}]'`);
+  await assert.rejects(codexConfigServers(cli, os.tmpdir()), /name/);
 });
 
 test("codexThreadOptions passes the model through and defaults cwd to home", () => {

@@ -102,7 +102,11 @@ drove the #21 rework and #12 churn).
   under `sandbox-exec` via `codexPathOverride`. Its own `sandboxMode:
   "read-only"` is kept but not relied on — it bounds writes only, and MCP tools
   bypass it (openai/codex#4152). Residual: Codex can read its own `~/.codex`
-  credentials, which the profile must leave readable for login. See DESIGN.md.
+  credentials, which the profile must leave readable for login. Connectors
+  follow `allowMcpActions`, all or none (`codexClientOptions`): `--config`
+  overrides merge into the user's config, so servers are disabled by name, and
+  `--ignore-user-config` would drop the user's model too. Verify against the
+  real CLI (`codex.sdk.test.ts`). See DESIGN.md.
 - User preferences: `~/Library/Application Support/Advisor/config.json`
   (mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts` —
   change both together; keys commented "App-side only" in Preferences.swift,

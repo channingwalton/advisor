@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { AgentSession, type AgentSessionOptions } from "./agent.js";
 import { mergeConfig } from "./config.js";
-import { fakeModelQuery, sse } from "./fakeModel.js";
+import { fakeModelQuery, sse, STUB_MCP } from "./fakeModel.js";
 import { cardLaneOptions } from "./lanes.js";
 import { classifierOptions } from "./trigger.js";
 
@@ -22,29 +22,6 @@ let home: string;
 let server: http.Server;
 /// The tool names each request offered, by the prompt that sent it.
 const offered = new Map<string, string[]>();
-
-/// A minimal stdio MCP server with one tool, `mcp__stub__lookup` to the CLI.
-const STUB_MCP = `
-import readline from "node:readline";
-const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
-readline.createInterface({ input: process.stdin }).on("line", (line) => {
-  const msg = JSON.parse(line);
-  if (msg.id === undefined) return;
-  if (msg.method === "initialize") {
-    send({ jsonrpc: "2.0", id: msg.id, result: {
-      protocolVersion: msg.params.protocolVersion,
-      capabilities: { tools: {} },
-      serverInfo: { name: "stub", version: "1" },
-    } });
-  } else if (msg.method === "tools/list") {
-    send({ jsonrpc: "2.0", id: msg.id, result: { tools: [
-      { name: "lookup", description: "Look something up", inputSchema: { type: "object", properties: {} } },
-    ] } });
-  } else {
-    send({ jsonrpc: "2.0", id: msg.id, result: {} });
-  }
-});
-`;
 
 type Message = { role: string; content: string | { type: string; text?: string }[] };
 

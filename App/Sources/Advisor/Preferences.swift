@@ -669,7 +669,7 @@ private struct AgentSettingsView: View {
                 AuthModeView(provider: provider, authMode: $authMode)
                 Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
                 Toggle("Allow connector actions", isOn: $allowMcpActions)
-                Text("Off: connectors (Slack, Jira, …) are read/search only. On: agents may also send, create, and update — use with care. Claude only.")
+                Text("Off: connectors (Slack, Jira, …) are read/search only; Codex, which can't tell the two apart, gets no connectors. On: agents may also send, create, and update — use with care.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

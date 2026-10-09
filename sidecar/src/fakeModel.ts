@@ -58,3 +58,27 @@ export function fakeModelQuery(home: string, port: number): QueryFn {
   return ((args: Parameters<QueryFn>[0]) =>
     query({ ...args, options: { ...args.options, env } })) as QueryFn;
 }
+
+/// A minimal stdio MCP server with one tool, `lookup`, standing in for the
+/// user's connectors (`mcp__stub__lookup` to the Claude CLI).
+export const STUB_MCP = `
+import readline from "node:readline";
+const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.id === undefined) return;
+  if (msg.method === "initialize") {
+    send({ jsonrpc: "2.0", id: msg.id, result: {
+      protocolVersion: msg.params.protocolVersion,
+      capabilities: { tools: {} },
+      serverInfo: { name: "stub", version: "1" },
+    } });
+  } else if (msg.method === "tools/list") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { tools: [
+      { name: "lookup", description: "Look something up", inputSchema: { type: "object", properties: {} } },
+    ] } });
+  } else {
+    send({ jsonrpc: "2.0", id: msg.id, result: {} });
+  }
+});
+`;

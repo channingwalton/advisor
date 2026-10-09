@@ -203,8 +203,8 @@ export interface AgentSessionOptions {
   /// An empty `allowedTools` doesn't do this: it only skips the permission
   /// check, and every other tool is still offered. A tool the user's settings
   /// switch on (`ENABLE_LSP_TOOL` adds LSP) still comes through, so pair it with
-  /// `settingSources: []`. Claude only: Codex has no equivalent (see
-  /// `codexThreadOptions`).
+  /// `settingSources: []`. Codex can't remove every built-in tool (see
+  /// `codexClientOptions`).
   noTools?: boolean;
   cwd?: string;
   /// SDK setting sources to load. Defaults to ["user"] (the user's own Claude

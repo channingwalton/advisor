@@ -88,7 +88,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - N1. **Latency:** best efforts; ~2–5 s after the triggering utterance is the aspiration, not a hard requirement (relaxed 2026-06-11).
   - A card's answer appears as the agent writes it, not when the agent finishes. `#card-token-stream`
   - While a card researches, it shows what the agent is doing (searching the web, reading a file, thinking); the line goes once the answer is being written or the card ends. `#card-activity`
-  - On Claude, the trigger classifier only decides what to research: it is offered no tools, built-in or connector, so it never searches or reads itself. (On Codex it has no web search or network, but keeps its shell and MCP servers.) `#classifier-no-tools`
+  - The trigger classifier only decides what to research: it is offered no tools, built-in or connector, so it never searches or reads itself. (On Codex, a few built-ins no setting removes are still offered — plan, ask the user, view an image and, for some models, patch and search tools — and each is inert there.) `#classifier-no-tools`
 - N2. **Platform:** macOS only (Apple Silicon).
 - N3. **Privacy:** STT runs on-device (Apple SpeechAnalyzer); only text leaves the machine. Listening must be explicitly user-initiated.
 - N4. **Cost:** STT is local (free); LLM cost per listening-hour must be tolerable for daily personal use.
@@ -112,6 +112,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - Subscription mode removes both provider API-key overrides from the child environment. `#sidecar-auth-subscription`
   - Unchanged effective authentication reuses the existing sidecar. `#sidecar-auth-stable`
   - Late termination, output and retry callbacks from a replaced sidecar cannot affect its replacement. `#sidecar-auth-generation`
+- N10. **Codex connectors:**
+  - Codex can't refuse a connector call by what it does, so without "Allow connector actions" a Codex card lane is offered no connectors: none of the MCP servers or plugins in `~/.codex/config.toml`, and no ChatGPT apps. With it, it has them all, as on Claude. `#codex-connectors`
 
 ## Architecture decision: MCP server vs standalone
 
