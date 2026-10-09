@@ -143,7 +143,7 @@ The aspiration is ≤5 s from utterance to a useful card. As measured, it is not
 | Trigger → first card text | median 30.5 s (p90 52.7 s) |
 | Trigger → finished card | 33.4 s |
 
-The placeholder-then-stream pattern keeps the card visible early. Until 2026-10-09 text streamed per assistant block, and the model mostly writes its answer as one block at the end, so cards filled in one go. Text now streams as it is written, and a card shows what the agent is doing until then — see *Card text streams as it is written*. Fast local note hits remain open.
+The placeholder-then-stream pattern keeps the card visible early. Until 2026-10-09 text streamed per assistant block, and the model mostly writes its answer as one block at the end, so cards filled in one go. Text now streams as it is written, and a card shows what the agent is doing until then — see *Card text streams as it is written*.
 
 ## Error handling
 
@@ -1952,8 +1952,7 @@ logged on its `run start` line, so card timings can be compared by level from
 the log.
 
 This is a measuring knob, not the whole fix: token streaming
-(`includePartialMessages`, done 2026-10-09 — see the next section) and fast
-local note hits before web research remain open.
+(`includePartialMessages`) followed on 2026-10-09 — see the next section.
 
 ## Card text streams as it is written (2026-10-09)
 
