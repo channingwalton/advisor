@@ -90,8 +90,9 @@ sentence) to:
 Once a card has finished, a follow-up box appears on it — ask a question about
 the card and the answer is appended in place, so a card becomes a short thread.
 (Summary cards are a one-shot recap and take no follow-ups.) While a card is
-still researching, the ✕ beside *Researching* (**Skip this card**) stops it; the
-card stays, marked cancelled.
+still researching it shows what the agent is doing, such as *Searching the web
+for “…”* or *Thinking…*, and the answer appears as it is written. The ✕ beside
+*Researching* (**Skip this card**) stops it; the card stays, marked cancelled.
 A card never loses an answer it has already given: while a follow-up or a
 re-summarise runs, the saved note keeps the previous answer; cancelling one puts
 it back, and a failed re-summarise keeps the old summary with a line saying it

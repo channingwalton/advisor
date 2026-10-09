@@ -98,7 +98,9 @@ export type Outbound =
       body: string;
       state: CardState;
     }
-  | { type: "card_update"; id: string; body: string; state: CardState }
+  // `activity`: what the agent is doing while the card researches (e.g.
+  // "Searching the web for “Cedar”"). Each update replaces it; absent clears it.
+  | { type: "card_update"; id: string; body: string; state: CardState; activity?: string }
   // Streamed answer to an ask_document question, keyed by the request id.
   | { type: "document_answer"; id: string; body: string; state: CardState }
   | { type: "error"; fatal: boolean; message: string };

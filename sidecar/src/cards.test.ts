@@ -4,8 +4,15 @@ import { cardOutcome, boundedPush } from "./cards.js";
 
 test("cardOutcome returns the answer when text is present", () => {
   assert.deepEqual(cardOutcome("the answer"), { body: "the answer", state: "done" });
-  // text wins even if an error is also set (partial answer before a late failure)
-  assert.deepEqual(cardOutcome("partial", "timed out"), { body: "partial", state: "done" });
+});
+
+// Text streams word by word, so a turn cut short can end mid-sentence: keep
+// what was written, but don't pass it off as a finished answer.
+test("cardOutcome keeps a partial answer and says it stopped early", () => {
+  assert.deepEqual(cardOutcome("Cedar is the datab", "timed out"), {
+    body: "Cedar is the datab\n\n*Stopped early: timed out.*",
+    state: "done",
+  });
 });
 
 test("cardOutcome surfaces the failure reason when text is empty", () => {

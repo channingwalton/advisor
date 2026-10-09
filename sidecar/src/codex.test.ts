@@ -84,7 +84,7 @@ test("#codex-session-reset abandons active and queued work before accepting a fr
   const { calls, factory } = controlledThreads();
   const session = new CodexAgentSession(base, factory);
   const oldText: string[] = [];
-  const active = session.run("old warm-up", (text) => oldText.push(text));
+  const active = session.run("old warm-up", { onText: (text) => oldText.push(text) });
   const queued = session.run("old real request");
   await setImmediate();
   session.reset();
@@ -148,7 +148,7 @@ test("timed-out warm-up retires its thread and releases queued requests", async 
     const { calls, factory } = controlledThreads();
     const session = new CodexAgentSession(base, factory);
     const updates: string[] = [];
-    const active = session.run("warm-up", (text) => updates.push(text), 25);
+    const active = session.run("warm-up", { onText: (text) => updates.push(text) }, 25);
     const queued = session.run("real request", undefined, 100);
     await setImmediate();
     emit(calls[0], {

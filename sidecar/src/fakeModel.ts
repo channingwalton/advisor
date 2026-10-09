@@ -7,20 +7,25 @@ import type { QueryFn } from "./agent.js";
 // Test support for driving the real bundled Claude CLI against a local fake
 // Messages API (the *.sdk.test.ts files). No real credentials or network.
 
+let messages = 0;
+
 /// Answer one Messages API request as a server-sent event stream of `content`
-/// blocks (text or tool_use), ending with `stop`.
+/// blocks (text or tool_use), ending with `stop`. Each response is a new
+/// message, and text arrives a word at a time, as from the real API.
 export function sse(res: http.ServerResponse, content: Record<string, unknown>[], stop: string): void {
   const events: Record<string, unknown>[] = [{
     type: "message_start",
     message: {
-      id: "msg_test", type: "message", role: "assistant", model: "claude-test", content: [],
+      id: `msg_test_${++messages}`, type: "message", role: "assistant", model: "claude-test", content: [],
       stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 },
     },
   }];
   content.forEach((block, index) => {
     if (block.type === "text") {
       events.push({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
-      events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text: block.text } });
+      for (const text of String(block.text).split(/(?<= )/)) {
+        events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text } });
+      }
     } else {
       events.push({ type: "content_block_start", index, content_block: { ...block, input: {} } });
       events.push({

@@ -79,7 +79,7 @@ test("streams text on the recycled session, stale head does not suppress it (iss
   assert.equal(r1.error, "timed out");
 
   const chunks: string[] = [];
-  const r2p = session.run("task2", (acc) => chunks.push(acc), 100);
+  const r2p = session.run("task2", { onText: (acc) => chunks.push(acc) }, 100);
   assert.equal(spawns.length, 2);
   spawns[1].messages.push(textBlock("hello"));
   spawns[1].messages.push(success("hello world"));
@@ -268,4 +268,116 @@ test("omits the effort option when none is set", async () => {
   assert.equal(options.effort, undefined);
   spawns[0].messages.push(success("done"));
   await r1p;
+});
+
+const streamEvent = (event: unknown, parent: string | null = null) =>
+  ({ type: "stream_event", event, parent_tool_use_id: parent });
+const assistant = (id: string, content: unknown[]) =>
+  ({ type: "assistant", message: { id, content }, parent_tool_use_id: null });
+/// A message with one text block streamed delta by delta: started, written,
+/// and unless `finished` is false, completed as the CLI completes one — the
+/// finished assistant message, then `message_stop`.
+function streamText(spawn: FakeSpawn, id: string, deltas: string[], finished = true): void {
+  spawn.messages.push(streamEvent({ type: "message_start", message: { id } }));
+  spawn.messages.push(streamEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
+  for (const text of deltas) {
+    spawn.messages.push(streamEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }));
+  }
+  if (!finished) return;
+  spawn.messages.push(assistant(id, [{ type: "text", text: deltas.join("") }]));
+  spawn.messages.push(streamEvent({ type: "message_stop" }));
+}
+
+// Cards waited for each whole text block, which the model mostly writes in one
+// go at the end of the turn (163 of 183 cards, 2026-10-09). Streaming the
+// deltas puts text on the card while the model is still writing.
+test("#card-token-stream text reaches the card as it is written, each block once", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const chunks: string[] = [];
+  const rp = session.run("task", { onText: (acc) => chunks.push(acc) }, 1000);
+  const { options } = spawns[0].args as { options: { includePartialMessages?: boolean } };
+  assert.equal(options.includePartialMessages, true);
+
+  streamText(spawns[0], "msg_1", ["Hello ", "world"]);
+  streamText(spawns[0], "msg_2", ["Done."]);
+  spawns[0].messages.push(success("Done."));
+  await rp;
+  assert.deepEqual(chunks, ["Hello ", "Hello world", "Hello world\n\nDone."]);
+});
+
+// Should the CLI ever deliver a message without its stream events (a
+// non-streaming fallback), the finished block still reaches the card.
+test("#card-token-stream a block that was not streamed is still added", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const chunks: string[] = [];
+  const rp = session.run("task", { onText: (acc) => chunks.push(acc) }, 1000);
+  streamText(spawns[0], "msg_1", ["From your notes: none."]);
+  spawns[0].messages.push(assistant("msg_2", [{ type: "text", text: "Answer." }]));
+  spawns[0].messages.push(success("Answer."));
+  await rp;
+  assert.deepEqual(chunks, ["From your notes: none.", "From your notes: none.\n\nAnswer."]);
+});
+
+// Only calls the sandbox lets run are shown: a denied read of a credential
+// file must not appear on the card as if it happened.
+test("#card-activity thinking and the tool calls the sandbox allows are reported as activity", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const activity: string[] = [];
+  const rp = session.run("task", { onActivity: (a) => activity.push(a) }, 1000);
+  const { options } = spawns[0].args as {
+    options: { hooks: { PreToolUse: { hooks: ((...a: unknown[]) => Promise<unknown>)[] }[] } };
+  };
+  const gate = options.hooks.PreToolUse[0].hooks[0];
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  spawns[0].messages.push(streamEvent({ type: "message_start", message: { id: "msg_1" } }));
+  spawns[0].messages.push(streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }));
+  // As the CLI does it: the model's tool call, then the gate's decision on it.
+  for (const [name, input] of [
+    ["ToolSearch", { query: "slack" }],
+    ["WebSearch", { query: "Cedar migration" }],
+    ["Read", { file_path: "~/.ssh/id_rsa" }],
+  ] as const) {
+    spawns[0].messages.push(assistant("msg_1", [{ type: "tool_use", id: `t_${name}`, name, input }]));
+    await settle();
+    await gate(
+      { hook_event_name: "PreToolUse", tool_name: name, tool_input: input },
+      `t_${name}`,
+      { signal: new AbortController().signal },
+    );
+  }
+  spawns[0].messages.push(success("ok"));
+  await rp;
+  assert.deepEqual(activity, ["Thinking…", "Searching the web for “Cedar migration”"]);
+});
+
+// The CLI replaces a message whose stream broke off — retrying it, or falling
+// back to a non-streaming request — under a new id. The broken message's text
+// must leave the card, or it shows twice.
+test("#card-token-stream a retried message replaces the one that broke off", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const chunks: string[] = [];
+  const rp = session.run("task", { onText: (acc) => chunks.push(acc) }, 1000);
+  streamText(spawns[0], "msg_1", ["From your notes: none."]);
+  streamText(spawns[0], "msg_2", ["Cedar is ", "the"], false);
+  streamText(spawns[0], "msg_3", ["Cedar is ", "the migration."]);
+  spawns[0].messages.push(success("Cedar is the migration."));
+  await rp;
+  assert.equal(chunks.at(-1), "From your notes: none.\n\nCedar is the migration.");
+  assert.ok(!chunks.some((c) => c.includes("the\n\nCedar")), JSON.stringify(chunks));
+});
+
+test("#card-token-stream a non-streaming fallback replaces the message that broke off", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const chunks: string[] = [];
+  const rp = session.run("task", { onText: (acc) => chunks.push(acc) }, 1000);
+  streamText(spawns[0], "msg_1", ["Cedar is ", "the"], false);
+  spawns[0].messages.push(assistant("msg_2", [{ type: "text", text: "Cedar is the migration." }]));
+  spawns[0].messages.push(success("Cedar is the migration."));
+  await rp;
+  assert.equal(chunks.at(-1), "Cedar is the migration.");
 });

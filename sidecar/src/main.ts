@@ -9,7 +9,7 @@ import {
 import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
-import { guardedRun } from "./guardedRun.js";
+import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
 import { cardLaneOptions, Lane, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
 import { AutoPipeline } from "./autoPipeline.js";
 import {
@@ -147,8 +147,7 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
       sessionContextPrefix(sessionContext) +
       replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
     await guardedRun(
-      lane.session, msg.cardId, task,
-      (body, state) => ({ type: "card_update", id: msg.cardId, body: header + body, state }),
+      lane.session, msg.cardId, task, cardUpdateFrame(msg.cardId, header),
       "reply error", { cancelledCards, send }
     );
   } finally {
@@ -254,8 +253,7 @@ async function runSummariseLive(msg: Extract<Inbound, { type: "summarise_live" }
   }
   try {
     await guardedRun(
-      lane.session, cardId, summaryTask(msg.transcript),
-      (body, state) => ({ type: "card_update", id: cardId, body, state }),
+      lane.session, cardId, summaryTask(msg.transcript), cardUpdateFrame(cardId),
       "summarise error", { cancelledCards, send }
     );
   } finally {

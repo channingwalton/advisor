@@ -88,9 +88,9 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Query lane.** The Ask box (a `query` card with no anchor, so it sorts in at the time of asking) and right-click actions (the action's kind, anchored under the clicked line). One at a time — a second gets an `error` frame. Gets its conversation through its own cursor, like a research lane.
 
-**guardedRun / cancel** (`guardedRun.ts`, `cancel.ts`). One run skeleton for every card, reply, summary and document task: stream, then a terminal frame, all suppressed once the id is cancelled. `cancel` interrupts whichever lane holds the id and answers on the right channel (`card_update` or `document_answer`).
+**guardedRun / cancel** (`guardedRun.ts`, `cancel.ts`). One run skeleton for every card, reply, summary and document task: stream, then a terminal frame, all suppressed once the id is cancelled. Streaming frames go out at most every 150 ms (`throttle.ts`); before any text a card stays `pending` and carries the agent's current `activity` (see *Card text streams as it is written*). `cancel` interrupts whichever lane holds the id and answers on the right channel (`card_update` or `document_answer`).
 
-**Agent backends** (`agent.ts`, `codex.ts`, `providers.ts`). One `Agent` interface (`run` / `reset` / `interrupt`) behind a provider registry; one provider and model serve every lane. `AgentSession` is a long-lived Claude Agent SDK session fed by streaming input, loading the user's own Claude configuration (`settingSources: ["user"]` — where personal context such as notes locations belongs), `maxTurns` 40, 180 s per task. `CodexAgentSession` wraps `@openai/codex-sdk` (measured far slower for cards — see the 2026-06-13 sections).
+**Agent backends** (`agent.ts`, `codex.ts`, `providers.ts`). One `Agent` interface (`run` / `reset` / `interrupt`) behind a provider registry; one provider and model serve every lane. `AgentSession` is a long-lived Claude Agent SDK session fed by streaming input, with `includePartialMessages` so text reaches a card delta by delta, loading the user's own Claude configuration (`settingSources: ["user"]` — where personal context such as notes locations belongs), `maxTurns` 40, 180 s per task. `CodexAgentSession` wraps `@openai/codex-sdk` (measured far slower for cards — see the 2026-06-13 sections).
 
 **Sandbox.** Claude: one policy, `toolDecision` — web, `ToolSearch`, connector reads/searches, and non-sensitive `$HOME` reads by absolute or `~` path; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. Codex: the same denylist as a Seatbelt profile, the CLI running under `sandbox-exec` (`codexSandbox.ts`). See *Agent sandboxing* and *Codex runs under a Seatbelt profile*.
 
@@ -122,7 +122,7 @@ Sidecar → Swift:
 ```json
 {"type":"hello","version":1}
 {"type":"card","id":"...","trigger":"<utterance uuid>","kind":"answer|context|factcheck|query|summary","title":"...","body":"...","state":"pending|streaming|done|failed|cancelled"}
-{"type":"card_update","id":"...","body":"...","state":"pending|streaming|done|failed|cancelled"}
+{"type":"card_update","id":"...","body":"...","state":"pending|streaming|done|failed|cancelled","activity":"Searching the web for “…”"}
 {"type":"document_answer","id":"d3","body":"...","state":"pending|streaming|done|failed|cancelled"}
 {"type":"error","fatal":false,"message":"..."}
 ```
@@ -143,7 +143,7 @@ The aspiration is ≤5 s from utterance to a useful card. As measured, it is not
 | Trigger → first card text | median 30.5 s (p90 52.7 s) |
 | Trigger → finished card | 33.4 s |
 
-The placeholder-then-stream pattern keeps the card visible early, but text streams per assistant block, not per token, and the two-pass "From your notes:" prompt mostly doesn't produce an early block (155 of 184 cards arrived as one block). Token streaming and fast local note hits remain open — see *Effort preference*.
+The placeholder-then-stream pattern keeps the card visible early. Until 2026-10-09 text streamed per assistant block, and the model mostly writes its answer as one block at the end, so cards filled in one go. Text now streams as it is written, and a card shows what the agent is doing until then — see *Card text streams as it is written*. Fast local note hits remain open.
 
 ## Error handling
 
@@ -1952,8 +1952,65 @@ logged on its `run start` line, so card timings can be compared by level from
 the log.
 
 This is a measuring knob, not the whole fix: token streaming
-(`includePartialMessages`) and fast local note hits before web research remain
-open.
+(`includePartialMessages`, done 2026-10-09 — see the next section) and fast
+local note hits before web research remain open.
+
+## Card text streams as it is written (2026-10-09)
+
+Cards still felt slow: they showed nothing until the agent finished. Measured
+over 183 research cards since 2026-09-01 (Sonnet, medium effort): run start to
+the last tool call a median 11.8 s, the last tool call to the first text 15.7 s,
+first text to done 0.1 s. 163 of 183 cards arrived as one text block, written
+whole at the end of the turn, so "streaming" per block streamed nothing.
+
+Two changes, one per gap:
+
+- **Text deltas.** `AgentSession` sets `includePartialMessages`, and the stream
+  loop appends each top-level `text_delta` as it arrives. The finished
+  `assistant` message that follows repeats the text, so a message whose id was
+  streamed adds nothing; one that wasn't (no stream events) is still added
+  whole. The real CLI was checked to give a finished message the id of its
+  `message_start` (`streaming.sdk.test.ts`). A message still open (no
+  `message_stop`) when another starts, or when an unstreamed one arrives, broke
+  off: the CLI retries it or falls back to a non-streaming request under a new
+  id, and drops the partial one from its own transcript, so its text comes off
+  the card too. The `first text` log line now marks the first visible text, so
+  latency stays comparable in the log.
+- **Cut-short answers.** Text can now stop mid-sentence, so a turn that ends in
+  an error with some text (timed out, `error_max_turns`, the CLI exiting) keeps
+  the text and adds "*Stopped early: <reason>.*" (`cardOutcome`).
+- **Activity lines.** Tool calls the sandbox gate lets through
+  (`describeToolUse` in `activity.ts`: "Searching the web for “…”", "Reading
+  example.com", "Reading Cedar.md", connector calls) and thinking blocks
+  ("Thinking…") go to `RunProgress.onActivity`. They come from the gate's allow
+  path, not the model's `tool_use`, so a denied call (a credential read) never
+  shows as if it ran.
+  `guardedRun` sends them as `activity` on `card_update`: with no text yet the
+  frame is `pending` with body "…", as at dispatch. Each frame replaces the line
+  and a frame without one clears it, so text arriving ends it and terminal
+  frames never carry one. `ToolSearch` (loading connector schemas) shows
+  nothing. The app keeps it on `Card.activity` while the card researches and
+  shows it under the body, never in the saved note. Saved-session answers
+  (`document_answer`) ignore it.
+
+`guardedRun` rate-limits streaming frames to one per 150 ms: deltas arrive
+every few words, each frame resends the whole body, and the app re-renders its
+markdown per frame. The first frame goes at once, later ones collapse into one
+trailing frame carrying the latest state, and that trailing frame is dropped
+when the run ends, so nothing follows the terminal frame. `Agent.run` now takes
+a `RunProgress` (`onText`, `onActivity`) instead of a bare text callback.
+
+The session note's debounced rewrite was keyed on every card's body, so each
+streaming frame restarted its 2 s wait and held back transcript writes while a
+card streamed. It is now keyed on what the note holds (`Card.writerKey`, each
+card as `persisted`), which streaming text never changes.
+
+Not changed: time to a finished answer is still the searching and thinking.
+Codex reports no activity yet (its SDK has `item.started` events for web
+searches and connector calls that could feed it). A collapsed card (fact-checks
+start collapsed) shows neither the streaming text nor the activity line until
+expanded. The two-pass "From your notes:" prompt rule predates this and may now
+cost more than it gives — measure before dropping it.
 
 ## Revisit as it grows
 

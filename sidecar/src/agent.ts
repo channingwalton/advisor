@@ -1,7 +1,14 @@
-import { query, type EffortLevel, type HookCallback, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  query,
+  type EffortLevel,
+  type HookCallback,
+  type SDKPartialAssistantMessage,
+  type SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { homedir } from "node:os";
 import fs from "node:fs";
 import path from "node:path";
+import { describeToolUse, THINKING } from "./activity.js";
 import { log } from "./protocol.js";
 
 type PermissionResult =
@@ -157,14 +164,30 @@ export interface TaskResult {
   error?: string;
 }
 
-interface PendingTask {
+/// What a running task reports as it goes.
+export interface RunProgress {
+  /// The answer so far, each time it grows.
   onText?: (accumulated: string) => void;
+  /// A short line saying what the agent is doing now, e.g. `Searching the web
+  /// for “Cedar”` (see activity.ts).
+  onActivity?: (activity: string) => void;
+}
+
+interface PendingTask {
+  progress?: RunProgress;
   resolve: (r: TaskResult) => void;
   settled: boolean;
   buffer: string;
   t0: number; // dispatch time, for latency logging
   cold: boolean; // first run after a (re)spawn pays the SDK subprocess boot
   firstTextLogged: boolean;
+  /// The message being streamed, until its `message_stop`, and the length of
+  /// `buffer` before it — so its text can come off again if the CLI replaces it.
+  open?: { id: string; mark: number };
+  /// Messages whose text was streamed: their finished blocks are already in `buffer`.
+  streamed: Set<string>;
+  /// A text block has started but none of its text has arrived yet.
+  blockOpen: boolean;
 }
 
 export interface AgentSessionOptions {
@@ -197,11 +220,7 @@ export type QueryFn = typeof query;
 /// A long-lived agent backend. Tasks are answered in FIFO order; the session
 /// retains context across tasks until reset().
 export interface Agent {
-  run(
-    task: string,
-    onText?: (accumulated: string) => void,
-    timeoutMs?: number
-  ): Promise<TaskResult>;
+  run(task: string, progress?: RunProgress, timeoutMs?: number): Promise<TaskResult>;
   /** Drop the session (and its accumulated context); next run() starts fresh. */
   reset(): void;
   /** Interrupt the currently-running turn (best effort). */
@@ -350,7 +369,8 @@ export function toolDecision(toolName: string, input: unknown, policy: SandboxPo
 /// same policy again. Fails closed on any error.
 export function sandboxGate(
   policy: SandboxPolicy,
-  onDeny: (tool: string, input: unknown, message: string) => void = () => {}
+  onDeny: (tool: string, input: unknown, message: string) => void = () => {},
+  onAllow: (tool: string, input: unknown) => void = () => {}
 ): HookCallback {
   return async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
@@ -360,7 +380,12 @@ export function sandboxGate(
     } catch (err) {
       decision = { behavior: "deny", message: `Advisor sandbox error: ${err}` };
     }
-    if (decision.behavior === "allow") return {};
+    if (decision.behavior === "allow") {
+      try {
+        onAllow(input.tool_name, input.tool_input);
+      } catch { /* reporting must not block the call */ }
+      return {};
+    }
     // A rejected hook is non-blocking for the CLI, so a logging failure must
     // not turn this deny into a pass.
     try {
@@ -425,11 +450,7 @@ export class AgentSession implements Agent {
     }
   }
 
-  async run(
-    task: string,
-    onText?: (accumulated: string) => void,
-    timeoutMs = 180_000
-  ): Promise<TaskResult> {
+  async run(task: string, progress?: RunProgress, timeoutMs = 180_000): Promise<TaskResult> {
     // A previous turn that timed out (or was interrupted) but never emitted a
     // clean `result` leaves its settled task at the head of the queue. Reusing
     // the session would let that stale head suppress this task's streaming and
@@ -451,13 +472,15 @@ export class AgentSession implements Agent {
     const cold = this.firstRunAfterSpawn;
     this.firstRunAfterSpawn = false;
     const p: PendingTask = {
-      onText,
+      progress,
       resolve: () => {},
       settled: false,
       buffer: "",
       t0: Date.now(),
       cold,
       firstTextLogged: false,
+      streamed: new Set(),
+      blockOpen: false,
     };
     log(`${this.opts.name}: run start (cold=${cold}, queue=${this.pending.length}, effort=${this.opts.effort ?? "default"})`);
     const answer = new Promise<TaskResult>((res) => {
@@ -502,6 +525,50 @@ export class AgentSession implements Agent {
     log(`${this.opts.name}: denied ${tool} ${JSON.stringify(input)?.slice(0, 200)}: ${message}`);
   };
 
+  /// The first text a task shows: the time a card stops being blank.
+  private logFirstText(p: PendingTask): void {
+    if (p.firstTextLogged) return;
+    p.firstTextLogged = true;
+    log(`${this.opts.name}: first text +${Date.now() - p.t0}ms`);
+  }
+
+  /// Take the text of a message that never finished back off the card: the CLI
+  /// has replaced it (it removes the partial message from its own transcript).
+  private dropOpen(p: PendingTask): void {
+    if (!p.open) return;
+    const { mark } = p.open;
+    p.open = undefined;
+    if (p.buffer.length === mark) return;
+    log(`${this.opts.name}: dropping ${p.buffer.length - mark} chars of a message the CLI replaced`);
+    p.buffer = p.buffer.slice(0, mark);
+    p.progress?.onText?.(p.buffer);
+  }
+
+  /// A raw Messages API event from the main agent: text deltas grow the
+  /// answer; a thinking block says so on the card.
+  private onStreamEvent(p: PendingTask, ev: SDKPartialAssistantMessage["event"]): void {
+    if (ev.type === "message_start") {
+      // One still open broke off, and this is the CLI's retry of it.
+      this.dropOpen(p);
+      p.open = { id: ev.message.id, mark: p.buffer.length };
+    } else if (ev.type === "message_stop") {
+      p.open = undefined;
+    } else if (ev.type === "content_block_start") {
+      if (ev.content_block.type === "text") p.blockOpen = true;
+      else if (ev.content_block.type === "thinking" || ev.content_block.type === "redacted_thinking") {
+        p.progress?.onActivity?.(THINKING);
+      }
+    } else if (ev.type === "content_block_delta" && ev.delta.type === "text_delta" && ev.delta.text) {
+      // Blocks are separated as whole ones are (see the assistant case).
+      if (p.blockOpen && p.buffer) p.buffer += "\n\n";
+      p.blockOpen = false;
+      if (p.open) p.streamed.add(p.open.id);
+      this.logFirstText(p);
+      p.buffer += ev.delta.text;
+      p.progress?.onText?.(p.buffer);
+    }
+  }
+
   /// Second check after the PreToolUse gate, for the calls the SDK asks about.
   private canUseTool = async (
     toolName: string,
@@ -542,7 +609,12 @@ export class AgentSession implements Agent {
         permissionMode: "default",
         // The sandbox: the gate runs before the SDK's own approvals; canUseTool
         // re-checks the calls the SDK asks about.
-        hooks: { PreToolUse: [{ hooks: [sandboxGate(this.policy, this.logDenied)] }] },
+        // Only a call the gate lets through shows on the card.
+        hooks: { PreToolUse: [{ hooks: [sandboxGate(this.policy, this.logDenied, (tool, input) => {
+          const line = describeToolUse(tool, input);
+          const current = pending[0];
+          if (line && current && !current.settled) current.progress?.onActivity?.(line);
+        })] }] },
         canUseTool: this.canUseTool,
         // Load the user's own Claude configuration (CLAUDE.md etc.) — that is
         // where personal context like vault locations belongs, not in Advisor.
@@ -553,6 +625,9 @@ export class AgentSession implements Agent {
         // tool-call/cost burn. The 180 s task timeout is the primary bound — this
         // is the secondary guard against a tight loop within it (issue #58).
         maxTurns: 40,
+        // Text deltas as the model writes, so a card fills in word by word
+        // rather than one whole block at the end of the turn.
+        includePartialMessages: true,
         // Without this the CLI's stderr is dropped and a spawn-time crash
         // surfaces only as "exited with code 1" (the v0.2.0 DMG entitlement
         // break was invisible for exactly this reason). Per line, not per
@@ -571,16 +646,27 @@ export class AgentSession implements Agent {
       try {
         for await (const msg of stream) {
           const current = pending[0];
-          if (msg.type === "assistant") {
+          if (msg.type === "stream_event") {
+            if (current && !current.settled && msg.parent_tool_use_id === null) this.onStreamEvent(current, msg.event);
+          } else if (msg.type === "assistant") {
+            // Its text was already added delta by delta, unless it wasn't streamed.
+            const streamed = current?.streamed.has(msg.message.id) ?? false;
+            // A message the stream never announced, while another is still open:
+            // the CLI's non-streaming fallback, replacing the one that broke off.
+            if (current && !current.settled && !streamed && msg.parent_tool_use_id === null
+                && current.open && current.open.id !== msg.message.id) {
+              this.dropOpen(current);
+            }
             for (const block of msg.message.content) {
               if (block.type === "text" && current && !current.settled) {
-                // Log every text block (each card update) as a delta, so the
-                // progression of what reaches the card is visible in the logs.
-                const tag = current.firstTextLogged ? "text+" : "first text";
-                current.firstTextLogged = true;
-                log(`${this.opts.name}: ${tag} +${Date.now() - current.t0}ms: ${JSON.stringify(block.text.slice(0, 280))}`);
-                current.buffer += (current.buffer ? "\n\n" : "") + block.text;
-                current.onText?.(current.buffer);
+                // Log every finished text block, so the progression of what
+                // reaches the card is visible in the logs.
+                log(`${this.opts.name}: text+ +${Date.now() - current.t0}ms: ${JSON.stringify(block.text.slice(0, 280))}`);
+                if (!streamed) {
+                  this.logFirstText(current);
+                  current.buffer += (current.buffer ? "\n\n" : "") + block.text;
+                  current.progress?.onText?.(current.buffer);
+                }
               } else if (block.type === "tool_use") {
                 log(`${this.opts.name}: tool ${block.name}`);
               }

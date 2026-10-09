@@ -570,14 +570,8 @@ struct TranscriptView: View {
         }
     }
 
-    /// Signature of the card fields the session writer actually renders, so a
-    /// rewrite is triggered by content/lifecycle changes but not by expand/
-    /// collapse. Card add/remove changes the array length, also caught here.
-    private var cardsWriterKey: [String] {
-        store.cards.map {
-            "\($0.id)|\($0.state)|\($0.title)|\($0.body)|\($0.verdict?.rawValue ?? "")|\($0.sources.count)"
-        }
-    }
+    /// What the session note holds of the cards (`Card.writerKey`).
+    private var cardsWriterKey: [String] { Card.writerKey(store.cards) }
 
     /// The in-progress (not-yet-finalised) speech across sources.
     private var interimText: String {

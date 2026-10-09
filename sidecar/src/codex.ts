@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { Codex, type CodexOptions, type Thread, type ThreadOptions } from "@openai/codex-sdk";
-import type { Agent, AgentSessionOptions, TaskResult } from "./agent.js";
+import type { Agent, AgentSessionOptions, RunProgress, TaskResult } from "./agent.js";
 import { codexSandboxWrapper } from "./codexSandbox.js";
 import { log } from "./protocol.js";
 
@@ -48,7 +48,7 @@ export function codexThreadOptions(opts: AgentSessionOptions): ThreadOptions {
 
 interface PendingTask {
   task: string;
-  onText?: (accumulated: string) => void;
+  progress?: RunProgress;
   timeoutMs: number;
   resolve: (result: TaskResult) => void;
 }
@@ -112,13 +112,9 @@ export class CodexAgentSession implements Agent {
     return this.thread;
   }
 
-  run(
-    task: string,
-    onText?: (accumulated: string) => void,
-    timeoutMs = 180_000
-  ): Promise<TaskResult> {
+  run(task: string, progress?: RunProgress, timeoutMs = 180_000): Promise<TaskResult> {
     return new Promise((resolve) => {
-      this.pending.push({ task, onText, timeoutMs, resolve });
+      this.pending.push({ task, progress, timeoutMs, resolve });
       this.drain();
     });
   }
@@ -177,7 +173,7 @@ export class CodexAgentSession implements Agent {
           if (ev.type === "item.updated" || ev.type === "item.completed") {
             if (ev.item.type === "agent_message") {
               messages.set(ev.item.id, ev.item.text);
-              task.onText?.(joined());
+              task.progress?.onText?.(joined());
             }
           } else if (ev.type === "turn.failed") {
             throw new Error(ev.error.message);

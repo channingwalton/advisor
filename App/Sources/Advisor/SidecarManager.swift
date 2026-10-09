@@ -50,6 +50,10 @@ struct Card: Identifiable, Equatable {
     /// never loses it and a cancelled one (or a failed re-summarise) can put it
     /// back. Nil until the card first completes.
     var settledBody: String?
+    /// What the agent is doing while the card researches ("Searching the web for
+    /// “Cedar”"), from the sidecar's `activity`. Each update replaces it; nil once
+    /// the research ends. Shown on the card only, never saved.
+    var activity: String?
 
     /// Maps the streaming `state` onto the spec's research lifecycle: a card is
     /// "researching" (spinner) until its first terminal state.
@@ -67,9 +71,21 @@ struct Card: Identifiable, Equatable {
         return card
     }
 
-    /// Apply a sidecar `card_update`'s body and state.
-    mutating func apply(body newBody: String?, state: String?) {
+    /// Signature of what the session note holds of `cards` — each one as
+    /// `persisted` — so the note is rewritten when that changes, and not on every
+    /// streaming frame or an expand/collapse. Adding or removing a saved card
+    /// changes it too.
+    static func writerKey(_ cards: [Card]) -> [String] {
+        cards.compactMap(\.persisted).map {
+            "\($0.id)|\($0.state)|\($0.title)|\($0.body)|\($0.verdict?.rawValue ?? "")|\($0.sources.count)"
+        }
+    }
+
+    /// Apply a sidecar `card_update`'s body, state and activity.
+    mutating func apply(body newBody: String?, state: String?, activity newActivity: String? = nil) {
         if let newBody { body = newBody }
+        // Set after the state below, so a card that has stopped researching drops it.
+        defer { activity = isResearching ? newActivity : nil }
         guard let state else { return }
         // A follow-up answer reaching a terminal state re-enables the reply
         // field for another turn.
@@ -730,7 +746,9 @@ final class SidecarManager {
             if let verdict = (obj["verdict"] as? String).flatMap(Verdict.init(rawValue:)) {
                 store.cards[idx].verdict = verdict
             }
-            store.cards[idx].apply(body: obj["body"] as? String, state: obj["state"] as? String)
+            store.cards[idx].apply(
+                body: obj["body"] as? String, state: obj["state"] as? String,
+                activity: obj["activity"] as? String)
         case "document_answer":
             guard let id = obj["id"] as? String else { return }
             let body = obj["body"] as? String ?? ""

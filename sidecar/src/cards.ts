@@ -2,8 +2,10 @@
 /// can be unit-tested without triggering its stdio side effects.
 
 /// Terminal card body + state from a run result: prefer the answer, else show
-/// the failure reason rather than a bare "no answer produced".
+/// the failure reason rather than a bare "no answer produced". An answer cut
+/// short (it streams word by word, so it may stop mid-sentence) says so.
 export function cardOutcome(text: string, error?: string): { body: string; state: "done" | "failed" } {
+  if (text && error) return { body: `${text}\n\n*Stopped early: ${error}.*`, state: "done" };
   if (text) return { body: text, state: "done" };
   return { body: error ? `failed: ${error}` : "no answer produced", state: "failed" };
 }

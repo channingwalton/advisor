@@ -119,6 +119,15 @@ struct FeedCardView: View {
                     MarkdownText(markdown: card.body, style: card.kind == "context" ? .context : .answer)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                // What the agent is doing while it researches, so the card
+                // isn't blank until the answer starts.
+                if let activity = card.activity {
+                    Text(activity)
+                        .font(.system(size: 12).italic())
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 footer
                 // Summary cards are a one-shot recap, not a conversation, so they
                 // don't take follow-ups; nor does a blockquote Advisor didn't write.

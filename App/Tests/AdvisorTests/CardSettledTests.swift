@@ -170,3 +170,21 @@ private let followUp = SessionMarkdown.replyBody(base: "Our migration.", questio
         #expect(card.body == "We agreed on Cedar.\n\n*Couldn't update the summary\(expected)*", "\(failure)")
     }
 }
+
+/// Streaming changes a card's body several times a second. Only what the note
+/// holds may trigger a rewrite, or every frame postpones the debounced write.
+@Test func noteRewriteWaitsForSavedChanges() {
+    var card = Card(id: "c1", created: t0, kind: "answer", title: "Cedar", body: "…", state: "pending")
+    let none = Card.writerKey([card])
+    card.apply(body: "Cedar is", state: "streaming", activity: "Thinking…")
+    #expect(Card.writerKey([card]) == none)
+
+    card.apply(body: "Our migration.", state: "done")
+    let done = Card.writerKey([card])
+    #expect(done != none)
+
+    // A follow-up streaming in leaves the saved answer as it was.
+    card.apply(body: followUp, state: "streaming")
+    #expect(Card.writerKey([card]) == done)
+    #expect(Card.writerKey([]) != done)
+}

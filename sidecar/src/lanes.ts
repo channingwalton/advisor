@@ -1,6 +1,6 @@
 import { Agent, type AgentSessionOptions } from "./agent.js";
 import { AdvisorConfig, effortArg, modelArg } from "./config.js";
-import { guardedRun } from "./guardedRun.js";
+import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
 import { buildResearchSystem, sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
 import { Outbound } from "./protocol.js";
 
@@ -116,9 +116,7 @@ export async function runCard(
   try {
     const prompt = sessionContextPrefix(deps.sessionContext()) + deps.transcript.delta(lane.name) + task;
     failed = await guardedRun(
-      lane.session, cardId, prompt,
-      (body, state) => ({ type: "card_update", id: cardId, body, state }),
-      "agent error", deps
+      lane.session, cardId, prompt, cardUpdateFrame(cardId), "agent error", deps
     );
   } finally {
     // Recycle a pooled (research/query) lane after any failure — timeout/error.
