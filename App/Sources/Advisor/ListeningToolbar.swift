@@ -359,17 +359,7 @@ struct ListeningToolbar: View {
     /// under a name) controls, sitting under the Context editor (issue #10).
     private var contextLibraryControls: some View {
         HStack(spacing: 8) {
-            Menu {
-                ForEach(savedContexts) { c in
-                    Button(c.name) { sessionContext = c.text }
-                }
-            } label: {
-                Label("Load", systemImage: "tray.and.arrow.down")
-                    .font(.system(size: 12))
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .disabled(savedContexts.isEmpty)
+            SavedContextMenu(contexts: savedContexts) { sessionContext = $0.text }
 
             Spacer(minLength: 4)
 

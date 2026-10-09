@@ -127,6 +127,7 @@ collapsible folder sections above the date-grouped sessions.
 - **Folder context.** The speech-bubble button beside a folder's record button
   sets context (who's there, what it's about) that every recording started in
   that folder inherits as its starting session context — editable per session.
+  **Load** fills it from one of your saved contexts (Preferences ▸ Contexts).
   The bubble is filled when a folder has a context set.
 - **Folder tags.** The adjacent **tag button** sets default tags from your
   library; every new recording started from that folder inherits them, and you

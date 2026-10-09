@@ -1211,6 +1211,11 @@ left of the record button: a speech bubble, tinted/filled when a context is set,
 opening a popover with a `TextEditor`. It owns its own draft/popover state so each
 folder row edits independently; `SessionsView.folderContexts` caches each folder's
 text (loaded in `reload`) for the button state and is updated in place on save.
+The popover also has the `#10` **Load** menu (`SavedContextMenu`, shared with the
+recording window's Context popover), filling the draft from a saved context;
+`SessionsView` reads `config.contexts` in `reload` and on `advisorConfigChanged`,
+so a Preferences edit shows without a relaunch. Load copies the text — the folder
+keeps its own `.context.md`, not a link to the saved context.
 
 Inheritance reuses the `#35` `pendingFolder` bridge: when the recording window opens
 via a folder's record button, `seedContextFromPendingFolder` sets `sessionContext`

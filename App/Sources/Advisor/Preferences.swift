@@ -435,6 +435,29 @@ private struct ContextEditorSheet: View {
     }
 }
 
+/// A "Load" menu listing the saved contexts; picking one hands it to `onPick`.
+/// Shared by the recording window's Context popover and a folder's context
+/// popover, so both choose from the same library the same way.
+struct SavedContextMenu: View {
+    let contexts: [SavedContext]
+    let onPick: (SavedContext) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(contexts) { c in
+                Button(c.name) { onPick(c) }
+            }
+        } label: {
+            Label("Load", systemImage: "tray.and.arrow.down")
+                .font(.system(size: 12))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .focusEffectDisabled()
+        .disabled(contexts.isEmpty)
+    }
+}
+
 /// Manages the library of session tags (issue #15): a list with add / edit /
 /// delete, editing through a sheet (name + colour). Bound to `config.tags`, so
 /// every change rides the parent's save + notification, which the Sessions

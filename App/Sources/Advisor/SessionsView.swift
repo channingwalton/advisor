@@ -29,6 +29,9 @@ struct SessionsView: View {
     /// The user's tag library (issue #15) — supplies pill colours and the detail
     /// pane's autocomplete. Refreshed from config on appear and config changes.
     @State private var tagLibrary: [SavedTag] = []
+    /// The saved-contexts library (issue #10), offered by a folder's context
+    /// popover. Refreshed from config on appear and config changes.
+    @State private var savedContexts: [SavedContext] = []
     /// Which research kinds are on in Preferences — gates the detail's
     /// right-click Answer / Context / Fact check, as in the recording window.
     @State private var triggers = AdvisorConfig.Triggers()
@@ -99,6 +102,7 @@ struct SessionsView: View {
             let config = AdvisorConfig.load()
             let library = config.tags
             tagLibrary = library
+            savedContexts = config.contexts
             triggers = config.triggers
             folderTags = folders.reduce(into: [:]) {
                 $0[$1] = SessionArchive.folderTags($1).filter {
@@ -276,7 +280,11 @@ struct SessionsView: View {
                     .foregroundStyle(Theme.textTertiary)
                     .opacity(hovered ? 0 : 1)
                 HStack(spacing: 9) {
-                    FolderContextButton(folder: folder, context: folderContexts[folder] ?? "") { text in
+                    FolderContextButton(
+                        folder: folder,
+                        context: folderContexts[folder] ?? "",
+                        library: savedContexts
+                    ) { text in
                         saveFolderContext(text, for: folder)
                     }
                     FolderTagsButton(
@@ -625,6 +633,7 @@ struct SessionsView: View {
     private func reload() {
         let config = AdvisorConfig.load()
         tagLibrary = config.tags
+        savedContexts = config.contexts
         triggers = config.triggers
         folders = SessionArchive.folders()
         folderContexts = folders.reduce(into: [:]) { $0[$1] = SessionArchive.folderContext($1) }
@@ -795,6 +804,8 @@ private struct FolderContextButton: View {
     let folder: String
     /// The folder's current saved context, for the tinted state and seeding the draft.
     let context: String
+    /// The saved-contexts library, offered by the popover's Load menu.
+    let library: [SavedContext]
     let onSave: (String) -> Void
     @State private var show = false
     @State private var draft = ""
@@ -826,6 +837,7 @@ private struct FolderContextButton: View {
                     .frame(width: 320, height: 100)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.hairline, lineWidth: 0.5))
                 HStack {
+                    SavedContextMenu(contexts: library) { draft = $0.text }
                     Spacer()
                     Button("Save") {
                         onSave(draft)
