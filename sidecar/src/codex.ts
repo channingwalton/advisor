@@ -33,6 +33,9 @@ export function codexConstructorOptions(
 /// This is still coarser than `canUseTool`: MCP servers come from the user's
 /// ~/.codex/config.toml and are not gated by `allowMcpActions`, so a connector
 /// read the Claude backend would refuse can still happen here.
+///
+/// `noTools` (the classifier) is not honoured: an empty `allowedTools` turns
+/// web search and network off, but the shell and those MCP servers stay.
 export function codexThreadOptions(opts: AgentSessionOptions): ThreadOptions {
   const web = opts.allowedTools.some((t) => t.startsWith("Web"));
   return {

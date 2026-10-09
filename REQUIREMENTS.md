@@ -88,6 +88,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - N1. **Latency:** best efforts; ~2–5 s after the triggering utterance is the aspiration, not a hard requirement (relaxed 2026-06-11).
   - A card's answer appears as the agent writes it, not when the agent finishes. `#card-token-stream`
   - While a card researches, it shows what the agent is doing (searching the web, reading a file, thinking); the line goes once the answer is being written or the card ends. `#card-activity`
+  - On Claude, the trigger classifier only decides what to research: it is offered no tools, built-in or connector, so it never searches or reads itself. (On Codex it has no web search or network, but keeps its shell and MCP servers.) `#classifier-no-tools`
 - N2. **Platform:** macOS only (Apple Silicon).
 - N3. **Privacy:** STT runs on-device (Apple SpeechAnalyzer); only text leaves the machine. Listening must be explicitly user-initiated.
 - N4. **Cost:** STT is local (free); LLM cost per listening-hour must be tolerable for daily personal use.

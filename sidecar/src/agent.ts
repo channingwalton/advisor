@@ -198,6 +198,14 @@ export interface AgentSessionOptions {
   /// choice, which includes the user's `effortLevel` from their settings.
   effort?: EffortLevel;
   allowedTools: string[];
+  /// Offer the model no built-in tools and no MCP servers — the user's own or
+  /// their claude.ai connectors (the classifier, which only reads its prompt).
+  /// An empty `allowedTools` doesn't do this: it only skips the permission
+  /// check, and every other tool is still offered. A tool the user's settings
+  /// switch on (`ENABLE_LSP_TOOL` adds LSP) still comes through, so pair it with
+  /// `settingSources: []`. Claude only: Codex has no equivalent (see
+  /// `codexThreadOptions`).
+  noTools?: boolean;
   cwd?: string;
   /// SDK setting sources to load. Defaults to ["user"] (the user's own Claude
   /// config — CLAUDE.md, MCP, etc.), which the research/query lanes need for
@@ -605,6 +613,9 @@ export class AgentSession implements Agent {
         // Auto-allowed tools (no permission check) — web only.
         allowedTools: this.opts.allowedTools.filter((t) => t.startsWith("Web")),
         disallowedTools: ["Bash", "Write", "Edit", "NotebookEdit", "Task", "KillShell"],
+        // No built-in tools, and only the MCP servers passed here (none) — not
+        // the user's own or their claude.ai connectors.
+        ...(this.opts.noTools ? { tools: [], mcpServers: {}, strictMcpConfig: true } : {}),
         cwd: this.policy.cwd,
         permissionMode: "default",
         // The sandbox: the gate runs before the SDK's own approvals; canUseTool

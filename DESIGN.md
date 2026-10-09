@@ -79,7 +79,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **AutoPipeline** (`autoPipeline.ts`). Each utterance or note restarts a 1.5 s quiet debounce; then the classifier gets only the lines past its cursor, consecutive same-source lines merged. The cursor commits only on a successful classify (a failed window is re-fed, up to 3 times). New subjects are deduped for 10 minutes (normalised in any script), queued (≤20) and dispatched to free research lanes, anchored to the last line of the window. Turning Auto cards off drops the pending classify, queued research and any in-flight classify result.
 
-**Classifier** (`trigger.ts`). A persistent session on the shared provider and model, with no tools and none of the user's settings; returns triggers of kind `question | context | factcheck` (only the kinds enabled in Preferences, at most 2 per pass) with a subject and query, steered by the sensitivity preference (conservative / balanced / eager). Warmed at session start; 30 s timeout. A `question` becomes an `answer` card.
+**Classifier** (`trigger.ts`). A persistent session on the shared provider and model, offered no tools (`noTools`; on Codex, no web search or network) and none of the user's settings; returns triggers of kind `question | context | factcheck` (only the kinds enabled in Preferences, at most 2 per pass) with a subject and query, steered by the sensitivity preference (conservative / balanced / eager). Warmed at session start; 30 s timeout. A `question` becomes an `answer` card.
 
 **Card lanes** (`lanes.ts`). Every card-answering session takes `cardLaneOptions`: one system prompt (`buildResearchSystem()`: persona plus fixed operating rules — lead with the answer, notes first then web, no narration, cite, say "couldn't verify", never ask), the tools `WebSearch`, `WebFetch`, `Read`, `Grep`, `Glob` plus the user's own connectors, and the effort preference. The per-task instruction comes from `researchTask` (answer / context / fact-check), `replyTask`, `summaryTask`, `documentQuestionTask` or `documentResearchTask`. Two kinds of lane:
 
@@ -2011,6 +2011,36 @@ searches and connector calls that could feed it). A collapsed card (fact-checks
 start collapsed) shows neither the streaming text nor the activity line until
 expanded. The two-pass "From your notes:" prompt rule predates this and may now
 cost more than it gives — measure before dropping it.
+
+## The classifier is offered no tools (2026-10-09)
+
+The classifier was meant to have no tools, but `allowedTools: []` only skips the
+permission check — the CLI still offered it every built-in tool (29 on the real
+login: Grep, Read, WebSearch, AskUserQuestion, ScheduleWakeup, ToolSearch, …),
+and the sandbox let the reads and web searches through. 46 classifies in the
+log used one, 22 of them on 6–9 October: AskUserQuestion 23 times, WebSearch 13,
+ToolSearch 5, Grep 4. Those took a median 10.2 s against 1.9 s, and classifies run
+one at a time, so every later trigger waited behind them.
+
+`AgentSessionOptions.noTools` now offers the model nothing: `tools: []` (no
+built-ins) plus `mcpServers: {}` with `strictMcpConfig` (no MCP servers but
+those passed, so none of the user's or claude.ai's). The classifier sets it; the
+card lanes don't. `classifier.sdk.test.ts` checks the request the real CLI
+sends: a card lane in the same synthetic home sees a stub MCP server and the
+built-ins, the classifier sees no tools, and `noTools` with the user's settings
+loaded still sees no stub (with `tools: []` alone it does). Checked on the real
+login too: the classifier went from 29 built-in tools and the claude.ai
+connectors (Linear, Gmail, Calendar, Drive, Docs connected; they join after the
+init message, so ask `mcpServerStatus()` after a turn) to no tools and no
+servers. A tool the user's settings switch on still comes through —
+`ENABLE_LSP_TOOL` adds LSP to a card lane with `noTools` — which is why the
+classifier also keeps `settingSources: []`.
+
+Codex is not covered: its classifier already has web search and network off,
+but keeps its shell (read-only, under the Seatbelt profile) and the MCP servers
+in `~/.codex/config.toml`. The SDK's `config: { mcp_servers: {} }` would pass
+`--config mcp_servers={}`; whether that clears the user's servers, and how to
+turn the shell off, is untested against the real Codex CLI.
 
 ## Revisit as it grows
 

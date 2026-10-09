@@ -1,4 +1,4 @@
-import { Agent } from "./agent.js";
+import { Agent, type AgentSessionOptions } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, modelArg } from "./config.js";
 import { log } from "./protocol.js";
@@ -170,6 +170,24 @@ export function configureClassifier(config: AdvisorConfig): void {
   session = undefined;
 }
 
+/// The classifier's session options.
+export function classifierOptions(config: AdvisorConfig): AgentSessionOptions {
+  return {
+    name: "classifier",
+    systemPrompt: classifierSystem(config),
+    model: modelArg(config),
+    allowedTools: [],
+    // It only decides what to research; the card lanes do the research. A
+    // tool call here held every later trigger back (~10 s instead of ~2 s).
+    noTools: true,
+    // The classifier only reads the transcript window — it needs none of the
+    // user's Claude config, so don't load it on every classify. No effort
+    // setting either: it already answers in ~1.5 s, and more thought would
+    // only delay every card.
+    settingSources: [],
+  };
+}
+
 function ensureSession(): Agent {
   if (!session) {
     const config =
@@ -182,17 +200,7 @@ function ensureSession(): Agent {
         effort: "",
         allowMcpActions: false,
       } as AdvisorConfig);
-    session = createAgent(config.provider, {
-      name: "classifier",
-      systemPrompt: classifierSystem(config),
-      model: modelArg(config),
-      allowedTools: [],
-      // The classifier only reads the transcript window — it needs none of the
-      // user's Claude config, so don't load it on every classify. No effort
-      // setting either: it already answers in ~1.5 s, and more thought would
-      // only delay every card.
-      settingSources: [],
-    });
+    session = createAgent(config.provider, classifierOptions(config));
   }
   return session;
 }
