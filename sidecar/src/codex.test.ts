@@ -245,11 +245,17 @@ async function until(condition: () => boolean): Promise<void> {
   assert.ok(condition(), "condition never held");
 }
 
-test("#codex-connectors a task stopped during client setup leaves the next task a thread with instructions", async () => {
+test("#codex-connectors a task stopped during client setup leaves the next task a thread with instructions", async (t) => {
+  // The session's timeout timer is unref'd, so it doesn't keep the event loop
+  // alive, and a pending setup holds nothing open: with a real timer the test
+  // runner can end the test before the timer fires (Node 22's did).
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { calls, create, client, setups } = controlledClient();
   const session = new CodexAgentSession(base, undefined, create);
   const warm = session.run("warm-up", undefined, 10);
   const first = session.run("first", undefined, 60_000);
+  await until(() => setups.length === 1);
+  t.mock.timers.tick(10);
   assert.equal((await warm).error, "timed out");
 
   // One setup serves both: the stopped task's must not start a second thread
