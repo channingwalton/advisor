@@ -23,7 +23,7 @@ decision.
   questions and transcript; folders with per-folder context and tags, session
   tags, search, ask-and-append, summarise), saved contexts, first-run terms,
   quit/close teardown (`QuitSequence`, `SessionClose`), preferences.
-- `sidecar/` — Node 22 + TypeScript, two agent backends: Claude Agent SDK and
+- `sidecar/` — Node 26 + TypeScript, two agent backends: Claude Agent SDK and
   Codex SDK (`src/providers.ts`, kept in step with the app's Preferences).
   Trigger classifier (persistent delta-fed session on the shared model) driving
   automatic cards (`autoPipeline.ts`); pooled research and query lanes plus
@@ -82,6 +82,10 @@ drove the #21 rework and #12 churn).
 ## Conventions & constraints
 
 - Work in main, don't branch unless told to
+- Pin exact versions. Node is pinned in `.tool-versions`, which mise, CI
+  (`node-version-file`) and `package.sh` (it bundles that Node) all read. npm
+  dependencies are exact in `sidecar/package.json`; `sidecar/.npmrc` sets
+  `save-exact`.
 - Always keep docs up to date
 - British spelling in UI strings, prompts, and docs.
 - The app must stay generic: no personal paths (vault, etc.) in code — the

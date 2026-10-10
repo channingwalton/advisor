@@ -48,7 +48,8 @@ cd sidecar && npm install --include=dev && npm run build
 cd ../App && swift build && .build/debug/Advisor
 ```
 
-Requires macOS 26+ on Apple Silicon, the Xcode toolchain and Node 22+.
+Requires macOS 26+ on Apple Silicon, the Xcode toolchain and Node 26.10.0
+(pinned in `.tool-versions`; `mise install` fetches it).
 Packaging, signing and releases are in
 [docs/development.md](docs/development.md).
 

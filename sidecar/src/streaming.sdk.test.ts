@@ -72,7 +72,7 @@ test("#card-token-stream #card-activity the real CLI streams text word by word a
       { onText: (acc) => text.push(acc), onActivity: (a) => activity.push(a) },
       30_000
     );
-    assert.equal(r.error, undefined, r.error);
+    assert.equal(r.error, undefined, `${r.error}`);
     assert.equal(r.text, ANSWER);
   } finally {
     s.reset();
@@ -97,7 +97,7 @@ test("#card-activity a call the user's settings refuse shows no activity line", 
   const activity: string[] = [];
   try {
     const r = await s.run("REFUSED: what is Cedar?", { onActivity: (a) => activity.push(a) }, 30_000);
-    assert.equal(r.error, undefined, r.error);
+    assert.equal(r.error, undefined, `${r.error}`);
   } finally {
     s.reset();
   }

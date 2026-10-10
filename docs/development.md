@@ -24,7 +24,7 @@ flowchart LR
   chronological feed of sentences with research cards inlined, and writes each
   session to markdown. Speech-to-text is Apple SpeechAnalyzer (macOS 26+),
   on-device.
-- **Sidecar** (`sidecar/`): Node 22 + TypeScript, running its agents on the
+- **Sidecar** (`sidecar/`): Node 26 + TypeScript, running its agents on the
   Claude Agent SDK or the Codex SDK (the provider chosen in Preferences). Watches the
   transcript, decides what is worth researching (questions, topics, claims —
   including questions about the user's own notes), researches in parallel
@@ -53,7 +53,8 @@ classifier on a real transcript, `sh sidecar/test/replay.sh` feeds
 `sidecar/test/fragments.txt` through the built sidecar and prints the triggers
 and cards (needs `jq` and a CLI login).
 
-Requires: macOS 26+ (Apple Silicon), Xcode toolchain, Node 22+, a logged-in
+Requires: macOS 26+ (Apple Silicon), Xcode toolchain, Node 26.10.0 (pinned in
+`.tool-versions`; `mise install` fetches it), a logged-in
 Claude Code or Codex CLI. First run prompts for Microphone and Screen & System
 Audio Recording permissions. A packaged app prompts as Advisor; a bare
 `.build/debug/Advisor` dev run may be attributed to the launching terminal.
@@ -81,7 +82,9 @@ required on the target Mac.
 **On the build machine** (Apple Silicon), you need:
 
 - the Xcode toolchain (`swift`, `codesign`);
-- an arm64 `node` on `PATH` — its binary is copied into the bundle.
+- an arm64 `node` on `PATH` — its binary is copied into the bundle. It must be
+  the version `.tool-versions` pins, which CI tests on; `package.sh` refuses
+  any other.
 
 **Build:**
 

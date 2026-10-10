@@ -12,6 +12,19 @@ ROOT=..                         # repo root
 OUT=dist
 APP=$OUT/Advisor.app
 
+# The node on PATH is copied into the bundle, so it must be the one CI tests:
+# .tool-versions pins it for both (mise installs it here).
+want=$(awk '$1 == "node" { print $2 }' "$ROOT/.tool-versions")
+if [ -z "$want" ]; then
+    echo "error: .tool-versions has no node line to bundle" >&2
+    exit 1
+fi
+have=$(node -p 'process.versions.node + " " + process.arch')
+if [ "$have" != "$want arm64" ]; then
+    echo "error: node $have is on PATH but .tool-versions pins $want arm64 — run: mise install" >&2
+    exit 1
+fi
+
 echo "==> swift build (release)"
 swift build -c release
 

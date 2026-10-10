@@ -27,7 +27,7 @@ import {
 let config: AdvisorConfig = loadConfig();
 
 // A fire-and-forget promise that rejects — or a stray synchronous throw in a
-// callback — would otherwise terminate the process on Node 22 (issue #45),
+// callback — would otherwise terminate the Node process (issue #45),
 // dropping the stdio pipe mid-session with no diagnostic for the app. We keep
 // the sidecar alive and log instead, so a lone stray rejection can't kill a
 // live session. The handlers must never throw (that would re-trigger the same
@@ -54,7 +54,7 @@ process.on("uncaughtException", (err) => {
 });
 
 /// Guard a fire-and-forget promise: log its rejection tagged with the operation
-/// so a stray rejection surfaces as a diagnostic rather than tripping Node 22's
+/// so a stray rejection surfaces as a diagnostic rather than tripping Node's
 /// unhandledRejection process kill (issue #45). Returns a handler for `.catch`.
 function guard(op: string): (err: unknown) => void {
   return (err) => log(`fire-and-forget ${op} rejected: ${err}`);

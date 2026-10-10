@@ -2105,6 +2105,25 @@ with no command, which the CLI rejects: that turn fails, and a failed turn
 makes the session list again, so the next one runs. A task stopped while the
 listing runs shares it with the next task rather than starting another.
 
+## Node and dependencies pinned (2026-10-10)
+
+`package.sh` bundles whatever `node` is on `PATH`, so v0.4.5 shipped Node
+26.10.0 (the build machine's mise default) while CI tested on Node 22. A test
+passed locally and failed in CI: it waited on the session's timeout timer, which
+is unref'd and so keeps nothing alive, and Node 22's test runner ended the test
+before it fired where Node 26's didn't. The test now uses mock timers, which
+holds on any version; the pin is so CI tests what ships.
+
+Node is now pinned once, in `.tool-versions` (`node 26.10.0`): mise reads it
+locally, CI's `actions/setup-node` reads it through `node-version-file`, and
+`package.sh` refuses to bundle any other version. Node 26 because the app
+already shipped it, and it becomes LTS this month; both SDKs need only Node 18
+or later. npm dependencies are exact in `sidecar/package.json` (the Claude Agent
+SDK was `latest`, `typescript` and `@types/node` were ranges) at the versions
+the lockfile already resolved, and `sidecar/.npmrc` sets `save-exact` so new
+ones are pinned too. `@types/node` moved from 22.19.21 to 26.6.3 to match the
+runtime: Node 22's types would type-check calls to APIs Node 26 removed.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
