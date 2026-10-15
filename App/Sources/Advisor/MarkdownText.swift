@@ -16,6 +16,9 @@ struct MarkdownTextStyle: Hashable {
     var strong: NSColor = Theme.nsTextStrong
     /// List bullets and ordinals.
     var marker: NSColor = Theme.nsTextTertiary
+    /// Table grid lines and header-row fill.
+    var tableBorder: NSColor = Theme.nsHairlineStrong
+    var tableHeader: NSColor = Theme.nsSurfaceCardSubtle
 
     /// Answer / fact-check cards — accent code + links.
     static let answer = MarkdownTextStyle(
@@ -35,8 +38,7 @@ struct MarkdownTextStyle: Hashable {
 /// the native pointing-hand cursor — SwiftUI `Text`/MarkdownUI never change the
 /// cursor over links (issue #26). Inline bold/italic/code/links, laid out by
 /// `lines(from:)` into paragraphs, lead lines, hanging (nested) list items,
-/// headings and rules — the shapes research cards take. Tables degrade to
-/// plain lines.
+/// headings, rules and pipe tables — the shapes research cards take.
 struct MarkdownText: NSViewRepresentable {
     let markdown: String
     var style: MarkdownTextStyle
@@ -100,10 +102,25 @@ struct MarkdownText: NSViewRepresentable {
             case item(level: Int, marker: String)
             case heading
             case rule
+            /// A GitHub-flavoured pipe table; `text` is empty.
+            case table(Table)
         }
         var kind: Kind
         var text: String
         var endsBlock: Bool
+
+        var isTable: Bool {
+            if case .table = kind { true } else { false }
+        }
+    }
+
+    /// A pipe table's cells as inline-markdown source. Every body row has one
+    /// cell per header cell (short rows padded, long rows cut, as GFM does).
+    struct Table: Equatable {
+        /// Per column, from the delimiter row's colons; `.natural` without any.
+        var alignments: [NSTextAlignment]
+        var header: [String]
+        var rows: [[String]]
     }
 
     /// Card markdown → laid-out lines. Blocks split on blank lines; a block with
@@ -140,6 +157,9 @@ struct MarkdownText: NSViewRepresentable {
             indents = []
             return [Line(kind: .heading, text: String(raw[0][h.upperBound...]), endsBlock: false)]
         }
+        if let header = raw.indices.dropLast().first(where: { isTableStart(raw, at: $0) }) {
+            return tableBlockLines(raw, header: header, indents: &indents)
+        }
         guard raw.contains(where: { listItem($0) != nil }) else {
             indents = []
             let text = raw.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
@@ -168,6 +188,72 @@ struct MarkdownText: NSViewRepresentable {
     }
 
     private static let bullets = ["•", "◦", "▪"]
+
+    /// A block holding a pipe table: the lines above it (prose there becomes
+    /// its lead), the table, then whatever follows its last piped row.
+    private static func tableBlockLines(_ raw: [String], header: Int, indents: inout [Int]) -> [Line] {
+        var out = header > 0 ? blockLines(raw[..<header].joined(separator: "\n"), indents: &indents) : []
+        if out.last?.kind == .text { out[out.count - 1].kind = .lead }
+        indents = []
+        let columns = cells(raw[header]).count
+        let body = raw[(header + 2)...].prefix { $0.contains("|") }
+        let table = Table(
+            alignments: cells(raw[header + 1]).map(alignment),
+            header: cells(raw[header]),
+            rows: body.map { row in
+                let c = cells(row)
+                return Array(c.prefix(columns)) + Array(repeating: "", count: max(0, columns - c.count))
+            })
+        out.append(Line(kind: .table(table), text: "", endsBlock: false))
+        let rest = raw[(header + 2 + body.count)...]
+        if !rest.isEmpty { out += blockLines(rest.joined(separator: "\n"), indents: &indents) }
+        return out
+    }
+
+    /// Whether `raw[i]` is a table's header row: piped, and followed by a piped
+    /// delimiter row (`---`, `:--`, `--:` or `:-:` cells) of the same width.
+    private static func isTableStart(_ raw: [String], at i: Int) -> Bool {
+        guard raw[i].contains("|"), raw[i + 1].contains("|") else { return false }
+        let marks = cells(raw[i + 1])
+        return marks.count == cells(raw[i]).count && marks.allSatisfy { $0.wholeMatch(of: #/:?-+:?/#) != nil }
+    }
+
+    private static func alignment(_ mark: String) -> NSTextAlignment {
+        switch (mark.hasPrefix(":"), mark.hasSuffix(":")) {
+        case (true, true): .center
+        case (false, true): .right
+        case (true, false): .left
+        case (false, false): .natural
+        }
+    }
+
+    /// A table row's trimmed cells: outer pipes dropped, split on unescaped
+    /// pipes, `\|` kept as a pipe (other escapes are left for the inline parser).
+    private static func cells(_ row: String) -> [String] {
+        var line = Substring(row.trimmingCharacters(in: .whitespaces))
+        if line.hasPrefix("|") { line = line.dropFirst() }
+        var cells = [""]
+        var escaped = false
+        var closed = false
+        for ch in line {
+            closed = false
+            if escaped {
+                cells[cells.count - 1] += ch == "|" ? "|" : "\\\(ch)"
+                escaped = false
+            } else if ch == "\\" {
+                escaped = true
+            } else if ch == "|" {
+                cells.append("")
+                closed = true
+            } else {
+                cells[cells.count - 1].append(ch)
+            }
+        }
+        if escaped { cells[cells.count - 1] += "\\" }
+        // A closing pipe ends the last cell rather than opening another.
+        if closed { cells.removeLast() }
+        return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+    }
 
     /// A list line's indentation (in columns, a tab counting four), its marker
     /// token ("-", "*", "+", "1." or "1)") and its text; nil for any other line.
@@ -216,14 +302,107 @@ struct MarkdownText: NSViewRepresentable {
                 out.append(inline(line.text, font: fonts.heading, para: para, style: style, fonts: fonts, colour: style.strong))
             case .text, .lead:
                 out.append(inline(line.text, font: fonts.base, para: para, style: style, fonts: fonts))
+            case .table(let table):
+                out.append(tableText(table, style: style, fonts: fonts))
             }
-            if i < laidOut.count - 1 { out.append(NSAttributedString(string: "\n", attributes: lineAttrs)) }
+            if i < laidOut.count - 1 {
+                // The newline ends the line's last paragraph, so a table's
+                // last cell keeps its cell block.
+                var ending = lineAttrs
+                if line.isTable {
+                    ending[.paragraphStyle] = out.attribute(.paragraphStyle, at: out.length - 1, effectiveRange: nil)
+                }
+                out.append(NSAttributedString(string: "\n", attributes: ending))
+                // TextKit ignores table and cell margins, so an empty line a
+                // block's spacing tall stands in for the table's.
+                if line.isTable { out.append(NSAttributedString(string: "\n", attributes: tableSpacer(fonts))) }
+            }
         }
         return out
     }
 
+    /// A table as one `FittedTextTable` (TextKit 1, which the view forces): a
+    /// paragraph per cell in its own cell block, row by row. Every cell but the
+    /// last ends with a newline; the line separator (or the end of the text)
+    /// ends the last. A hairline grid, each line drawn once (cells draw their
+    /// top and left edges, the last row and column close the frame), and a
+    /// filled strong header row.
+    private static func tableText(_ table: Table, style: MarkdownTextStyle, fonts: Fonts) -> NSAttributedString {
+        let m = Theme.Metric.self
+        let rows = [table.header] + table.rows
+        let columns = table.header.count
+        let grid = FittedTextTable()
+        grid.numberOfColumns = columns
+        grid.collapsesBorders = true
+        grid.hidesEmptyCells = false
+        let out = NSMutableAttributedString()
+        var minimums = Array(repeating: CGFloat(0), count: columns)
+        var naturals = minimums
+        for (r, row) in rows.enumerated() {
+            for (c, cell) in row.enumerated() {
+                let block = grid.cell(row: r, column: c)
+                block.setBorderColor(style.tableBorder)
+                block.setWidth(1, type: .absoluteValueType, for: .border, edge: .minX)
+                block.setWidth(1, type: .absoluteValueType, for: .border, edge: .minY)
+                if c == columns - 1 { block.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxX) }
+                if r == rows.count - 1 { block.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxY) }
+                block.setWidth(m.cardCellPaddingX, type: .absoluteValueType, for: .padding, edge: .minX)
+                block.setWidth(m.cardCellPaddingX, type: .absoluteValueType, for: .padding, edge: .maxX)
+                block.setWidth(m.cardCellPaddingY, type: .absoluteValueType, for: .padding, edge: .minY)
+                block.setWidth(m.cardCellPaddingY, type: .absoluteValueType, for: .padding, edge: .maxY)
+                if r == 0 { block.backgroundColor = style.tableHeader }
+                let p = NSMutableParagraphStyle()
+                p.alignment = table.alignments[c]
+                // A line of only (smaller) code is as tall as body text, so it sits on the row's baseline.
+                p.minimumLineHeight = ceil(fonts.base.ascender - fonts.base.descender + fonts.base.leading)
+                p.textBlocks = [block]
+                let attrs: [NSAttributedString.Key: Any] = [.font: fonts.base, .paragraphStyle: p]
+                var text = r == 0
+                    ? inline(cell, font: fonts.strong, para: p, style: style, fonts: fonts, colour: style.strong)
+                    : inline(cell, font: fonts.base, para: p, style: style, fonts: fonts)
+                // An empty cell still needs a character to carry its block.
+                if text.length == 0 { text = NSAttributedString(string: " ", attributes: attrs) }
+                naturals[c] = max(naturals[c], ceil(text.size().width))
+                minimums[c] = max(minimums[c], widestWord(in: text))
+                out.append(text)
+                out.append(NSAttributedString(string: "\n", attributes: attrs))
+            }
+        }
+        grid.minimums = minimums
+        grid.naturals = naturals
+        out.deleteCharacters(in: NSRange(location: out.length - 1, length: 1))
+        return out
+    }
+
+    private static func tableSpacer(_ fonts: Fonts) -> [NSAttributedString.Key: Any] {
+        let p = NSMutableParagraphStyle()
+        p.minimumLineHeight = Theme.Metric.cardBlockSpacing
+        p.maximumLineHeight = Theme.Metric.cardBlockSpacing
+        return [.font: fonts.base, .paragraphStyle: p]
+    }
+
+    /// Spaces a line may break at: not the no-break ones.
+    private static let breakingSpaces = CharacterSet.whitespaces.subtracting(
+        CharacterSet(charactersIn: "\u{00A0}\u{2007}\u{202F}"))
+
+    /// The width of the widest run of `text` between breaking spaces, as laid out.
+    private static func widestWord(in text: NSAttributedString) -> CGFloat {
+        var widest: CGFloat = 0
+        let ns = text.string as NSString
+        var location = 0
+        while location < ns.length {
+            let gap = ns.rangeOfCharacter(from: breakingSpaces, range: NSRange(location: location, length: ns.length - location))
+            let end = gap.location == NSNotFound ? ns.length : gap.location
+            if end > location {
+                widest = max(widest, ceil(text.attributedSubstring(from: NSRange(location: location, length: end - location)).size().width))
+            }
+            location = end + max(gap.length, 1)
+        }
+        return widest
+    }
+
     private struct Fonts {
-        let base, strong, italic, strongItalic, heading, mono, ordinal: NSFont
+        let base, strong, italic, strongItalic, heading, mono, strongMono, ordinal: NSFont
 
         init(size: CGFloat) {
             base = NSFont.systemFont(ofSize: size)
@@ -232,6 +411,7 @@ struct MarkdownText: NSViewRepresentable {
             strongItalic = NSFontManager.shared.convert(strong, toHaveTrait: .italicFontMask)
             heading = NSFont.systemFont(ofSize: size + 1, weight: .semibold)
             mono = NSFont.monospacedSystemFont(ofSize: size - 2, weight: .regular)
+            strongMono = NSFont.monospacedSystemFont(ofSize: size - 2, weight: .semibold)
             ordinal = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium)
         }
     }
@@ -256,7 +436,7 @@ struct MarkdownText: NSViewRepresentable {
         case .lead, .heading:
             p.paragraphSpacingBefore = isFirst ? 0 : m.cardLeadSpacingBefore
             p.paragraphSpacing = m.cardItemSpacing
-        case .text, .rule:
+        case .text, .rule, .table:
             break
         }
         if isLast { p.paragraphSpacing = 0 }
@@ -276,17 +456,22 @@ struct MarkdownText: NSViewRepresentable {
         let ns = NSMutableAttributedString(attributedString: NSAttributedString(parsed))
         let full = NSRange(location: 0, length: ns.length)
         ns.addAttributes([.font: font, .foregroundColor: colour ?? style.body, .paragraphStyle: para], range: full)
+        // A table header is strong throughout, its italic and code runs included.
+        let header = font === fonts.strong
         ns.enumerateAttribute(.inlinePresentationIntent, in: full) { value, range, _ in
             guard let raw = (value as? NSNumber)?.uintValue ?? (value as? UInt) else { return }
             let intent = InlinePresentationIntent(rawValue: raw)
             if intent.contains(.code) {
                 ns.addAttributes(
-                    [.font: fonts.mono, .foregroundColor: style.code, .backgroundColor: style.codeBackground],
+                    [.font: header ? fonts.strongMono : fonts.mono, .foregroundColor: style.code,
+                     .backgroundColor: style.codeBackground],
                     range: range)
             } else if intent.contains(.stronglyEmphasized), intent.contains(.emphasized) {
                 ns.addAttributes([.font: fonts.strongItalic, .foregroundColor: style.strong], range: range)
             } else if intent.contains(.stronglyEmphasized) {
                 ns.addAttributes([.font: font === fonts.heading ? font : fonts.strong, .foregroundColor: style.strong], range: range)
+            } else if intent.contains(.emphasized), header {
+                ns.addAttributes([.font: fonts.strongItalic, .foregroundColor: style.strong], range: range)
             } else if intent.contains(.emphasized) {
                 ns.addAttributes([.font: fonts.italic, .foregroundColor: style.emphasis ?? style.body], range: range)
             }
@@ -301,6 +486,89 @@ struct MarkdownText: NSViewRepresentable {
         guard stripped.count >= 3 else { return false }
         return stripped.allSatisfy { $0 == "-" } || stripped.allSatisfy { $0 == "*" }
             || stripped.allSatisfy { $0 == "_" }
+    }
+}
+
+/// An `NSTextTable` that sizes its columns to their content at the width it is
+/// laid out in, as a browser does. TextKit 1's automatic layout splits the
+/// width evenly whatever the content, and scales fixed cell widths that don't
+/// fit, so each layout at a new width sets them afresh.
+final class FittedTextTable: NSTextTable {
+    /// Per column, content widths in points: the widest word (any narrower
+    /// breaks a word) and the longest cell on one line.
+    var minimums: [CGFloat] = []
+    var naturals: [CGFloat] = []
+    /// Weak: each cell holds its table.
+    private let cells = NSHashTable<NSTextTableBlock>.weakObjects()
+    private var fittedWidth: CGFloat?
+
+    /// A one-row, one-column cell of this table, sized with it.
+    func cell(row: Int, column: Int) -> NSTextTableBlock {
+        let block = NSTextTableBlock(table: self, startingRow: row, rowSpan: 1, startingColumn: column, columnSpan: 1)
+        cells.add(block)
+        return block
+    }
+
+    override func rect(
+        for block: NSTextTableBlock, layoutAt startingPoint: NSPoint, in rect: NSRect,
+        textContainer: NSTextContainer, characterRange charRange: NSRange
+    ) -> NSRect {
+        if fittedWidth != rect.width { fit(to: rect.width) }
+        return super.rect(
+            for: block, layoutAt: startingPoint, in: rect, textContainer: textContainer,
+            characterRange: charRange)
+    }
+
+    /// Archives (drag, copy) as a plain table: the fitting is this view's.
+    override var classForCoder: AnyClass { NSTextTable.self }
+
+    /// Sets every cell's content width for a table `width` wide, after each
+    /// column's padding and the grid lines, with a point spare for rounding.
+    private func fit(to width: CGFloat) {
+        fittedWidth = width
+        guard let any = cells.anyObject, minimums.count == numberOfColumns else { return }
+        let padding = any.width(for: .padding, edge: .minX) + any.width(for: .padding, edge: .maxX)
+        let chrome = CGFloat(numberOfColumns) * padding + CGFloat(numberOfColumns + 1) + 1
+        let widths = Self.columnWidths(minimums: minimums, naturals: naturals, available: width - chrome)
+        for cell in cells.allObjects {
+            cell.setValue(widths[cell.startingColumn], type: .absoluteValueType, for: .width)
+        }
+    }
+
+    /// Column content widths for `available` points: every column's natural
+    /// width when they all fit. Otherwise, narrowest first, a column that fits
+    /// an even share of what is left keeps its natural width, so long as the
+    /// rest can still have their widest words; the rest get their minimum plus
+    /// a share of what remains in proportion to their slack. When even the
+    /// widest words don't fit, words must break somewhere: narrow columns keep
+    /// their widest word in the same way, and the rest are scaled into what
+    /// remains.
+    static func columnWidths(minimums: [CGFloat], naturals: [CGFloat], available: CGFloat) -> [CGFloat] {
+        if naturals.reduce(0, +) <= available { return naturals }
+        let wordsFit = minimums.reduce(0, +) < available
+        let wanted = wordsFit ? naturals : minimums
+        var widths = minimums
+        var open = wanted.indices.sorted { wanted[$0] < wanted[$1] }
+        var left = available
+        while let i = open.first {
+            let othersMinimum = wordsFit ? open.dropFirst().reduce(0) { $0 + minimums[$1] } : 0
+            guard wanted[i] <= left / CGFloat(open.count), left - wanted[i] >= othersMinimum else { break }
+            widths[i] = wanted[i]
+            left -= wanted[i]
+            open.removeFirst()
+        }
+        let openMinimum = open.reduce(0) { $0 + minimums[$1] }
+        guard wordsFit else {
+            for i in open { widths[i] = openMinimum > 0 ? minimums[i] * max(left, 0) / openMinimum : 0 }
+            return widths
+        }
+        // Not every column fits, so `open` keeps one whose natural width
+        // exceeds `left`, which still covers the open minimums.
+        let openNatural = open.reduce(0) { $0 + naturals[$1] }
+        for i in open {
+            widths[i] = minimums[i] + (naturals[i] - minimums[i]) * (left - openMinimum) / (openNatural - openMinimum)
+        }
+        return widths
     }
 }
 

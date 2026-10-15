@@ -73,6 +73,11 @@ enum Theme {
     static let nsContextCodeText = NSColor.dynamic(NSColor(rgb: 0x6E54B8), NSColor(rgb: 0xCCBEFF))
     static let nsContextCodeBg = NSColor.dynamic(
         NSColor(rgb: 0xF1F0F6), NSColor(rgb: 0xB9A4FF, alpha: 0.14))
+    /// Card table grid and header fill: twins of `hairlineStrong` and `surfaceCardSubtle`.
+    static let nsHairlineStrong = NSColor.dynamic(
+        NSColor(rgb: 0x000000, alpha: 0.14), NSColor(rgb: 0xFFFFFF, alpha: 0.16))
+    static let nsSurfaceCardSubtle = NSColor.dynamic(
+        NSColor(rgb: 0x000000, alpha: 0.032), NSColor(rgb: 0xFFFFFF, alpha: 0.045))
 
     // MARK: accent — the user's macOS accent colour (System Settings →
     // Appearance), kept for links, selection focus and primary actions.
@@ -137,6 +142,8 @@ enum Theme {
         static let cardListIndent: CGFloat = 18
         static let cardBulletColumn: CGFloat = 14
         static let cardOrdinalColumn: CGFloat = 22
+        static let cardCellPaddingX: CGFloat = 8
+        static let cardCellPaddingY: CGFloat = 4
     }
 
     /// Card ambient shadow. Near-invisible in dark mode, where the elevated

@@ -1007,7 +1007,8 @@ then `inlinePresentationIntent` runs are mapped to real fonts and `Theme` colour
 lists get `•`/kept ordering, headings render bold, `---` becomes a rule. This
 suits the app's concise card bodies (the research prompt cites sources inline as
 markdown links); nested lists/tables degrade to plain lines — acceptable, and
-revisit if card bodies grow richer. `MarkdownUI` is now unused and the dependency
+revisit if card bodies grow richer. (Superseded: nested lists 2026-10-04, see
+*Sessions window restyle*; tables 2026-10-15, see *Card tables*.) `MarkdownUI` is now unused and the dependency
 is dropped. The footer's discrete source `Link`s (live feed) keep a SwiftUI
 `linkCursor()` (`NSCursor.pointingHand` on hover) since they aren't `NSTextView`
 links.
@@ -2123,6 +2124,71 @@ SDK was `latest`, `typescript` and `@types/node` were ranges) at the versions
 the lockfile already resolved, and `sidecar/.npmrc` sets `save-exact` so new
 ones are pinned too. `@types/node` moved from 22.19.21 to 26.6.3 to match the
 runtime: Node 22's types would type-check calls to APIs Node 26 removed.
+
+## Card tables (2026-10-15)
+
+A pipe table in a card body showed as one run-on line of pipes: `MarkdownText`
+joins a block's lines with spaces, and the 2026-06-21 renderer left tables to
+degrade. Every place the app shows markdown goes through `MarkdownText` (live
+and saved cards, notes, Ask and Summarise answers, the terms sheet), so tables
+are handled there once.
+
+`lines(from:)` finds a GitHub-flavoured table anywhere in a block, as GFM does:
+a piped header row followed by a piped delimiter row (`---`, `:--`, `--:`,
+`:-:`) with the same number of cells. Lines above it lay out as before, prose
+directly above becoming its lead; rows run to the first line without a pipe
+(GFM runs on to a blank line, but straight after a table such a line is more
+likely prose), padded or cut to the header's width; the delimiter's colons set each column's
+alignment; `\|` is a literal pipe, and a pipe inside a code span still splits
+the cell, as in GFM.
+
+`render` builds the table as an AppKit text table: one paragraph per cell,
+each in its own `NSTextTableBlock`, with a hairline grid (`hairlineStrong`), a
+semibold header row, its italic and code runs included, on a faint fill
+(`surfaceCardSubtle`), cell padding from
+`Theme.Metric`, and inline markdown in cells. Text tables need TextKit 1, which
+the view already forces for height measurement, so the card's intrinsic height
+includes the table, cells wrap at the card's width, and the table stays part of
+the one selectable text view, links and their cursor included. Tab stops were
+rejected because a cell longer than its stop breaks the columns rather than
+wrapping. A SwiftUI `Grid` was rejected because it splits the card into several
+views, so one selection could no longer span the table and the text around it.
+
+TextKit 1's table layout needed working around, measured against the real
+layout manager:
+
+- **Columns split evenly.** The "automatic" layout algorithm gives every
+  column the same width whatever its content, and it ignores minimum and
+  maximum cell widths. Fixed cell widths are honoured as content widths, but
+  are scaled down when they don't fit. So `FittedTextTable`, an `NSTextTable`
+  subclass, records each column's widest word and longest cell when the card
+  renders. In `rect(for:layoutAt:in:…)`, TextKit's per-cell layout callback,
+  it sets fixed widths for the width on offer, as a browser does:
+  - every column at its natural width when they all fit, so a small table
+    shrinks to its content;
+  - otherwise narrow columns first at their natural width (see below), and
+    the rest at their widest word plus a share of what remains, in proportion
+    to their slack;
+  - and when even the widest words don't fit, words must break somewhere:
+    narrow columns keep their widest word, and the rest are scaled into what
+    remains.
+
+  A point is kept spare, because a full-width table overhangs by half a point
+  and its right border was clipped.
+- **Table and cell margins are ignored**, so a table that isn't last is
+  followed by an empty spacer line one block-spacing tall. It works between
+  two tables, and gives what follows the same rhythm as after any block.
+- **Translucent borders double where cells meet.** Cells draw only their top
+  and left edges, and the last row and column close the frame, so each line is
+  drawn once.
+- **Cells align by their top edge**, and `.baselineAlignment` has no effect.
+  A cell of only inline code, which is smaller, sat higher than its row, so
+  cell lines get the body font's line height as a minimum.
+- **Narrow columns keep their natural width.** Shares in proportion to slack
+  alone left a short header ("Monthly cost") a few points short, so it
+  wrapped beside a long column that could spare them. So, narrowest first, a
+  column that fits an even share of the remaining width keeps its natural
+  width, provided the other columns can still fit their widest words.
 
 ## Revisit as it grows
 
