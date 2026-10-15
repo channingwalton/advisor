@@ -53,7 +53,7 @@ classifier on a real transcript, `sh sidecar/test/replay.sh` feeds
 `sidecar/test/fragments.txt` through the built sidecar and prints the triggers
 and cards (needs `jq` and a CLI login).
 
-Requires: macOS 26+ (Apple Silicon), Xcode toolchain, Node 26.10.0 (pinned in
+Requires: macOS 26+ (Apple Silicon), Xcode toolchain, Node 26.11.1 (pinned in
 `.tool-versions`; `mise install` fetches it), a logged-in
 Claude Code or Codex CLI. First run prompts for Microphone and Screen & System
 Audio Recording permissions. A packaged app prompts as Advisor; a bare

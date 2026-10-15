@@ -2124,6 +2124,8 @@ SDK was `latest`, `typescript` and `@types/node` were ranges) at the versions
 the lockfile already resolved, and `sidecar/.npmrc` sets `save-exact` so new
 ones are pinned too. `@types/node` moved from 22.19.21 to 26.6.3 to match the
 runtime: Node 22's types would type-check calls to APIs Node 26 removed.
+(Bumped to 26.11.1 on 2026-10-15. The line must say `node`, not asdf's
+`nodejs`, because `package.sh` reads the `node` line, though mise accepts both.)
 
 ## Card tables (2026-10-15)
 
