@@ -5,7 +5,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { AgentSession } from "./agent.js";
-import { fakeModelQuery, sse } from "./fakeModel.js";
+import { fakeModelQuery, sse, stubMcp } from "./fakeModel.js";
 
 // The sandbox against the real bundled Claude CLI, not just the policy
 // predicates. The SDK approves some calls before `canUseTool` is ever asked —
@@ -38,6 +38,10 @@ function scripted(id: string): { name: string; input: Record<string, unknown> } 
     case "tildeGlob": return { name: "Glob", input: { path: "~/Documents", pattern: "*.txt" } };
     case "globScoped": return { name: "Glob", input: { path: p("Documents"), pattern: "*.txt" } };
     case "globEscape": return { name: "Glob", input: { path: p("Documents"), pattern: p(".ssh", "*") } };
+    // The user's connectors, as the CLI names them (`mcp__<server>__<tool>`).
+    case "mcpRead": return { name: "mcp__stub__lookup", input: {} };
+    case "mcpAction": return { name: "mcp__stub__share_file", input: {} };
+    case "mcpCompound": return { name: "mcp__stub__findAndReplace", input: {} };
     default: throw new Error(`no script for ${id}`);
   }
 }
@@ -160,4 +164,29 @@ test("#sandbox-explicit-paths a ~ path to an ordinary file still reaches the mod
   assert.ok(read.includes(NOTES), read);
   const glob = await toolResult(session(work), "tildeGlob");
   assert.ok(glob.includes("notes.txt"), glob);
+});
+
+// The connector gate against the real CLI: the tool names must reach the
+// PreToolUse hook in the `mcp__<server>__<tool>` shape, casing intact, for
+// `mcpPermission`'s word splitting to mean anything. Connector actions are off
+// (the AgentSession default), so the read tool runs and the action tools do not.
+test("#sandbox-mcp-gate a connector read tool runs; a sharing tool and a compound name do not", async (t) => {
+  // A user-scope connector with a read tool and two action tools, as
+  // `claude mcp add --scope user` writes it — registered for this test only, so
+  // the path cases above don't each spawn a server they never use.
+  const stub = path.join(home, "stub-mcp.mjs");
+  const userConfig = path.join(home, ".claude", ".claude.json");
+  fs.writeFileSync(stub, stubMcp(["lookup", "share_file", "findAndReplace"]));
+  fs.writeFileSync(userConfig, JSON.stringify({
+    mcpServers: { stub: { type: "stdio", command: process.execPath, args: [stub] } },
+  }));
+  t.after(() => fs.rmSync(userConfig, { force: true }));
+  const s = session(work);
+  const read = await toolResult(s, "mcpRead");
+  assert.ok(read.includes("STUB_TOOL_RAN:lookup"), read);
+  for (const id of ["mcpAction", "mcpCompound"]) {
+    const out = await toolResult(s, id);
+    assert.ok(!out.includes("STUB_TOOL_RAN"), `${id}: ${out}`);
+    assert.ok(out.includes("not an allowed read/search connector tool"), `${id}: ${out}`);
+  }
 });

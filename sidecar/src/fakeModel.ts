@@ -59,9 +59,13 @@ export function fakeModelQuery(home: string, port: number, apiKey: string | null
     query({ ...args, options: { ...args.options, env } })) as QueryFn;
 }
 
-/// A minimal stdio MCP server with one tool, `lookup`, standing in for the
-/// user's connectors (`mcp__stub__lookup` to the Claude CLI).
-export const STUB_MCP = `
+/// A minimal stdio MCP server offering `tools` (each answering `{}`), standing
+/// in for the user's connectors (`mcp__stub__<tool>` to the Claude CLI).
+export function stubMcp(tools: string[]): string {
+  const list = tools.map((name) =>
+    `{ name: ${JSON.stringify(name)}, description: "Stub tool", inputSchema: { type: "object", properties: {} } }`
+  ).join(",\n      ");
+  return `
 import readline from "node:readline";
 const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -75,10 +79,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     } });
   } else if (msg.method === "tools/list") {
     send({ jsonrpc: "2.0", id: msg.id, result: { tools: [
-      { name: "lookup", description: "Look something up", inputSchema: { type: "object", properties: {} } },
+      ${list}
     ] } });
+  } else if (msg.method === "tools/call") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "STUB_TOOL_RAN:" + msg.params.name }] } });
   } else {
     send({ jsonrpc: "2.0", id: msg.id, result: {} });
   }
 });
 `;
+}
+
+/// The one-tool stub (`lookup`) most tests want.
+export const STUB_MCP = stubMcp(["lookup"]);

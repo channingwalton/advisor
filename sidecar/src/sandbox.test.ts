@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import type { HookInput } from "@anthropic-ai/claude-agent-sdk";
 import {
-  readPathAllowed, searchRootAllowed, mcpPermission, toolDecision, sandboxGate, type SandboxPolicy,
+  readPathAllowed, searchRootAllowed, mcpPermission, normaliseVerbName, bareMcpName, toolDecision, sandboxGate,
+  type SandboxPolicy,
 } from "./agent.js";
 
 const HOME = "/home/u";
@@ -191,6 +192,131 @@ test("MCP gate denies action verbs embedded mid-camelCase (issue #42 fail-open)"
   ]) {
     assert.equal(mcpPermission(t, false), "deny", t);
   }
+});
+
+// Code review 2026-10-17: `share` sat in the read allowlist (sharing grants a
+// third party access), the action list lacked replace/insert/append/submit/
+// save/modify/put and more, and a combined name passed on its leading read verb
+// alone. Now a conjunction denies outright, whatever the second verb.
+test("MCP gate denies sharing, the mutating verbs it lacked, and any conjunction", () => {
+  for (const t of [
+    "mcp__gdrive__share_file",
+    "mcp__x__shareDashboard",
+    "mcp__x__comment_on_issue",
+    "mcp__x__replyToThread",
+    "mcp__gmail__mark_read",
+    "mcp__x__patch_issue",
+    "mcp__x__put_object",
+    "mcp__x__replace_text",
+    "mcp__x__insertRow",
+    "mcp__x__save_draft",
+    "mcp__x__purge_history", // unknown-to-the-old-list verb on a read noun
+    "mcp__x__trash_docs",
+    "mcp__x__sync_schema",
+    "mcp__x__notify_on_query",
+    // Conjunctions: the second verb need not be on any list.
+    "mcp__gdocs__find_and_replace",
+    "mcp__x__get_or_insert",
+    "mcp__slack__read_and_reply",
+    "mcp__gmail__fetchAndMarkRead",
+    "mcp__jira__getIssueAndComment",
+    "mcp__x__list_then_patch",
+    "mcp__x__get_and_frobnicate",
+    "mcp__x__search_and_escalate",
+    "mcp__x__fetch-and-sync",
+    // An acronym run must not hide the verb after it.
+    "mcp__x__getHTTPPutURL",
+    "mcp__x__fetchHTTPSave",
+    // Nor may any other separator a tool name can use.
+    "mcp__x__search.delete",
+    "mcp__x__files/delete_list",
+    "mcp__x__get:delete",
+    "mcp__x__get delete",
+    // A `__` inside the tool's own name is not the server separator.
+    "mcp__x__delete__list",
+    // Verbs the lists lacked, on a read verb or noun.
+    "mcp__x__kill_process_list",
+    "mcp__x__revert_diff",
+    "mcp__x__destroy_view",
+    "mcp__x__open_issue",
+    "mcp__x__commit_changes",
+    "mcp__x__release_version",
+    "mcp__x__resolve_thread",
+    // A service prefix does not make an ambiguous verb a noun.
+    "mcp__gmail__gmail_mark_as_read",
+    "mcp__slack__slack_mark_read",
+    "mcp__gdrive__gdrive_share_file_get_link",
+    // Verbs built on listed ones, and the rest the lists lacked.
+    "mcp__x__truncate_history",
+    "mcp__x__rewrite_docs",
+    "mcp__x__overwrite_docs",
+    "mcp__x__migrate_schema",
+    "mcp__x__undelete_doc",
+    "mcp__x__prepend_history",
+    // A read noun first does not vouch for the verb after it.
+    "mcp__x__schema_migrate",
+    "mcp__x__doc_share",
+    "mcp__x__info_push",
+    // Read verbs are whole words.
+    "mcp__x__listen_for_events",
+    "mcp__x__getaway_booking",
+    // The recorded cost of the conjunction rule: a read tool named with one.
+    "mcp__slack__slack_search_public_and_private",
+  ]) {
+    assert.equal(mcpPermission(t, false), "deny", t);
+  }
+});
+
+test("MCP gate keeps allowing reads named after a noun that is also an action verb", () => {
+  for (const t of [
+    "mcp__x__get_comment",
+    "mcp__x__getComment",
+    "mcp__jira__get_issue_comment",
+    "mcp__x__get_comments",
+    "mcp__x__list_replies",
+    "mcp__x__get_reply",
+    "mcp__github__get_commit_patch",
+    "mcp__github__list_deploy_keys",
+    "mcp__x__list_push_notifications",
+    "mcp__x__find_duplicate_issues",
+    "mcp__gdrive__get_share_link",
+    "mcp__gdrive__list_shared_drives",
+    "mcp__gdrive__sharedWithMe",
+    "mcp__x__get_copy_status",
+    "mcp__x__get_markdown",
+    "mcp__x__list_bookmarks",
+    "mcp__datadog__get_saved_queries",
+    "mcp__x__get_input_schema",
+    "mcp__x__search_copyright_notices",
+    "mcp__x__get_open_issues",
+    "mcp__github__get_release",
+    "mcp__jira__jira_get_issue_comment", // a read verb before the ambiguous one
+    // Read nouns as the whole name, first word or last word.
+    "mcp__unison__docs",
+    "mcp__x__history",
+    "mcp__x__schema_info",
+    "mcp__slack__conversations_history",
+    "mcp__claude_ai_Atlassian_Rovo__atlassianUserInfo",
+    "mcp__x__table_schema",
+    "mcp__x__getHTTPHeaders",
+  ]) {
+    assert.equal(mcpPermission(t, false), "allow", t);
+  }
+});
+
+test("normaliseVerbName splits camelCase and acronym runs into lower-case words, on any separator", () => {
+  assert.equal(normaliseVerbName("fetchAndDelete"), "fetch_and_delete");
+  assert.equal(normaliseVerbName("getHTTPPutURL"), "get_http_put_url");
+  assert.equal(normaliseVerbName("slack_search_public"), "slack_search_public");
+  assert.equal(normaliseVerbName("issues.delete-all/now"), "issues_delete_all_now");
+  // A pluralised acronym comes out mangled, but the leading verb survives.
+  assert.equal(normaliseVerbName("getURLs"), "get_ur_ls");
+});
+
+test("bareMcpName strips exactly the mcp__<server>__ prefix", () => {
+  assert.equal(bareMcpName("mcp__claude_ai_Slack__slack_send_message"), "slack_send_message");
+  assert.equal(bareMcpName("mcp__x__delete__list"), "delete__list");
+  assert.equal(bareMcpName("Read"), "Read");
 });
 
 test("MCP gate still allows read-only camelCase tools (no embedded action verb)", () => {

@@ -2286,6 +2286,32 @@ turns regardless (`codex.sdk.test.ts`), but that path is otherwise
 unexercised. Verified both ways on the files: append, rename-over, new-file and
 through-the-link writes fail under the new profile and succeed under the old.
 
+**The connector gate judges names by structure, not only by verb list.**
+`mcpPermission` (the Claude backend's read/search-only rule for the user's MCP
+connectors with actions off) had `share` in its *read* allowlist — sharing
+grants a third party access — and lacked `replace`, `insert`, `append`,
+`submit`, `save`, `modify`, `put` and more, so a compound such as
+`find_and_replace` passed on its leading read verb. Adding verbs alone created
+regressions the other way: `comment`, `reply`, `mark`, `patch`, `push`,
+`deploy`, `share`, `copy`, `open`, `commit`, `release` are the nouns read tools
+are named after (`get_comment`, `get_commit_patch`, `list_deploy_keys`,
+`get_share_link`). The gate now works in layers over a normalised name
+(camelCase and acronym runs split, every separator a tool name may use — `.`,
+`/`, `:`, space — folded to `_`, the `mcp__<server>__` prefix stripped at its
+first `__` so a tool's own `__` is kept): a conjunction (`_and_`, `_or_`,
+`_then_`) denies outright, whatever follows — fail-closed, so a read tool named
+with one (`search_public_and_private`) is refused too, the recorded cost; an
+unambiguous action verb anywhere denies; an ambiguous verb denies unless a read
+verb precedes it (`jira_get_issue_comment` reads, `gmail_mark_as_read` acts);
+a whole-word read verb anywhere allows; a read noun (`history`, `docs`, `info`,
+`schema`) allows only as the whole name or last word (`conversations_history`,
+`atlassianUserInfo`), so `purge_history` is judged by its verb. What remains
+open is a verb on no list ahead of a read verb (`listen_webhook` was the probe
+until `list` became a whole word); the lists are the defence and connector
+actions being off by default the backstop. `sandbox.sdk.test.ts` now drives a
+stub connector through the real CLI to prove tool names reach the hook in the
+shape the gate assumes.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

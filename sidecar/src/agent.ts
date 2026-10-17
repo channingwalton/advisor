@@ -236,48 +236,87 @@ export interface Agent {
   interrupt(): Promise<void>;
 }
 
-/// Connector action verbs — tools that can change external state. Matched as a
-/// word (start, or after _ / -, ending at _ / - / end) in the bare tool name,
-/// which is first normalised (`normaliseVerbName`) so a verb glued mid-camelCase
-/// (`fetchAndDelete` → `fetch_and_delete`) becomes a delimited, lower-case word
-/// the anchor can see — without that step such a verb is invisible and the name
-/// fails OPEN via a leading read verb. The trailing `set` etc. only match a whole
-/// word, so `settings`/`assets` never trip. Checked BEFORE the read allowlist so
-/// a name carrying both an action and a read verb (e.g. `ddsql_upsert_saved_query`,
-/// `searchAndUpdate`) is gated.
+/// Connector action verbs — tools that can change external state — wherever
+/// they sit in the tool name. Names reach the patterns normalised
+/// (`normaliseVerbName`): lower-case words joined by `_`, so `_`/end are the
+/// word boundaries and `set` never trips on `settings`/`assets`. Checked BEFORE
+/// the read allowlist so a name carrying both an action and a read verb
+/// (`ddsql_upsert_saved_query`, `searchAndUpdate`) is gated.
 const MCP_ACTION_PATTERN =
-  /(?:^|[_-])(send|post|create|update|upsert|delete|remove|write|upload|install|uninstall|add|run|exec|execute|start|stop|enable|disable|schedule|transition|invite|archive|publish|edit|move|rename|merge|close|cancel|assign|apply|approve|reject|import|export|reset|clear|drop|grant|revoke|set|authenticate|complete)(?:[_-]|[A-Z]|$)/;
+  /(?:^|_)(send|post|create|update|upsert|delete|remove|write|upload|install|uninstall|add|run|exec|execute|start|stop|enable|disable|schedule|transition|invite|archive|publish|edit|move|rename|merge|close|cancel|assign|apply|approve|reject|import|export|reset|clear|drop|grant|revoke|set|authenticate|complete|replace|insert|append|submit|save|modify|put|purge|trash|wipe|sync|notify|acknowledge|trigger|subscribe|unsubscribe|restore|lock|unlock|toggle|pay|transfer|kill|terminate|destroy|revert|rotate|register|unregister|dismiss|escalate|refresh|regenerate|redeem|snooze|forward|convert|generate|compose|ban|mute|block|accept|decline|unfollow|migrate|truncate|flush|invalidate|rewrite|overwrite|undelete|prepend)(?:_|$)/;
 
-/// Connector read/search verbs. Only consulted after the action check fails, so
-/// it can be permissive (no trailing boundary) without re-opening the hole.
+/// Verbs that are also the nouns read tools are named after (`get_comment`,
+/// `list_deploy_keys`, `get_share_link`, `get_open_issues`, `get_commit_patch`):
+/// an action unless a read verb comes before them in the name — so
+/// `comment_on_issue`, `share_file`, `mark_read` and the service-prefixed
+/// `gmail_mark_as_read` are actions, `jira_get_issue_comment` is a read. Code
+/// review 2026-10-17 — `share` had sat in the read list, and sharing grants a
+/// third party access.
+const MCP_AMBIGUOUS_ACTION_PATTERN =
+  /(?:^|_)(comment|reply|mark|share|copy|duplicate|push|deploy|patch|open|commit|release|flag|star|pin|react|follow|resolve|checkout|draft|like|vote|tag)(?:_|$)/;
+
+/// `x_and_y` does y, whatever x says: a conjunction denies the name outright,
+/// so an action verb the lists above lack cannot ride in behind a read verb
+/// (`find_and_replace`, `get_or_insert`, `fetch_and_purge`). Fail-closed, so a
+/// read tool named with one (`search_public_and_private`) is refused too — the
+/// recorded cost.
+const MCP_CONJUNCTION_PATTERN = /_(and|or|then)_/;
+
+/// Connector read/search verbs, anywhere in the name — connectors prefix their
+/// tools with the service or entity (`slack_search_public`, `ddsql_query`).
+/// Whole words (`listen` is not `list`). A verb on neither action list ahead of
+/// one of these passes; the lists above are the defence against that, and
+/// connector actions being off by default the backstop.
 const MCP_READ_PATTERN =
-  /(?:^|[_-])(get|list|search|read|fetch|lookup|view|find|describe|query|history|docs?|info|schema|aggregate|analy[sz]e|explore|expand|rank|recommend|summari[sz]e|visuali[sz]e|typecheck|diff|share)/;
+  /(?:^|_)(get|list|search|read|fetch|lookup|view|find|describe|query|aggregate|analy[sz]e|explore|expand|rank|recommend|summari[sz]e|visuali[sz]e|typecheck|diff|shared)(?:_|$)/;
 
-/// The bare tool name after the `mcp__server__` prefix (so the server name can't
-/// trip a verb match). Non-MCP names are returned unchanged.
-function bareMcpName(toolName: string): string {
-  const i = toolName.lastIndexOf("__");
-  return i >= 0 ? toolName.slice(i + 2) : toolName;
+/// Nouns a tool is named after when it returns them: a read as the whole name
+/// (`docs`) or its last word (`conversations_history`, `atlassian_user_info`,
+/// `table_schema`, `schema_info`), so `purge_history`, `sync_schema` and
+/// `schema_migrate` are judged by their verb, not waved through on the noun.
+const MCP_READ_NOUN_PATTERN = /(?:^|_)(history|docs?|info|schema)$/;
+
+/// The bare tool name after the `mcp__<server>__` prefix (so the server name
+/// can't trip a verb match). The prefix ends at the first `__` after the server
+/// name — a tool's own name may contain `__` too (`delete__list`), and taking
+/// the last one would judge it on its final word alone. Non-MCP names are
+/// returned unchanged.
+export function bareMcpName(toolName: string): string {
+  const m = /^mcp__.+?__(.*)$/.exec(toolName);
+  return m ? m[1] : toolName;
 }
 
-/// Split camelCase into `_`-delimited words and lower-case, so the verb patterns'
-/// `^ / _ / -` word anchors also see a verb embedded mid-camelCase. Without this,
-/// `fetchAndDelete` hides `delete` behind a lower-case letter (no anchor) and,
-/// being upper-cased, dodges the case-sensitive match too — so the action gate
-/// misses it and a leading read verb (`fetch`) waves it through: a fail-OPEN.
-function normaliseVerbName(name: string): string {
-  return name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+/// Lower-case words joined by `_`, so the verb patterns' `^ / _` word anchors
+/// see every word. camelCase splits (`fetchAndDelete` → `fetch_and_delete`:
+/// without this, `delete` hides behind a lower-case letter and dodges the
+/// case-sensitive match, so the action gate misses it and the leading `fetch`
+/// waves it through — a fail-OPEN), an acronym run splits before its last
+/// capital (`getHTTPPutURL` → `get_http_put_url`), and every other separator a
+/// tool name may use (`-`, `.`, `/`, `:`, space) becomes `_`
+/// (`search.delete` → `search_delete`), since a verb after one of those was
+/// invisible to anchors that knew only `_` and `-`.
+export function normaliseVerbName(name: string): string {
+  return name
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
 }
 
 /// MCP connector permission. Fail closed: when actions are disabled a tool is
-/// allowed only if it is recognised as a read/search. An action verb, OR any
-/// name we don't recognise, is denied — a new mutating tool we've never seen is
-/// blocked by default rather than waved through.
+/// allowed only if it is recognised as a read/search. An action verb, a
+/// conjunction, OR any name we don't recognise, is denied — a new mutating tool
+/// we've never seen is blocked by default rather than waved through.
 export function mcpPermission(toolName: string, allowMcpActions: boolean): "allow" | "deny" {
   if (allowMcpActions) return "allow";
   const name = normaliseVerbName(bareMcpName(toolName));
+  if (MCP_CONJUNCTION_PATTERN.test(name)) return "deny";
   if (MCP_ACTION_PATTERN.test(name)) return "deny";
-  if (MCP_READ_PATTERN.test(name)) return "allow";
+  const read = MCP_READ_PATTERN.exec(name);
+  const ambiguous = MCP_AMBIGUOUS_ACTION_PATTERN.exec(name);
+  if (ambiguous && (!read || ambiguous.index < read.index)) return "deny";
+  if (read) return "allow";
+  if (MCP_READ_NOUN_PATTERN.test(name)) return "allow";
   return "deny";
 }
 
