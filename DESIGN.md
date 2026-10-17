@@ -2312,6 +2312,34 @@ actions being off by default the backstop. `sandbox.sdk.test.ts` now drives a
 stub connector through the real CLI to prove tool names reach the hook in the
 shape the gate assumes.
 
+**One shutdown contract.** The app closed the sidecar's stdin and sent SIGTERM
+in the same instant, so the sidecar's own stdin-close path (exit once the lanes
+were idle) was unreachable, and the two sides disagreed about who ended the
+process. The idle wait bought nothing — the app has already failed every
+in-flight card before it closes the pipe — but the exit path matters for a
+different reason: it is where the sidecar's CLI children are cleaned up. On
+stdin close the sidecar now resets every lane, which aborts its in-flight turn
+— the Codex SDK kills its CLI on abort and registers no exit handler, so
+leaving without this would orphan a running `codex exec`; the Agent SDK kills
+its CLIs from Node's `exit` handlers as well, which a SIGTERM skips — then
+exits on the next tick (`main.ts`). `SidecarManager.discardProcess` closes
+stdin and terminates only a sidecar still running after `exitGrace` (2 s;
+injectable, so the tests use 0.2 s) — the backstop against a wedged one, not
+the mechanism. ⌘Q is the exception: `finishQuit` is followed by a synchronous
+`_exit`, so a delayed backstop would never fire there; `stopForExit` instead
+waits for the clean exit, bounded (1 s on quit, so a wedged sidecar adds at
+most that to the 5 s shutdown deadline) — including the wait for the queued
+stdin close, which a write blocked on a wedged sidecar's full pipe must not
+hold up — and terminates what is left. On an authentication change the old
+sidecar likewise gets the grace before it is terminated, so for up to 2 s two
+may be running, the old one's stderr still reaching the log. The
+`stopping` flag went entirely: a deliberate stop bumps the generation, which
+every crash, spawn-failure and backoff callback checks first, so no branch on
+the flag was reachable. Tests: the sidecar exits within a second of stdin
+closing (`stdin.test.ts`); a fake sidecar that reads stdin leaves by exit
+status, not signal, one that ignores stdin is terminated after the grace
+period, not before, and the quit path does both synchronously.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

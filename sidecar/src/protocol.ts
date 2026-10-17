@@ -1,3 +1,4 @@
+import { writeSync } from "node:fs";
 // NDJSON protocol between the Swift app and this sidecar (see DESIGN.md).
 
 export type Source = "me" | "them";
@@ -110,6 +111,21 @@ export function send(msg: Outbound): void {
 }
 
 export function log(message: string): void {
-  // Elapsed-since-start prefix so all log lines sit on one timeline.
-  process.stderr.write(`[sidecar +${process.uptime().toFixed(1)}s] ${message}\n`);
+  process.stderr.write(logLine(message));
+}
+
+/// `log` for the last line before `process.exit`, which would drop an async
+/// pipe write. Never throws: once the app is gone the pipe is closed (EPIPE),
+/// and a line of diagnostics must not stop the exit it describes.
+export function logSync(message: string): void {
+  try {
+    writeSync(2, logLine(message));
+  } catch {
+    /* stderr gone — nothing to say it to */
+  }
+}
+
+/// Elapsed-since-start prefix so all log lines sit on one timeline.
+function logLine(message: string): string {
+  return `[sidecar +${process.uptime().toFixed(1)}s] ${message}\n`;
 }

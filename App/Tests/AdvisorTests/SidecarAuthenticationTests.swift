@@ -12,6 +12,8 @@ private final class AuthHarness {
     var environment: [String: String] = [:]
     let directory: URL
     var useDevShell = false
+    /// What the fake sidecar runs; the default reads stdin until it closes.
+    var childScript = AuthHarness.childScript
 
     init() throws {
         directory = FileManager.default.temporaryDirectory
@@ -28,7 +30,7 @@ private final class AuthHarness {
             // and termination callbacks without Node, providers or Keychain.
             if !self.useDevShell {
                 process.executableURL = URL(fileURLWithPath: "/bin/sh")
-                process.arguments = ["-c", Self.childScript]
+                process.arguments = ["-c", self.childScript]
             }
             var environment = process.environment ?? [:]
             environment["ADVISOR_TEST_ENV"] = self.envFile(self.children.count).path
@@ -41,8 +43,12 @@ private final class AuthHarness {
             self.children.append(process)
             self.outputWriters.append(output)
         },
-        environment: environment
+        environment: environment,
+        exitGrace: exitGrace
     )
+    /// The production default; a test of the backstop's timing sets it short
+    /// before first touching `manager`.
+    var exitGrace: TimeInterval = 2
 
     static let childScript = """
         printf '%s\\n%s\\n' "${ANTHROPIC_API_KEY-unset}" "${OPENAI_API_KEY-unset}" > "$ADVISOR_TEST_ENV"
@@ -227,4 +233,67 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
     #expect(await waitFor { FileManager.default.fileExists(atPath: h.envFile(1).path) })
     #expect(try String(contentsOf: h.envFile(1), encoding: .utf8) == "selected-placeholder\nunset\n")
     #expect(!h.children[1].arguments!.joined().contains("selected-placeholder"))
+}
+
+// The shutdown contract: the app closes the sidecar's stdin and the sidecar
+// exits on its own, through Node's exit handlers (where the Agent SDK kills the
+// CLI processes it spawned). SIGTERM skips those, so it is only the backstop.
+
+@MainActor
+@Test func req_sidecar_shutdown_closesStdinAndLetsTheSidecarExitCleanly() async throws {
+    let h = try AuthHarness()
+    defer { h.close() }
+    h.manager.start()
+    let child = h.children[0]
+    h.manager.stop()
+    try #require(await waitFor { !child.isRunning }) // reading the reason of a live process raises
+    // It left on stdin close, not by signal.
+    #expect(child.terminationReason == .exit)
+    #expect(child.terminationStatus == 0)
+}
+
+@MainActor
+@Test func req_sidecar_shutdown_terminatesASidecarThatIgnoresStdinClose() async throws {
+    let h = try AuthHarness()
+    defer { h.close() }
+    h.childScript = "exec sleep 30" // never reads stdin
+    h.exitGrace = 0.2
+    h.manager.start()
+    let child = h.children[0]
+    h.manager.stop()
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(child.isRunning, "no signal before the grace period")
+    try await Task.sleep(for: .seconds(h.exitGrace))
+    try #require(await waitFor { !child.isRunning })
+    #expect(child.terminationReason == .uncaughtSignal)
+}
+
+// ⌘Q exits the app synchronously after finishQuit, so the delayed backstop
+// could never fire there: the quit path waits, bounded, for the clean exit.
+
+@MainActor
+@Test func req_sidecar_shutdown_quitWaitsForTheCleanExit() throws {
+    let h = try AuthHarness()
+    defer { h.close() }
+    h.manager.start()
+    let child = h.children[0]
+    let t0 = Date()
+    h.manager.stopForExit()
+    let elapsed = Date().timeIntervalSince(t0)
+    try #require(!child.isRunning)
+    #expect(child.terminationReason == .exit)
+    #expect(elapsed < 1, "left on stdin close, well inside the wait")
+}
+
+@MainActor
+@Test func req_sidecar_shutdown_quitTerminatesASidecarThatIgnoresStdinClose() throws {
+    let h = try AuthHarness()
+    defer { h.close() }
+    h.childScript = "exec sleep 30"
+    h.manager.start()
+    let child = h.children[0]
+    h.manager.stopForExit(waitingUpTo: 0.2)
+    #expect(child.isRunning || child.terminationReason == .uncaughtSignal) // terminate() is asynchronous
+    child.waitUntilExit()
+    #expect(child.terminationReason == .uncaughtSignal)
 }

@@ -188,9 +188,13 @@ final class SidecarManager {
     // cards, no query). Restart with backoff and replay the session context the
     // running conversation depends on. (In-flight utterances at crash time are
     // not replayed — the classifier session is gone; new utterances flow into a
-    // fresh session via the replayed session_start.)
-    private var stopping = false
+    // fresh session via the replayed session_start.) A deliberate stop() needs
+    // no flag: it bumps the generation, which every crash, spawn-failure and
+    // backoff callback checks first.
     private var restartAttempts = 0
+    /// How long a sidecar gets to leave on its own after its stdin closes
+    /// before it is terminated (see discardProcess).
+    private let exitGrace: TimeInterval
     private let maxRestarts = 5
     /// A sidecar that ran this long before crashing is treated as healthy, so
     /// the backoff budget resets — only a tight crash loop exhausts maxRestarts.
@@ -206,12 +210,14 @@ final class SidecarManager {
         loadConfig: @escaping () -> AdvisorConfig = { AdvisorConfig.load() },
         readKey: @escaping (Keychain.Key) -> String? = { Keychain.read($0) },
         launchProcess: @escaping (Process) throws -> Void = { try $0.run() },
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        exitGrace: TimeInterval = 2
     ) {
         self.store = store
         self.loadConfig = loadConfig
         self.readKey = readKey
         self.launchProcess = launchProcess
+        self.exitGrace = exitGrace
         baseEnvironment = environment
         // Writing to a sidecar that has died closes its read end → SIGPIPE, which
         // would kill the app. Ignore it; the write throws EPIPE instead, handled
@@ -222,7 +228,6 @@ final class SidecarManager {
     func start() {
         guard process == nil else { return }
         restartAttempts = 0
-        stopping = false
         spawn()
     }
 
@@ -334,13 +339,13 @@ final class SidecarManager {
 
     @MainActor
     private func handleTermination(_ code: Int32, generation: Int) {
+        // A deliberate stop() never reaches here: discardProcess bumps the
+        // generation first, so this is always a genuine crash.
         guard self.generation == generation else { return }
         stdinHandle = nil
         process = nil
         spawnedAuth = nil
-        documentHandlers.failAll(
-            reason: stopping ? "sidecar stopped" : "sidecar crashed (\(code))")
-        if stopping { stopping = false; return } // deliberate stop()
+        documentHandlers.failAll(reason: "sidecar crashed (\(code))")
         // Genuine crash: the restarted sidecar has no memory of prior card ids, so
         // any still-researching card can never receive its terminal card_update and
         // would spin forever (issue #49). Fail them now — on every crash path
@@ -364,9 +369,7 @@ final class SidecarManager {
         stdinHandle = nil
         process = nil
         spawnedAuth = nil
-        documentHandlers.failAll(
-            reason: stopping ? "sidecar stopped" : "sidecar failed to start: \(error)")
-        if stopping { stopping = false; return } // stopped during the backoff window
+        documentHandlers.failAll(reason: "sidecar failed to start: \(error)")
         scheduleRestart(reason: "sidecar failed to start: \(error)")
     }
 
@@ -391,7 +394,6 @@ final class SidecarManager {
 
     @MainActor
     private func restart() {
-        guard !stopping else { return } // user stopped during the backoff window
         spawn()
         guard process != nil else { return } // spawn failed; status already set
         // Replay the session context the running conversation depends on.
@@ -402,11 +404,33 @@ final class SidecarManager {
 
     @MainActor
     func stop() {
-        stopping = true
         lastSessionId = nil
         lastSessionContext = ""
         discardProcess()
         documentHandlers.failAll(reason: "sidecar stopped")
+    }
+
+    /// `stop()` for the way out (⌘Q's `finishQuit`): the app exits synchronously
+    /// straight after, so the delayed backstop in `discardProcess` would never
+    /// fire. Close stdin, then wait up to `grace` for the sidecar to leave on its
+    /// own — the clean path, which takes its CLI children with it — and
+    /// terminate it only if it is still there. Blocks the main thread for at
+    /// most `grace`, whatever state the sidecar is in: the stdin close is queued
+    /// behind any in-flight write, and a write blocked on a wedged sidecar's full
+    /// pipe must not hold up the exit, so the wait on it is bounded too.
+    @MainActor
+    func stopForExit(waitingUpTo grace: TimeInterval? = nil) {
+        let grace = grace ?? exitGrace
+        let leaving = process
+        stop()
+        guard let leaving, leaving.isRunning else { return }
+        let deadline = Date().addingTimeInterval(grace)
+        let closed = DispatchSemaphore(value: 0)
+        writeQueue.async { closed.signal() } // runs after the close discardProcess queued
+        if closed.wait(timeout: .now() + grace) == .success {
+            while leaving.isRunning && Date() < deadline { usleep(10_000) }
+        }
+        if leaving.isRunning { leaving.terminate() }
     }
 
     private func discardProcess() {
@@ -414,11 +438,19 @@ final class SidecarManager {
         // and backoff callbacks must never clear or restart the replacement.
         generation += 1
         // Close on writeQueue so it serialises with in-flight async writes (a
-        // close racing a write mid-syscall is an fd-reuse hazard). sidecar exits
-        // on stdin close.
+        // close racing a write mid-syscall is an fd-reuse hazard). The sidecar
+        // exits at once on stdin close — through Node's exit handlers, where the
+        // Agent SDK kills the CLI processes it spawned. A SIGTERM skips those and
+        // orphans them, so it is only the backstop for a sidecar that fails to
+        // leave (code review 2026-10-17; it used to be sent in the same instant,
+        // which made the sidecar's own exit path unreachable).
         if let handle = stdinHandle { writeQueue.async { try? handle.close() } }
         stdinHandle = nil
-        if let process, process.isRunning { process.terminate() } // backstop: no orphan
+        if let process, process.isRunning {
+            DispatchQueue.main.asyncAfter(deadline: .now() + exitGrace) {
+                if process.isRunning { process.terminate() }
+            }
+        }
         process = nil
         spawnedAuth = nil
     }
@@ -432,7 +464,6 @@ final class SidecarManager {
         if process == nil || spawnedAuth != auth {
             discardProcess()
             documentHandlers.failAll(reason: "authentication changed — request cancelled")
-            stopping = false
             restartAttempts = 0
             spawn(auth: auth)
             guard process != nil else { return } // recovery replays session_start

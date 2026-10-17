@@ -102,9 +102,13 @@ extension AppServices: Quitting {
     /// deadline: save synchronously — ending the session if it is still
     /// recording, otherwise just writing, so an ended session keeps its end
     /// time (both no-ops once the close has released the note) — then close
-    /// the node child's stdin so it exits.
+    /// the node child's stdin and give it a moment to exit on its own (taking
+    /// its CLI children with it) before the app's own exit; a sidecar still
+    /// running after that is terminated. The clean exit takes tens of
+    /// milliseconds; the second is the most a wedged sidecar can add to ⌘Q on
+    /// top of `shutdown`'s deadline.
     func finishQuit() {
         if writer.isSessionActive { writer.end() } else { writer.flush() }
-        sidecar.stop()
+        sidecar.stopForExit(waitingUpTo: 1)
     }
 }

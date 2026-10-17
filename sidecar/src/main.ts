@@ -7,7 +7,7 @@ import {
   summaryTask,
 } from "./prompts.js";
 import { ProcessCardIDs } from "./cardIds.js";
-import { Inbound, log, send } from "./protocol.js";
+import { Inbound, log, logSync, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
 import { cardLaneOptions, Lane, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
@@ -421,11 +421,30 @@ rl.on("line", (line) => {
     log(`bad message: ${trimmed} (${err})`);
   }
 });
+// The shutdown contract with the app (SidecarManager.discardProcess): it closes
+// our stdin and we exit at once, taking our CLI children with us. The app has
+// already failed every in-flight card by then, so there is nothing to wait for
+// (an idle wait used to sit here, unreachable: the app sent SIGTERM in the same
+// instant — code review 2026-10-17). Every lane is reset first, which aborts
+// its in-flight turn: the Codex SDK kills its CLI on abort and has no exit
+// handler, so leaving without this would orphan a running `codex exec`; the
+// Agent SDK kills its CLIs from Node's exit handlers as well, which a SIGTERM
+// would skip. The exit is scheduled first and waits a tick, so the abort
+// signals are dispatched and a reset that throws (swallowed by the
+// uncaughtException keep-alive above) cannot keep the process here. The log
+// line is written synchronously (`logSync`): an async pipe write would be
+// dropped by the exit. The app's SIGTERM is the late backstop for a sidecar that fails to leave.
 rl.on("close", () => {
-  const exitWhenIdle = () => {
-    if (!busy && researchLanes.every((l) => !l.busy)) process.exit(0);
-    setTimeout(exitWhenIdle, 200);
-  };
-  log("stdin closed, exiting when idle");
-  exitWhenIdle();
+  setImmediate(() => process.exit(0));
+  logSync("stdin closed, exiting");
+  for (const reset of [
+    resetClassifier,
+    ...[...researchLanes, queryLane, ...replyLanes, ...documentLanes, ...summaryLanes].map((l) => () => l.session.reset()),
+  ]) {
+    try {
+      reset();
+    } catch (err) {
+      log(`reset on exit failed: ${err}`);
+    }
+  }
 });
