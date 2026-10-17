@@ -134,8 +134,7 @@ You can end the agreement at any time by deleting Advisor.
 ## 13. Changes to these terms
 
 We may update these terms — the version and date appear at the top, and the
-current version is always at
-[advisor.monoidal.co.uk/terms.html](https://advisor.monoidal.co.uk/terms.html).
+current version is always `TERMS.md` in the Advisor source repository.
 Advisor will ask you to accept material changes before continuing.
 
 ## 14. Governing law
@@ -147,5 +146,5 @@ grants you.
 
 ## 15. Contact
 
-Questions about these terms: see
-[advisor.monoidal.co.uk](https://advisor.monoidal.co.uk).
+Questions about these terms: open an issue on the Advisor repository,
+[github.com/Monoidal-Limited/advisor](https://github.com/Monoidal-Limited/advisor).

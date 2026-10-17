@@ -35,7 +35,7 @@ enum TermsAcceptance {
     /// functional (and acceptance meaningful) if the file is missing.
     static func text() -> String {
         (try? String(contentsOf: AppResources.termsURL, encoding: .utf8))
-            ?? "Terms unavailable in this build — the current terms are at "
-            + "https://advisor.monoidal.co.uk/terms.html"
+            ?? "Terms unavailable in this build — the current terms are TERMS.md "
+            + "in the Advisor source repository."
     }
 }

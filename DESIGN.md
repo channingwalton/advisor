@@ -2192,6 +2192,20 @@ layout manager:
   column that fits an even share of the remaining width keeps its natural
   width, provided the other columns can still fit their widest words.
 
+## Website removed (2026-10-17)
+
+The `www/` site (index, features, terms, served by Cloudflare with the DMG in
+an R2 bucket) is gone: it was never kept in step — the DMG link on the live
+page returned 404 for the last three releases and the tags it advertised had
+not been pushed since v0.4.0. `mise run release` now just builds the DMG and
+tags `HEAD`, which also fixes an off-by-one: the sync commit used to land
+*after* the DMG was built, so the tag pointed one commit past the source the
+bundle's `CFBundleVersion` (commit count) was stamped from. `TERMS.md` is the
+only copy of the terms; the in-app fallback when the bundled file is missing
+names the repo file rather than a URL, since the repo is private and there is
+no public page. The DMG is not published anywhere until a new home is chosen
+(GitHub Releases is the obvious one, with `gh release create` in the task).
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

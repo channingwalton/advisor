@@ -27,14 +27,6 @@ import Testing
     #expect(text.contains("Version \(TermsAcceptance.currentVersion)"))
 }
 
-@Test func websiteTermsPageStaysInStepWithTheAcceptedVersion() throws {
-    // www/terms.html duplicates TERMS.md for the site; a material change must
-    // bump the version in both and in TermsAcceptance.currentVersion.
-    let page = try String(
-        contentsOf: repoRoot.appendingPathComponent("www/terms.html"), encoding: .utf8)
-    #expect(page.contains("Version \(TermsAcceptance.currentVersion)"))
-}
-
 @Test func acceptedTermsVersionRoundTripsThroughConfig() throws {
     var c = AdvisorConfig()
     #expect(c.acceptedTermsVersion == "")     // default: not accepted

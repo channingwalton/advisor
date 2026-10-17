@@ -10,19 +10,13 @@ conversation on demand (live or from a saved session). Your notes, the web,
 and connected tools are its sources; nothing is recorded, only
 transcripts are kept.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="www/img/recording-dark.png">
-  <img alt="The recording window: a live transcript with answer and fact-check cards placed where they were raised." src="www/img/recording-light.png">
-</picture>
-
 ## Getting started
 
-1. **Install.** Download the DMG from
-   [advisor.monoidal.co.uk](https://advisor.monoidal.co.uk), open it and drag
-   Advisor to Applications.
-2. **Accept the terms.** First launch shows the [Terms of Use](TERMS.md)
-   (also at [advisor.monoidal.co.uk/terms.html](https://advisor.monoidal.co.uk/terms.html))
-   — recording and AI features stay off until accepted.
+1. **Install.** Build the DMG from source (see
+   [docs/development.md](docs/development.md)), open it and drag Advisor to
+   Applications.
+2. **Accept the terms.** First launch shows the [Terms of Use](TERMS.md) —
+   recording and AI features stay off until accepted.
 3. **Grant permissions.** On first launch Advisor asks for **Microphone** and
    **Screen & System Audio Recording** — both are needed to hear the
    conversation.
@@ -58,7 +52,7 @@ Packaging, signing and releases are in
 - [docs/guide.md](docs/guide.md) — using Advisor: recording, sessions,
   preferences, providers, safety, logs
 - [docs/development.md](docs/development.md) — architecture, building,
-  packaging, releasing, the website
+  packaging, releasing
 - [FEATURES.md](FEATURES.md) — the feature list, in plain language
 - [REQUIREMENTS.md](REQUIREMENTS.md) — what it must do, decisions made
 - [DESIGN.md](DESIGN.md) — architecture, protocol, milestones, tuning history

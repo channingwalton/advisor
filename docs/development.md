@@ -67,7 +67,7 @@ If `mise` is installed, common tasks are available from the repo root:
 mise run commit-check   # clean build and test both sides; Swift warnings fail it (alias: mise run cc)
 mise run run            # run the debug build
 mise run dmg            # create App/dist/Advisor-<version>.dmg
-mise run release        # dmg + sync website version line + commit + tag vVERSION
+mise run release        # dmg + tag vVERSION
 mise run install        # install to ~/Applications/Advisor.app
 ```
 
@@ -167,19 +167,8 @@ release: bump `VERSION` and commit the bump, then
 mise run release
 ```
 
-which builds the DMG, rewrites the version/size line and DMG link on
-`www/index.html`, commits that sync, and tags `vVERSION`. It refuses to run if
-the tag already exists (bump `VERSION` first), if `VERSION` has uncommitted
-changes (the tag must point at a commit carrying the version it names), or if
-`www/index.html` has uncommitted changes (so the release commit contains only
-the sync). Push the commit and tag yourself.
-
-## Website
-
-`www/` holds plain HTML pages sharing `www/style.css`, with no build step or
-scripts. Screenshots live in `www/img/` as `-light`/`-dark` pairs; capture them
-from demo sessions, never real ones.
-
-The site is hosted by Cloudflare. The DMG is stored in an R2 bucket called
-`advisor-downloads` with a custom domain of `downloads.advisor.monoidal.co.uk`;
-the download link is `https://downloads.advisor.monoidal.co.uk/Advisor-a.b.c.dmg`.
+which builds the DMG and tags `vVERSION` at `HEAD`. It refuses to run if the
+tag already exists (bump `VERSION` first) or if `VERSION` has uncommitted
+changes (the tag must point at a commit carrying the version it names). Push
+the tag yourself (`git push origin main vVERSION`); the DMG in `App/dist` is
+not published anywhere.
