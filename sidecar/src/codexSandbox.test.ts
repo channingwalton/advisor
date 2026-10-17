@@ -12,6 +12,7 @@ import {
   realpathOrSelf,
   sandboxPolicy,
   sandboxReadDenials,
+  sandboxWriteDenials,
   seatbeltProfile,
 } from "./codexSandbox.js";
 
@@ -41,12 +42,13 @@ function fakeHome(opts: { symlinkDotfiles?: boolean } = {}): {
   }
   fs.writeFileSync(path.join(root, ".ssh", "id_rsa"), "PRIVATE KEY");
   fs.writeFileSync(path.join(root, ".codex", "auth.json"), "provider token");
+  fs.writeFileSync(path.join(root, ".codex", "config.toml"), 'model = "x"\n');
   fs.writeFileSync(path.join(home, "Documents", "notes.txt"), "hello");
 
   const tmp = path.join(home, "tmp");
   const profile = path.join(tmp, "advisor.sb");
   const policy = sandboxPolicy(home, [tmp]);
-  fs.writeFileSync(profile, seatbeltProfile(policy.readDenials, policy.writableRoots));
+  fs.writeFileSync(profile, seatbeltProfile(policy.readDenials, policy.writableRoots, policy.writeDenials));
   return { home, tmp, profile };
 }
 
@@ -67,7 +69,7 @@ test("the OS sandbox denies every path the Claude backend denies, bar Codex's ow
 });
 
 test("the profile denies the read paths and confines writes to the writable roots", () => {
-  const profile = seatbeltProfile(["/home/u/.ssh"], ["/home/u/.codex"]);
+  const profile = seatbeltProfile(["/home/u/.ssh"], ["/home/u/.codex"], []);
   assert.match(profile, /^\(version 1\)/);
   assert.match(profile, /\(deny file-read\* \(subpath "\/home\/u\/\.ssh"\)\)/);
   assert.match(profile, /\(deny file-write\*\)/);
@@ -76,8 +78,67 @@ test("the profile denies the read paths and confines writes to the writable root
   assert.ok(profile.indexOf("(deny file-write*)") < profile.indexOf("(allow file-write*"));
 });
 
+test("the profile denies writes to Codex's inputs, after the folder allowance", () => {
+  const profile = seatbeltProfile([], ["/home/u/.codex"], ["/home/u/.codex/config.toml", "/home/u/.codex/skills"]);
+  assert.match(profile, /\(deny file-write\* \(subpath "\/home\/u\/\.codex\/config\.toml"\) \(subpath "\/home\/u\/\.codex\/skills"\)\)/);
+  // Last matching rule wins: the input denials must follow the folder allowance.
+  assert.ok(profile.indexOf("(allow file-write*") < profile.indexOf('(deny file-write* (subpath "/home/u/.codex/config.toml"'));
+});
+
+test("the policy names every input as a write denial, resolved through the folder", () => {
+  const { home } = fakeHome({ symlinkDotfiles: true });
+  const policy = sandboxPolicy(home, [path.join(home, "tmp")]);
+  const real = path.join(home, "dotfiles", ".codex");
+  const inputs = sandboxWriteDenials(home);
+  assert.ok(inputs.length >= 9, "the input list is not empty");
+  for (const input of inputs) {
+    assert.equal(path.dirname(input), path.join(home, ".codex"), input);
+    assert.ok(policy.writeDenials.includes(path.join(real, path.basename(input))), input);
+  }
+  // The connector-override and command-running inputs are in the list by name.
+  for (const f of ["config.toml", "managed_config.toml", "hooks.json", ".env", "AGENTS.md", "skills"]) {
+    assert.ok(inputs.includes(path.join(home, ".codex", f)), f);
+  }
+});
+
+test("a relative symlink target is read from the folder the link really sits in", () => {
+  // Dotfiles managers write relative links; resolved against the unresolved
+  // `~/.codex` the denied target would be a path the kernel never matches.
+  const { home } = fakeHome({ symlinkDotfiles: true });
+  const real = path.join(home, "dotfiles", ".codex");
+  fs.mkdirSync(path.join(home, "dotfiles", "shared"));
+  fs.writeFileSync(path.join(home, "dotfiles", "shared", "config.toml"), "");
+  fs.unlinkSync(path.join(real, "config.toml"));
+  fs.symlinkSync("../shared/config.toml", path.join(real, "config.toml"));
+  const policy = sandboxPolicy(home, [path.join(home, "tmp")]);
+  assert.ok(policy.writeDenials.includes(path.join(home, "dotfiles", "shared", "config.toml")), policy.writeDenials.join("\n"));
+});
+
+test("a dangling link into a folder that does not exist yet is still denied at its real target", () => {
+  const { home } = fakeHome({ symlinkDotfiles: true });
+  const real = path.join(home, "dotfiles", ".codex");
+  fs.symlinkSync(path.join(home, ".codex", "local", "hooks.json"), path.join(real, "hooks.json"));
+  const policy = sandboxPolicy(home, [path.join(home, "tmp")]);
+  assert.ok(policy.writeDenials.includes(path.join(real, "local", "hooks.json")), policy.writeDenials.join("\n"));
+});
+
+test("an input that is itself a symlink is denied by name and at its target, dangling or not", () => {
+  const { home } = fakeHome();
+  const codex = path.join(home, ".codex");
+  const target = path.join(home, "Documents", "work.toml");
+  fs.writeFileSync(target, "");
+  fs.unlinkSync(path.join(codex, "config.toml"));
+  fs.symlinkSync(target, path.join(codex, "config.toml"));
+  const dangling = path.join(codex, "local", "hooks.json"); // not created
+  fs.symlinkSync(dangling, path.join(codex, "hooks.json"));
+  const policy = sandboxPolicy(home, [path.join(home, "tmp")]);
+  for (const p of [path.join(codex, "config.toml"), target, path.join(codex, "hooks.json"), dangling]) {
+    assert.ok(policy.writeDenials.includes(p), `${p} missing from\n${policy.writeDenials.join("\n")}`);
+  }
+});
+
 test("profile paths are escaped so a quote cannot terminate the s-expression", () => {
-  const profile = seatbeltProfile(['/home/u/a"b\\c'], []);
+  const profile = seatbeltProfile(['/home/u/a"b\\c'], [], []);
   assert.match(profile, /\(subpath "\/home\/u\/a\\"b\\\\c"\)/);
 });
 
@@ -122,6 +183,70 @@ test("a sandboxed process can still read and write Codex's own state", darwin, (
   const write = sandboxed(profile, ["/bin/sh", "-c", `echo s > ${session}`]);
   assert.equal(write.code, 0);
   assert.equal(fs.existsSync(session), true);
+});
+
+// The inputs that shape the CLI's next turn or session (see sandboxWriteDenials)
+// are write-denied inside the otherwise writable folder, in both home layouts.
+test("a sandboxed process cannot write Codex's inputs, by write, rename or new file", darwin, () => {
+  for (const layout of [{}, { symlinkDotfiles: true }]) {
+    const { home, profile } = fakeHome(layout);
+    const label = JSON.stringify(layout);
+    const config = path.join(home, ".codex", "config.toml");
+    const append = sandboxed(profile, ["/bin/sh", "-c", `echo '[mcp_servers.evil]' >> ${config}`]);
+    assert.notEqual(append.code, 0, label);
+    assert.equal(fs.readFileSync(config, "utf8"), 'model = "x"\n');
+    const staged = path.join(home, ".codex", "config.toml.tmp");
+    const rename = sandboxed(profile, ["/bin/sh", "-c", `echo evil > ${staged} && mv ${staged} ${config}`]);
+    assert.notEqual(rename.code, 0, label);
+    assert.equal(fs.readFileSync(config, "utf8"), 'model = "x"\n');
+    // Files that need not exist yet, and a folder of them.
+    for (const f of ["managed_config.toml", "requirements.toml", "hooks.json", "AGENTS.md"]) {
+      const target = path.join(home, ".codex", f);
+      const r = sandboxed(profile, ["/bin/sh", "-c", `echo evil > ${target}`]);
+      assert.notEqual(r.code, 0, `${label} ${f}`);
+      assert.equal(fs.existsSync(target), false, `${label} ${f}`);
+    }
+    // The volume is case-insensitive and so is the kernel's match: a case
+    // variant of a denied name cannot be created either.
+    const upper = path.join(home, ".codex", "HOOKS.JSON");
+    const cased = sandboxed(profile, ["/bin/sh", "-c", `echo evil > ${upper}`]);
+    assert.notEqual(cased.code, 0, label);
+    assert.equal(fs.existsSync(upper), false, label);
+    const skill = path.join(home, ".codex", "skills", "evil", "SKILL.md");
+    const mk = sandboxed(profile, ["/bin/sh", "-c", `mkdir -p ${path.dirname(skill)} && echo evil > ${skill}`]);
+    assert.notEqual(mk.code, 0, label);
+    assert.equal(fs.existsSync(skill), false, label);
+    // Reading them is still fine, and the rest of the folder is still writable
+    // (the "can still read and write Codex's own state" test above).
+    const read = sandboxed(profile, ["/bin/cat", config]);
+    assert.equal(read.code, 0, label);
+    // Seatbelt matches paths, not inodes, but linking needs write access to the
+    // source path, so a hard link cannot lend a denied file an allowed name.
+    const alias = path.join(home, ".codex", "alias.toml");
+    const hard = sandboxed(profile, ["/bin/sh", "-c", `ln ${config} ${alias} && echo '[mcp_servers.evil]' >> ${alias}`]);
+    assert.notEqual(hard.code, 0, label);
+    assert.equal(fs.readFileSync(config, "utf8"), 'model = "x"\n');
+  }
+});
+
+test("a config.toml that is a symlink cannot be written through the link, nor replaced", darwin, () => {
+  const { home, tmp } = fakeHome();
+  const target = path.join(home, ".codex", "profiles", "work.toml");
+  fs.mkdirSync(path.dirname(target));
+  fs.writeFileSync(target, 'model = "x"\n');
+  const link = path.join(home, ".codex", "config.toml");
+  fs.unlinkSync(link);
+  fs.symlinkSync(target, link);
+  const profile = path.join(tmp, "advisor.sb");
+  const policy = sandboxPolicy(home, [tmp]);
+  fs.writeFileSync(profile, seatbeltProfile(policy.readDenials, policy.writableRoots, policy.writeDenials));
+  const through = sandboxed(profile, ["/bin/sh", "-c", `echo '[mcp_servers.evil]' >> ${link}`]);
+  assert.notEqual(through.code, 0);
+  assert.equal(fs.readFileSync(target, "utf8"), 'model = "x"\n');
+  const replace = sandboxed(profile, ["/bin/sh", "-c", `rm ${link} && echo '[mcp_servers.evil]' > ${link}`]);
+  assert.notEqual(replace.code, 0);
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), "the link must survive");
+  assert.equal(fs.readFileSync(target, "utf8"), 'model = "x"\n');
 });
 
 test("a sandboxed process cannot create files outside the writable roots", darwin, () => {

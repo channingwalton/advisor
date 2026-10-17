@@ -40,7 +40,34 @@ export function sandboxWritableRoots(home: string, tmps: string[] = DEFAULT_TMPS
   return [path.join(home, ".codex"), ...tmps, "/dev"];
 }
 
-/// The two path lists as the kernel will match them: resolved, then deduped.
+/// What in Codex's own folder the agent may not write, folder allowance
+/// notwithstanding: the inputs that shape the CLI's next turn or session. The
+/// CLI re-reads its config every turn, and Advisor disables the user's
+/// connectors by name through `--config` overrides (see codex.ts) — a written
+/// `[mcp_servers.x]` block in `config.toml` would have a connector back next
+/// turn, and `managed_config.toml` is layered *above* those overrides, so it
+/// could re-enable one by name. `requirements.toml` constrains the CLI;
+/// `hooks.json` runs commands; `.env` is loaded into the CLI's environment
+/// (`OPENAI_BASE_URL` would redirect the user's token and transcript);
+/// `AGENTS.md`, `instructions.md`, `agents/`, `skills/`, `rules/`, `prompts/`
+/// and `plugins/` are instructions and commands every later session loads.
+/// Codex's own read-only mode is the only other thing in the way, and it is not
+/// relied on. `auth.json` stays writable (the OAuth token refresh rewrites it),
+/// as does the CLI's working state (sessions, sqlite databases, memories, logs,
+/// locks, temp files) — the set the CLI writes is large and changes with
+/// releases, so it is the inputs that are listed, not the outputs. Two of those
+/// outputs are read back (a resumed thread's rollout, the memories): known
+/// residuals, recorded in DESIGN.md. A denylist, so a new input class in a Codex
+/// release is a gap until it is added here; the inverse (an allowlist of state)
+/// would instead break the backend on an unexpected write. Code review 2026-10-17.
+export function sandboxWriteDenials(home: string): string[] {
+  return [
+    "config.toml", "managed_config.toml", "requirements.toml", "hooks.json", ".env",
+    "AGENTS.md", "instructions.md", "agents", "skills", "rules", "prompts", "plugins",
+  ].map((f) => path.join(home, ".codex", f));
+}
+
+/// The path lists as the kernel will match them: resolved, then deduped.
 ///
 /// Resolving is not cosmetic. Seatbelt matches the real path, so a rule naming
 /// a symlink matches nothing — and it fails in both directions. A dotfiles
@@ -51,12 +78,50 @@ export function sandboxWritableRoots(home: string, tmps: string[] = DEFAULT_TMPS
 export function sandboxPolicy(
   home: string,
   tmps: string[] = DEFAULT_TMPS
-): { readDenials: string[]; writableRoots: string[] } {
+): { readDenials: string[]; writableRoots: string[]; writeDenials: string[] } {
   const resolve = (ps: string[]): string[] => [...new Set(ps.map(realpathOrSelf))];
   return {
     readDenials: resolve(sandboxReadDenials(home)),
     writableRoots: resolve(sandboxWritableRoots(home, tmps)),
+    writeDenials: [...new Set(sandboxWriteDenials(home).flatMap(inputDenialPaths))],
   };
+}
+
+/// The paths the kernel must match to keep an input unwritable. Its own name,
+/// resolved as far as it exists (the folder is the part a dotfiles symlink
+/// redirects) — the input may not exist yet, and when it is a symlink the name
+/// is what `rm` and a fresh `>` act on. And, when it is a symlink, its target
+/// (dangling or not), read relative to the *resolved* folder the link sits in:
+/// that is where the kernel matches a write *through* the link. Either alone
+/// was bypassable (code review 2026-10-17). A symlink nested inside a denied
+/// folder is not followed — a known residual, recorded in DESIGN.md.
+function inputDenialPaths(p: string): string[] {
+  // The folder resolved, the name kept: `realpathLeaf(p)` would follow the link.
+  const name = path.join(realpathLeaf(path.dirname(p)), path.basename(p));
+  try {
+    if (!fs.lstatSync(p).isSymbolicLink()) return [name];
+    const target = path.resolve(path.dirname(name), fs.readlinkSync(p));
+    return [name, realpathLeaf(target)];
+  } catch {
+    return [name]; // does not exist: the name is all there is
+  }
+}
+
+/// `realpathOrSelf` for a path that may not exist: the deepest existing ancestor
+/// resolved, the rest appended as written (not existing, it can hold no symlink).
+function realpathLeaf(p: string): string {
+  const tail: string[] = [];
+  let cur = p;
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(cur), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(cur);
+      if (parent === cur) return p;
+      tail.push(path.basename(cur));
+      cur = parent;
+    }
+  }
 }
 
 /// The sidecar's own `TMPDIR` plus the two macOS temp roots, because the CLI and
@@ -64,18 +129,25 @@ export function sandboxPolicy(
 const DEFAULT_TMPS = [os.tmpdir(), "/private/tmp", "/private/var/folders"];
 
 /// A macOS Seatbelt profile: everything allowed except reads of `readDenials`
-/// and writes outside `writableRoots`.
-/// Seatbelt takes the LAST matching rule, so the write allowances must follow
-/// the blanket write denial. Paths are matched against the resolved path, so a
+/// and writes outside `writableRoots`, less the `writeDenials` (files or
+/// folders) inside them. Seatbelt takes the LAST matching rule, so the write
+/// allowances must follow the blanket write denial, and the denials inside them
+/// must follow the allowances. Paths are matched against the resolved path, so a
 /// symlink out of an allowed directory cannot reach a denied one — the kernel
-/// does here what `realResolve` does for the Claude backend.
-export function seatbeltProfile(readDenials: string[], writableRoots: string[]): string {
+/// does here what `realResolve` does for the Claude backend. `writeDenials` is
+/// not optional: a caller that forgot it would ship a profile without them.
+export function seatbeltProfile(
+  readDenials: string[],
+  writableRoots: string[],
+  writeDenials: string[]
+): string {
   const subpaths = (ps: string[]): string =>
     ps.map((p) => `(subpath "${escapeSexp(p)}")`).join(" ");
   const lines = ["(version 1)", "(allow default)"];
   if (readDenials.length > 0) lines.push(`(deny file-read* ${subpaths(readDenials)})`);
   lines.push("(deny file-write*)");
   if (writableRoots.length > 0) lines.push(`(allow file-write* ${subpaths(writableRoots)})`);
+  if (writeDenials.length > 0) lines.push(`(deny file-write* ${subpaths(writeDenials)})`);
   return lines.join("\n") + "\n";
 }
 
@@ -109,7 +181,7 @@ export function installCodexSandbox(
   const profilePath = path.join(dir, "advisor.sb");
   const wrapperPath = path.join(dir, "codex-sandboxed");
   const policy = sandboxPolicy(home, tmps);
-  fs.writeFileSync(profilePath, seatbeltProfile(policy.readDenials, policy.writableRoots));
+  fs.writeFileSync(profilePath, seatbeltProfile(policy.readDenials, policy.writableRoots, policy.writeDenials));
   fs.writeFileSync(wrapperPath, codexWrapperScript(realCodex, profilePath), { mode: 0o755 });
   fs.chmodSync(wrapperPath, 0o755); // mode above is subject to umask
   return wrapperPath;

@@ -269,9 +269,12 @@ your Claude settings can't widen it.
 On **Codex**, which has no per-call hook, the sandbox is at the process
 boundary: the Codex CLI runs under a macOS Seatbelt profile built from the same
 denylist, so it and every process it starts (shell commands, MCP servers) can't
-read those paths or write anywhere but Codex's own state and temp folders. It's
-coarser than the Claude policy: read-only shell commands are allowed, and Codex
-can read its own `~/.codex` login. Codex can't let connector reads through while
+read those paths or write anywhere but Codex's own state and temp folders (and
+not Codex's own config files, hooks, `.env`, `AGENTS.md`, agents, skills, rules,
+prompts or plugins even there, so a turn can't re-enable connectors or plant
+instructions for the next). It's coarser than the Claude policy:
+read-only shell commands are allowed, and Codex can read its own `~/.codex`
+login. Codex can't let connector reads through while
 refusing actions, so with the connector-actions toggle off it gets no connectors
 at all (the MCP servers and plugins in `~/.codex/config.toml`, and ChatGPT
 apps); with it on, it gets all of them. See [DESIGN.md](../DESIGN.md).

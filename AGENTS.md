@@ -106,7 +106,11 @@ drove the #21 rework and #12 churn).
   under `sandbox-exec` via `codexPathOverride`. Its own `sandboxMode:
   "read-only"` is kept but not relied on — it bounds writes only, and MCP tools
   bypass it (openai/codex#4152). Residual: Codex can read its own `~/.codex`
-  credentials, which the profile must leave readable for login. Connectors
+  credentials, which the profile must leave readable for login; the folder is
+  writable too (sqlite state, sessions), bar the CLI's inputs — config files,
+  `hooks.json`, `.env`, `AGENTS.md`, `agents/`, `skills/`, `rules/`,
+  `prompts/`, `plugins/` (`sandboxWriteDenials`) — or a turn could re-enable
+  connectors or plant instructions for the next. Connectors
   follow `allowMcpActions`, all or none (`codexClientOptions`): `--config`
   overrides merge into the user's config, so servers are disabled by name, and
   `--ignore-user-config` would drop the user's model too. Verify against the

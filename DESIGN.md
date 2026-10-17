@@ -1649,11 +1649,13 @@ any shell command the agent runs are covered by construction rather than by the
 CLI honouring a flag. Writes are denied outright except to Codex's own state,
 the temp roots and `/dev`.
 
-Two things worth keeping in mind. Codex's own state (`~/.codex`,
-`~/.codex-global-state.json`) must stay readable and writable or the CLI cannot
-authenticate or persist threads, so the agent can still read its own provider
-credentials — the one residual the Claude backend's in-process denylist covers
-and this one cannot. And Seatbelt matches *resolved* paths: on a dotfiles-managed
+Two things worth keeping in mind. Codex's own state (`~/.codex`: `auth.json`,
+`config.toml`, its sqlite databases, sessions, logs and locks — the
+global-state file lives in there too) must stay readable and writable or the
+CLI cannot authenticate or persist threads, so the agent can still read its own
+provider credentials — the one residual the Claude backend's in-process
+denylist covers and this one cannot. (Two files in that folder are write-denied
+all the same; see *Code review batch (2026-10-17)*.) And Seatbelt matches *resolved* paths: on a dotfiles-managed
 machine where `~/.codex` symlinks into `~/dotfiles`, a rule naming the link
 matches nothing. That bit during development in the harmless direction (Codex
 could not log in); the same miss on `~/.ssh` would have left the keys readable.
@@ -2231,7 +2233,58 @@ carries its subtype plus the CLI's own first message rather than a bare
 Claude Code process exited with code 1") instead of leaving the reason in
 stderr alone. `auth.sdk.test.ts` proves the logged-out shape against the real
 CLI. (A 401 from the API is a different path: the CLI retries it ten times with
-backoff, longer than a task lives, so that one ends as the lane's timeout.)
+backoff, longer than a task lives, so that one ends as the lane's timeout.) The
+session is kept after a flagged result: with no credentials the CLI exits within
+~100 ms and the stream's end drops it, but after an API 400 ("prompt is too
+long", probed) it carries on and answers the next prompt, and dropping it would
+cold-spawn the classifier on every recoverable error. The gap between a fatal
+flagged result and the process exit is real but shorter than any dispatch
+interval; a task caught in it fails with the cause named.
+
+**Codex may not write its own inputs.** The Seatbelt profile allowed writes to
+all of `~/.codex`, and Codex writes all over it (sqlite databases, sessions,
+logs, locks, temp files), so the folder has to stay writable. But the CLI
+re-reads its config every turn and Advisor disables the user's connectors by
+name through `--config` overrides (*Codex connectors follow the actions
+toggle*), so a research lane's shell could append an `[mcp_servers.x]` block to
+`config.toml` and have a connector back next turn — and `managed_config.toml`
+is layered *above* those overrides, so a line there would re-enable one by
+name. `hooks.json` runs commands; `.env` is loaded into the CLI's environment,
+so an `OPENAI_BASE_URL` there would redirect the user's token and transcript;
+`AGENTS.md`, `instructions.md`, `agents/`, `skills/`, `rules/`, `prompts/` and
+`plugins/` are instructions and commands every later session loads, which
+makes them the persistence a prompt-injected turn would reach for. Only Codex's
+own `read-only` mode stood in the way, which is kept but not relied on.
+`sandboxWriteDenials` lists those inputs and the profile denies them with
+`subpath` rules placed after the folder allowance (last match wins). Each input
+is denied under every path the kernel might match it by: its own name resolved
+through its folder (what `rm` and a fresh `>` act on; the folder is the part a
+dotfiles symlink redirects) and, when the input is itself a symlink, its target,
+dangling or not (where a write *through* the link is matched). Either alone was
+bypassable — unlink-and-replace at the name, or a write through the link to an
+undenied target. A relative link target is read from the resolved folder, and a
+dangling one resolves as far as its ancestors exist. Two things Seatbelt does
+on its own (verified against the kernel, pinned in the tests): a hard link
+cannot lend a denied file an allowed name, since linking needs write access to
+the source path, and on the default case-insensitive volume a case variant
+(`HOOKS.JSON`) is matched too. Not covered: a symlink nested *inside* a denied
+folder (`skills/mine` → elsewhere in `~/.codex`) is not followed, so a write
+through it lands where it points — a residual. The CLI's own writes under the
+denied folders (`skills/.system`, the plugin cache) are refused as well; its
+turns complete regardless, and plugins are off under Advisor, but a Codex
+upgrade that re-syncs its bundled skills while Advisor runs would need a
+carve-out. `auth.json` stays writable: the OAuth token refresh rewrites it. It is a
+denylist of inputs, not an allowlist of the state the CLI writes: that set is
+large and changes with releases, and an allowlist would break the backend on the
+first unexpected write, where a denylist leaves a new input class open until it
+is added. Two outputs are also read back and stay writable as known residuals:
+a resumed thread's rollout under `sessions/` (the sidecar resumes threads by id,
+so a turn could edit its own history) and the memories the CLI writes and feeds
+into later prompts. A CLI-initiated config write (a model-migration notice on
+upgrade, a trust entry) now fails with EPERM too; the real CLI completes its
+turns regardless (`codex.sdk.test.ts`), but that path is otherwise
+unexercised. Verified both ways on the files: append, rename-over, new-file and
+through-the-link writes fail under the new profile and succeed under the old.
 
 ## Revisit as it grows
 
