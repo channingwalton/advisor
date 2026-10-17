@@ -2206,6 +2206,33 @@ names the repo file rather than a URL, since the repo is private and there is
 no public page. The DMG is not published anywhere until a new home is chosen
 (GitHub Releases is the obvious one, with `gh release create` in the task).
 
+## Code review batch (2026-10-17)
+
+A whole-codebase review (both halves, read against the sandbox, the process
+lifecycle and the docs) found no release blocker; the fixes landed one per
+commit, in order of risk.
+
+**A flagged `success` result is a failure.** The Claude SDK reports some
+failures as a `success` result with `is_error` set and the message in
+`result` — a logged-out CLI answers "Not logged in · Please run /login" that
+way, instantly, without touching the API, and echoes the same text as an
+assistant block whose `message.model` is `<synthetic>`. `AgentSession` keyed
+only on the subtype, so the message reached the card as a *done* answer; and
+because `runCard` recycles on `result.error` alone, the lane's transcript
+cursor was not forgotten — the CLI exits after such a result (the SDK rethrows
+it as "Claude Code returned an error result"), so the next card re-spawned the
+session but was sent only the lines after the cursor, missing the ones the
+dead turn had consumed. Now: synthetic assistant messages are skipped at the
+source (they are the CLI's words, not the model's), `resultOutcome` reports a
+flagged result as a failure carrying the CLI's message (text streamed *before*
+the failure is kept, so the card can say it stopped early), and an error result
+carries its subtype plus the CLI's own first message rather than a bare
+`error_max_turns`. A stream that dies names its cause ("agent session ended:
+Claude Code process exited with code 1") instead of leaving the reason in
+stderr alone. `auth.sdk.test.ts` proves the logged-out shape against the real
+CLI. (A 401 from the API is a different path: the CLI retries it ten times with
+backoff, longer than a task lives, so that one ends as the lane's timeout.)
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

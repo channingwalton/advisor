@@ -3,6 +3,7 @@ import {
   type EffortLevel,
   type HookCallback,
   type SDKPartialAssistantMessage,
+  type SDKResultMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { homedir } from "node:os";
@@ -409,6 +410,33 @@ export function sandboxGate(
   };
 }
 
+/// A turn's result as the task sees it. A `success` result with `is_error` set
+/// is how the SDK reports some failures — a logged-out CLI's "Not logged in ·
+/// Please run /login" among them — with the message in `result`; read at face
+/// value it reached the card as a finished answer (code review 2026-10-17). Text
+/// the turn streamed before failing is kept, so the card can say it stopped
+/// early (the CLI's synthetic echo of the message never reaches the buffer).
+/// An error result names its subtype and, when the CLI gives one, its first
+/// message. `result` is typed as a string but tolerated missing, as before.
+/// The error goes onto the card as one italic line, so it is cut to its first
+/// line and a bounded length: the CLI's messages can be JSON bodies or stacks.
+export function resultOutcome(msg: SDKResultMessage, buffer: string): TaskResult {
+  if (msg.subtype === "success") {
+    const result = msg.result ?? "";
+    if (!msg.is_error) return { text: result };
+    return { text: buffer, error: oneLine(result) || "agent error" };
+  }
+  const detail = oneLine(msg.errors?.[0] ?? "");
+  return { text: buffer, error: detail ? `${msg.subtype}: ${detail}` : msg.subtype };
+}
+
+const ERROR_LINE_MAX = 200;
+
+function oneLine(s: string): string {
+  const line = s.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  return line.length > ERROR_LINE_MAX ? line.slice(0, ERROR_LINE_MAX - 1) + "…" : line;
+}
+
 /**
  * A long-lived Agent SDK session fed via streaming input. Avoids the ~5–10 s
  * CLI cold-spawn per request; each task is one (possibly multi-turn) exchange.
@@ -653,6 +681,7 @@ export class AgentSession implements Agent {
       },
     });
     this.stream = stream;
+    let cause: string | undefined;
     void (async () => {
       try {
         for await (const msg of stream) {
@@ -660,6 +689,15 @@ export class AgentSession implements Agent {
           if (msg.type === "stream_event") {
             if (current && !current.settled && msg.parent_tool_use_id === null) this.onStreamEvent(current, msg.event);
           } else if (msg.type === "assistant") {
+            // The CLI's own words, not the model's: a failure's message echoed as
+            // an assistant block ("Not logged in · Please run /login") flagged
+            // with the failure. The result that follows carries it as the error;
+            // it is not answer text. (`max_output_tokens` marks real model text
+            // that was cut off, which is.)
+            if (msg.error !== undefined && msg.error !== "max_output_tokens") {
+              log(`${this.opts.name}: assistant message flagged ${msg.error} skipped`);
+              continue;
+            }
             // Its text was already added delta by delta, unless it wasn't streamed.
             const streamed = current?.streamed.has(msg.message.id) ?? false;
             // A message the stream never announced, while another is still open:
@@ -684,27 +722,33 @@ export class AgentSession implements Agent {
             }
           } else if (msg.type === "result") {
             const p = pending.shift();
+            const outcome = resultOutcome(msg, p?.buffer ?? "");
             if (p) {
-              const finalText = msg.subtype === "success" ? msg.result : p.buffer;
-              log(`${this.opts.name}: run done +${Date.now() - p.t0}ms (cold=${p.cold}) final: ${JSON.stringify((finalText ?? "").slice(0, 400))}`);
+              log(`${this.opts.name}: run done +${Date.now() - p.t0}ms (cold=${p.cold}) final: ${JSON.stringify(outcome.text.slice(0, 400))}${outcome.error ? ` error: ${outcome.error}` : ""}`);
             }
             if (p && !p.settled) {
               p.settled = true;
-              p.resolve({
-                text: msg.subtype === "success" ? msg.result : p.buffer,
-                error: msg.subtype === "success" ? undefined : msg.subtype,
-              });
+              p.resolve(outcome);
             }
+            // After a flagged result the CLI may exit (no credentials: it does,
+            // within ~100 ms, and the SDK then rethrows the result) or carry on
+            // (an API 400 such as "prompt is too long": it answers the next
+            // prompt). The session is kept either way: `finally` below drops a
+            // dead one, and dropping a live one would cold-spawn the classifier
+            // on every recoverable error.
           }
         }
       } catch (err) {
         log(`${this.opts.name}: session died: ${err}`);
+        cause = err instanceof Error ? err.message : String(err);
       } finally {
         if (this.input === q) this.input = undefined;
         for (const p of pending.splice(0)) {
           if (!p.settled) {
             p.settled = true;
-            p.resolve({ text: p.buffer, error: "agent session ended" });
+            // Name the cause: a missing or crashing CLI otherwise reaches the
+            // card as a bare "agent session ended", its reason in stderr alone.
+            p.resolve({ text: p.buffer, error: cause ? `agent session ended: ${cause}` : "agent session ended" });
           }
         }
       }

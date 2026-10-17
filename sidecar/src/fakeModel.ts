@@ -44,15 +44,15 @@ export function sse(res: http.ServerResponse, content: Record<string, unknown>[]
 
 /// A `query` that runs the CLI in the synthetic `home` against the fake
 /// endpoint on `port`, with a minimal environment so the developer's own Claude
-/// config never loads.
-export function fakeModelQuery(home: string, port: number): QueryFn {
+/// config never loads. `apiKey: null` leaves the CLI with no credentials at all.
+export function fakeModelQuery(home: string, port: number, apiKey: string | null = "sk-ant-test"): QueryFn {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
     TMPDIR: os.tmpdir(),
     HOME: home,
     CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
-    ANTHROPIC_API_KEY: "sk-ant-test",
+    ...(apiKey === null ? {} : { ANTHROPIC_API_KEY: apiKey }),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   };
   return ((args: Parameters<QueryFn>[0]) =>

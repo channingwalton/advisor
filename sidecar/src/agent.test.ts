@@ -17,6 +17,10 @@ interface FakeSpawn {
   args: unknown;
 }
 
+/// Pushed into a fake stream to make it throw, as the SDK's does when the CLI
+/// subprocess dies.
+const streamFailure = (err: Error) => ({ type: "__fail__", err });
+
 function makeFakeQuery(): { queryFn: QueryFn; spawns: FakeSpawn[] } {
   const spawns: FakeSpawn[] = [];
   const queryFn = ((args: unknown) => {
@@ -24,7 +28,17 @@ function makeFakeQuery(): { queryFn: QueryFn; spawns: FakeSpawn[] } {
     const rec: FakeSpawn = { messages, interrupted: false, args };
     spawns.push(rec);
     return {
-      [Symbol.asyncIterator]: () => messages[Symbol.asyncIterator](),
+      [Symbol.asyncIterator]: () => {
+        const it = messages[Symbol.asyncIterator]();
+        return {
+          next: async () => {
+            const r = await it.next();
+            const v = r.value as { type?: string; err?: Error } | undefined;
+            if (!r.done && v?.type === "__fail__") throw v.err;
+            return r;
+          },
+        };
+      },
       interrupt: async () => {
         rec.interrupted = true;
       },
@@ -380,4 +394,131 @@ test("#card-token-stream a non-streaming fallback replaces the message that brok
   spawns[0].messages.push(success("Cedar is the migration."));
   await rp;
   assert.equal(chunks.at(-1), "Cedar is the migration.");
+});
+
+// The SDK reports some failures — a logged-out CLI's "Not logged in · Please
+// run /login" among them (auth.sdk.test.ts has the real shape) — as a `success`
+// result with `is_error` set and the message in `result`. Taking that at face
+// value put the error on the card as a finished answer (code review 2026-10-17).
+test("#result-error a success result flagged is_error is a failure, not an answer", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const rp = session.run("task", undefined, 1000);
+  spawns[0].messages.push({
+    type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login",
+  });
+  const r = await rp;
+  assert.equal(r.text, "");
+  assert.equal(r.error, "Not logged in · Please run /login");
+});
+
+// The CLI echoes the failure as an assistant block flagged with it (`error:
+// "authentication_failed"`), after any text the model did stream. Neither the
+// echo-only nor the echo-after-text shape may put the CLI's words in the answer.
+test("#result-error the CLI's flagged echo of the error is not answer text", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const rp = session.run("task", undefined, 1000);
+  spawns[0].messages.push(textBlock("Cedar is the"));
+  spawns[0].messages.push({
+    type: "assistant", error: "server_error", message: { content: [{ type: "text", text: "Request failed" }] },
+  });
+  spawns[0].messages.push({ type: "result", subtype: "success", is_error: true, result: "Request failed" });
+  const r = await rp;
+  assert.equal(r.text, "Cedar is the");
+  assert.equal(r.error, "Request failed");
+});
+
+// A message cut off by the output cap is flagged too, but its text is the
+// model's answer so far and stays.
+test("#result-error a max_output_tokens message keeps its text", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const chunks: string[] = [];
+  const rp = session.run("task", { onText: (acc) => chunks.push(acc) }, 1000);
+  spawns[0].messages.push({
+    type: "assistant", error: "max_output_tokens", message: { content: [{ type: "text", text: "Cedar is the" }] },
+  });
+  // A flagged result, so the answer is the buffer: the cut-off text must be in it.
+  spawns[0].messages.push({ type: "result", subtype: "success", is_error: true, result: "Output limit reached" });
+  const r = await rp;
+  assert.deepEqual(chunks, ["Cedar is the"]); // and it streamed to the card
+  assert.equal(r.text, "Cedar is the");
+  assert.equal(r.error, "Output limit reached");
+});
+
+// The CLI survives some flagged results (an API 400 such as "prompt is too
+// long" — probed against the real CLI) and answers the next prompt, so the
+// session is kept warm rather than cold-spawned on every recoverable error.
+test("#result-error a flagged result does not throw away a live session", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const r1p = session.run("task1", undefined, 1000);
+  spawns[0].messages.push({ type: "result", subtype: "success", is_error: true, result: "Prompt is too long" });
+  assert.equal((await r1p).error, "Prompt is too long");
+  const r2p = session.run("task2", undefined, 1000);
+  assert.equal(spawns.length, 1); // reused
+  spawns[0].messages.push(success("a2"));
+  assert.equal((await r2p).text, "a2");
+});
+
+// The error goes onto the card as one italic line; the CLI's can be a JSON body
+// or a stack trace.
+test("#result-error a multi-line error is cut to its first line, bounded", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const rp = session.run("task", undefined, 1000);
+  spawns[0].messages.push({
+    type: "result", subtype: "error_during_execution", is_error: true,
+    errors: [`{"type":"error","message":"${"x".repeat(300)}"}\n    at stack line`],
+  });
+  const r = await rp;
+  assert.ok(!r.error?.includes("\n"), r.error ?? "");
+  assert.ok((r.error?.length ?? 0) <= "error_during_execution: ".length + 200, `${r.error?.length}`);
+  assert.ok(r.error?.startsWith('error_during_execution: {"type":"error"'), r.error ?? "");
+});
+
+test("#result-error a success result with no result string is an empty answer, not a dead session", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const rp = session.run("task", undefined, 1000);
+  spawns[0].messages.push({ type: "result", subtype: "success", is_error: false });
+  assert.deepEqual(await rp, { text: "" });
+  const r2p = session.run("task2", undefined, 1000);
+  assert.equal(spawns.length, 1); // the session survived
+  spawns[0].messages.push(success("a2"));
+  assert.equal((await r2p).text, "a2");
+});
+
+test("#result-error text streamed before a flagged failure is kept as a partial answer", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const rp = session.run("task", undefined, 1000);
+  spawns[0].messages.push(textBlock("Cedar is the"));
+  spawns[0].messages.push({ type: "result", subtype: "success", is_error: true, result: "Request failed" });
+  const r = await rp;
+  assert.equal(r.text, "Cedar is the");
+  assert.equal(r.error, "Request failed");
+});
+
+test("#result-error an error result carries the CLI's own message, not just its subtype", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const rp = session.run("task", undefined, 1000);
+  spawns[0].messages.push({
+    type: "result", subtype: "error_during_execution", is_error: true, errors: ["rate limited"],
+  });
+  const r = await rp;
+  assert.equal(r.error, "error_during_execution: rate limited");
+});
+
+// A CLI that is missing or crashes at spawn ends the stream with a throw. The
+// card used to say only "agent session ended", with the cause in stderr alone.
+test("#result-error a session that dies names its cause", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const rp = session.run("task", undefined, 1000);
+  spawns[0].messages.push(streamFailure(new Error("Claude Code process exited with code 1")));
+  const r = await rp;
+  assert.equal(r.error, "agent session ended: Claude Code process exited with code 1");
 });

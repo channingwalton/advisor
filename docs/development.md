@@ -46,8 +46,9 @@ cd ../App && swift build
 
 Tests: `cd App && swift test` and `cd sidecar && npm test`. The sidecar suite
 includes the `*.sdk.test.ts` files, which check the tool sandbox, the tools the
-classifier is offered, effort and streaming against the real bundled Claude CLI
-(a local fake model, no network). `mise run commit-check`
+classifier is offered, effort, streaming and the logged-out failure shape
+against the real bundled Claude CLI (a local fake model or no credentials at
+all; no network). `mise run commit-check`
 (below) runs the same clean build and tests as CI. To watch the trigger
 classifier on a real transcript, `sh sidecar/test/replay.sh` feeds
 `sidecar/test/fragments.txt` through the built sidecar and prints the triggers
