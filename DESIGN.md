@@ -2652,6 +2652,33 @@ the same way at session start (`queryLane = makeLane("query")`), with the same
 synchronous settle behind it and a `busy` flag rather than a name rule — the
 same hardening would apply if that ever changes.
 
+**The connector gate keeps its read-verb-anywhere rule (#87, 2026-10-18).**
+The residual above — a word on neither action list ahead of a read verb passes
+on the read verb (`nuke_list`, `frobnicate_list`) — was assessed against a
+first-word rule: strip the `mcp__<server>__` prefix, skip a service prefix,
+and let the first remaining word decide, an unknown word denying. The service
+prefix is what defeats it. The only prefix a gate can skip without a list is
+the server's own name (`slack_` under `claude_ai_Slack`, `framebuffer_` under
+`Framebuffer`), and that rule denies reads the gate allows today:
+`ddsql_query` under `claude_ai_Datadog`, `jira_get_issue_comment` under its
+real server `claude_ai_Atlassian_Rovo`, `gdrive_read_file` under
+`Google_Drive`, and every entity-first name — `channels_list`, `logs_search`,
+`metrics_query`, the Slack Web API's own naming — two of them cases in
+`sandbox.test.ts`. A hard-coded prefix list (`slack|gmail|gcal|gdrive|ddsql|
+jira|…`) restores them but is the verb list again under another name, and
+with the worse failure mode: an unlisted verb today opens one
+adversarially-named tool, with actions off; an unlisted prefix would close
+every read of a connector the list has not met — the normal case for a new
+connector — and silently remove its sources from research. Nor does the
+first-word rule close the class: the read-noun rule that `conversations_history`,
+`atlassianUserInfo` and `users_info` need still passes `nuke_history`, and
+dropping it breaks those. The names actually seen from the user's connectors
+(`list_events`, `search_threads`, `list_issues`, `get_issue`, `getJiraIssue`,
+`typecheck-code`) are verb-first and unaffected either way, which is why the
+gain is confined to invented names. Kept as recorded: the lists are the
+defence and actions-off-by-default the backstop; a connector that ships such
+a name is added to the action list when met. No code changed.
+
 ## Terms of use removed (2026-10-18)
 
 Advisor is open source under the MIT licence (*MIT licence*, 2026-10-04), so it
