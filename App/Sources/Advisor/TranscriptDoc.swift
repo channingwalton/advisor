@@ -167,6 +167,17 @@ enum TranscriptDoc {
         return line.hasPrefix("- ") ? splitTimestamp(String(line.dropFirst(2))).1 : line
     }
 
+    /// `raw` with its `memberText` replaced by `text`, keeping everything else —
+    /// indentation, bullet, stamp, trailing whitespace — so a correction can
+    /// never alter a stamp. The one splice every edit of a paragraph line goes
+    /// through. Nil when `raw` has no member text to replace.
+    static func replacingMemberText(of raw: String, with text: String) -> String? {
+        let current = memberText(raw)
+        // A member's text ends its line, bar trailing whitespace.
+        guard !current.isEmpty, let range = raw.range(of: current, options: .backwards) else { return nil }
+        return raw.replacingCharacters(in: range, with: text)
+    }
+
     /// Splits a leading `HH:MM:SS ` stamp off a transcript line, returning the
     /// stamp in seconds-of-day and the remaining text. No stamp → (nil, line).
     private static func splitTimestamp(_ s: String) -> (Int?, String) {

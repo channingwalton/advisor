@@ -105,13 +105,13 @@ enum NoteEdit {
         guard blocks.indices.contains(offset), blocks[offset].block == expected else { return nil }
         var lines = body.components(separatedBy: "\n")
         let members = blocks[offset].lines
-        let texts = members.map { TranscriptDoc.memberText(lines[$0]) }
+        let texts = blocks[offset].texts
         guard let corrected = TranscriptCorrection.replacingOccurrence(n, of: original, with: replacement, in: texts)
         else { return nil }
         for (slot, index) in members.enumerated() where corrected[slot] != texts[slot] {
-            // A member's text ends its line, bar trailing whitespace.
-            guard let range = lines[index].range(of: texts[slot], options: .backwards) else { return nil }
-            lines[index].replaceSubrange(range, with: corrected[slot])
+            guard let line = TranscriptDoc.replacingMemberText(of: lines[index], with: corrected[slot])
+            else { return nil }
+            lines[index] = line
         }
         return prefix + lines.joined(separator: "\n")
     }

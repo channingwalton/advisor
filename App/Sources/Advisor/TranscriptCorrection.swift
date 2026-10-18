@@ -123,60 +123,28 @@ enum TranscriptCorrection {
 
     // MARK: saved (markdown) corrections
 
-    /// `markdown` with every occurrence of `original` in the **transcript body
-    /// lines** replaced by `replacement`. Frontmatter, card/follow-up blockquotes
-    /// (`>` lines), and headings (`#` lines) are left byte-identical — only the
-    /// text portion of `- HH:MM:SS …` utterance lines is touched. Empty `original`
-    /// → unchanged.
+    /// `markdown` with every occurrence of `original` in the **transcript
+    /// paragraph lines** replaced by `replacement`. Frontmatter, card/follow-up
+    /// blockquotes (`>` lines), and headings (`# ` lines) are left byte-identical;
+    /// of a transcript line only its text (`TranscriptDoc.memberText`) is
+    /// touched, so a bullet or stamp is never altered, however the line is
+    /// indented (issue #93). The lines are the paragraphs `TranscriptDoc` reads,
+    /// so a line has one reading here and on screen. Empty `original` → unchanged.
     static func replacingAllInTranscript(
         of original: String, with replacement: String, inMarkdown markdown: String
     ) -> String {
         guard !original.isEmpty else { return markdown }
         let (prefix, body) = TranscriptDoc.splitFrontmatter(markdown)
-        let lines = body.components(separatedBy: "\n").map { line -> String in
-            guard isParagraphMemberLine(line), let (linePrefix, text) = splitMemberLine(line)
-            else { return line }
-            return linePrefix + text.replacingOccurrences(of: original, with: replacement)
+        var lines = body.components(separatedBy: "\n")
+        for block in TranscriptDoc.timedBlocks(from: body) {
+            guard case .paragraph = block.block else { continue }
+            let corrected = replacingAll(of: original, with: replacement, in: block.texts)
+            for (slot, index) in block.lines.enumerated() where corrected[slot] != block.texts[slot] {
+                guard let line = TranscriptDoc.replacingMemberText(of: lines[index], with: corrected[slot])
+                else { continue }
+                lines[index] = line
+            }
         }
         return prefix + lines.joined(separator: "\n")
-    }
-
-    // MARK: markdown helpers
-
-    /// True for a line that contributes prose to a transcript paragraph: not a
-    /// blockquote (`>`), heading (`#`), or blank line, as `TranscriptDoc` reads
-    /// it — though `splitMemberLine` takes an indented bullet as plain prose.
-    private static func isParagraphMemberLine(_ line: String) -> Bool {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        return !trimmed.isEmpty && !line.hasPrefix(">") && !trimmed.hasPrefix("# ")
-    }
-
-    /// Splits a paragraph member line into the prefix to keep verbatim and the
-    /// replaceable text. For a `- HH:MM:SS text` line the prefix is the bullet and
-    /// stamp (so a correction can never alter a timestamp); a stampless line keeps
-    /// only the `- `; any other prose line is entirely text. Returns nil for a
-    /// non-member line.
-    private static func splitMemberLine(_ line: String) -> (prefix: String, text: String)? {
-        guard isParagraphMemberLine(line) else { return nil }
-        guard line.hasPrefix("- ") else { return (prefix: "", text: line) }
-        let afterBullet = String(line.dropFirst(2))
-        let parts = afterBullet.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
-        if let stamp = parts.first, stamp.count == 8, isStamp(String(stamp)) {
-            if parts.count > 1 {
-                return (prefix: "- \(stamp) ", text: String(parts[1]))
-            }
-            return (prefix: "- \(stamp)", text: "")
-        }
-        return (prefix: "- ", text: afterBullet)
-    }
-
-    /// `HH:MM:SS` shape check — eight chars, colons at 2 and 5, digits elsewhere.
-    private static func isStamp(_ s: String) -> Bool {
-        let chars = Array(s)
-        guard chars.count == 8, chars[2] == ":", chars[5] == ":" else { return false }
-        for (i, c) in chars.enumerated() where i != 2 && i != 5 {
-            guard c.isNumber else { return false }
-        }
-        return true
     }
 }

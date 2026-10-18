@@ -114,3 +114,21 @@ import Testing
 @Test func unstampedParagraphHasNoTime() {
     #expect(TranscriptDoc.timedBlocks(from: "Loose prose line.").map(\.time) == [nil])
 }
+
+// MARK: replacingMemberText (issue #93)
+
+@Test func replacingMemberTextKeepsEverythingButTheText() {
+    // Indentation, bullet, stamp and trailing whitespace stay; only the text
+    // `memberText` reads is replaced — the stamp is never reachable.
+    #expect(TranscriptDoc.replacingMemberText(of: "  - 17:00:30 beta 17  ", with: "beta 18") == "  - 17:00:30 beta 18  ")
+    #expect(TranscriptDoc.replacingMemberText(of: "- 17:00:00 00", with: "XX") == "- 17:00:00 XX")
+    #expect(TranscriptDoc.replacingMemberText(of: "- stampless", with: "text") == "- text")
+    #expect(TranscriptDoc.replacingMemberText(of: "  prose", with: "text") == "  text")
+    // The replacement is read back the same way.
+    #expect(TranscriptDoc.memberText(TranscriptDoc.replacingMemberText(of: "  - 17:00:30 beta", with: "gamma")!) == "gamma")
+}
+
+@Test func replacingMemberTextIsNilWithoutText() {
+    #expect(TranscriptDoc.replacingMemberText(of: "- 17:00:00", with: "x") == nil)
+    #expect(TranscriptDoc.replacingMemberText(of: "   ", with: "x") == nil)
+}

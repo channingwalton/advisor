@@ -192,3 +192,36 @@ private let straddling = ["this is", "a cat, this is a dog, this is a bird"]
         TranscriptCorrection.location(ofOccurrence: 0, of: "cat", in: texts)
             == TranscriptCorrection.OccurrenceLocation(line: 0, range: NSRange(location: 3, length: 3)))
 }
+
+// MARK: an indented line (issue #93)
+
+/// A hand-edited note can indent a transcript line; Advisor never writes one.
+/// `TranscriptDoc` trims the line before looking for its bullet, so the stamp
+/// is still a stamp there, and Replace all must read it the same way: only the
+/// text after the stamp is replaceable, however the line is indented.
+@Test func replaceAllInTranscriptLeavesTheStampOfAnIndentedLine() {
+    let note = """
+        # Transcript
+
+        - 17:00:00 alpha 17
+
+          - 17:00:30 beta effect 17
+
+          - stampless 17
+
+          prose 17
+        """
+    let out = TranscriptCorrection.replacingAllInTranscript(of: "17", with: "18", inMarkdown: note)
+    #expect(
+        out == """
+            # Transcript
+
+            - 17:00:00 alpha 18
+
+              - 17:00:30 beta effect 18
+
+              - stampless 18
+
+              prose 18
+            """)
+}

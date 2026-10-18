@@ -2709,6 +2709,28 @@ defence in depth. Residual: a route to launchd that does not go through
 LaunchServices (a direct `bootstrap_look_up` of some other launching service) is
 still open under `(allow default)`.
 
+**Replace all reads a transcript line as `TranscriptDoc` does (#93, 2026-10-18).**
+The residual the #91 entry left: "All in session" on a saved note
+(`TranscriptCorrection.replacingAllInTranscript`) still read each line its own
+way. Its `splitMemberLine` looked for the `- ` bullet on the untrimmed line,
+where `TranscriptDoc.memberText` trims first, so an indented line in a
+hand-edited note — `  - 17:00:30 beta effect` — was all text to it:
+replacing `17` with `18` gave `  - 18:00:30 beta effect`, moving the stamp,
+and with it the margin time and the 2 s-gap grouping of the paragraph. Only a
+hand-edited note can hit it; Advisor never writes an indented line. It was the
+second half of the mirror #91 removed, and had drifted the same way. Replace
+all is now built on the paragraphs `TranscriptDoc.timedBlocks` reads — each
+paragraph's `lines` and `texts` — and splices a changed text back through
+`TranscriptDoc.replacingMemberText`, the one inverse of `memberText`, which
+`NoteEdit.correctingOccurrence` now uses too, so a transcript line has one
+reading and one splice. `isParagraphMemberLine`, `splitMemberLine` and
+`isStamp` are gone. Unchanged by design: a match across a line join is still
+left (issue #92), and frontmatter, cards and headings stay byte-identical.
+`TranscriptCorrectionTests` cover the indented stamped line beside a stampless
+indented bullet and an indented prose line, all keeping their indentation;
+`TranscriptDocTests` the splice itself — indentation, stamp and trailing
+whitespace kept, nil for a line with no text.
+
 ## Terms of use removed (2026-10-18)
 
 Advisor is open source under the MIT licence (*MIT licence*, 2026-10-04), so it
