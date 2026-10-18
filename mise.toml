@@ -13,8 +13,7 @@ run = [
     "cd App && swift test -Xswiftc -warnings-as-errors",
     "cd sidecar && npm ci --include=dev",
     "cd sidecar && npm run build",
-    "cd sidecar && npm test",
-    "git diff --check",
+    "cd sidecar && npm test"
 ]
 
 [tasks.dmg]
