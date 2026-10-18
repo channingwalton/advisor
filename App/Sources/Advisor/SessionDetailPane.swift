@@ -398,10 +398,7 @@ struct SessionDetailPane: View {
             onAddNote: isLive
                 ? nil
                 : { text, offset, paragraph in
-                    guard let block = Int(paragraph.id) else { return }
-                    finishEdit(SessionArchive.insertNote(
-                        text, inParagraphAt: block, expecting: detail.blocks[block], atCharacter: offset,
-                        in: file))
+                    finishEdit(Self.addNote(text, atCharacter: offset, in: paragraph, of: detail.blocks, to: file))
                 },
             onCorrect: isLive
                 ? nil
@@ -421,6 +418,20 @@ struct SessionDetailPane: View {
             },
             onReply: isLive ? nil : { card, question in startReply(on: card, question) },
             onDeleteNote: isLive ? nil : { id in deleteBlock(id: id) })
+    }
+
+    /// "Add note here…": insert `text` into `file` after the line that character
+    /// `offset` of `paragraph` falls in. False — the edit-failed path, which
+    /// reloads — when the paragraph's id isn't one of `blocks`' offsets (a row out
+    /// of step with the detail, or a malformed id; issue #84) or the note on disk
+    /// no longer matches.
+    static func addNote(
+        _ text: String, atCharacter offset: Int, in paragraph: FeedParagraph, of blocks: [TranscriptBlock],
+        to file: SessionFile
+    ) -> Bool {
+        guard let block = Int(paragraph.id), blocks.indices.contains(block) else { return false }
+        return SessionArchive.insertNote(
+            text, inParagraphAt: block, expecting: blocks[block], atCharacter: offset, in: file)
     }
 
     /// Remove a card or note from the note on disk — or, for a research card not

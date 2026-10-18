@@ -2413,6 +2413,23 @@ writer, browser as a file copy) differed — only one offered the `.md` content
 type — and now share `exportDestination(suggestedName:)` in
 `SessionActions.swift`.
 
+**Add note on a stale row reloads (issue #84).** The saved pane's "Add note
+here…" closure indexed `detail.blocks` with the paragraph's id unchecked, where
+its sibling `startResearch` guards it, so an id outside the blocks would trap
+with an index out of range. Not seen in use: `FeedView` builds each row's
+paragraph and its action from the same `detail` in one pass, so the guard is
+defensive. The closure's body is now `SessionDetailPane.addNote`, which returns
+whether the note was written. An id that isn't one of the detail's block
+offsets — past the end, negative or not a number — returns false, so the pane
+takes its edit-failed path (`finishEdit(false)`): the note is left alone, the
+pane says it couldn't update the note, and the list reloads. `startResearch`
+returns silently on the same guard; a note is text the user has just typed, so
+it gets the message rather than vanishing. `SessionDetailPaneTests` drive
+`addNote` with each kind of bad id and with a real paragraph. Not covered: the
+correction closure turns the id into a paragraph ordinal by slicing
+`detail.blocks[..<offset]`, unchecked, and would trap the same way (issue
+#90).
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
