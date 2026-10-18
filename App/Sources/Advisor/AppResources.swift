@@ -1,5 +1,14 @@
 import Foundation
 
+// Repo root, derived from this source file's compile-time location so the
+// checkout can move without editing paths. Sources/Advisor/AppResources.swift
+// is four levels below the repo root (…/App/Sources/Advisor/AppResources.swift).
+let repoRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()   // Advisor/
+    .deletingLastPathComponent()   // Sources/
+    .deletingLastPathComponent()   // App/
+    .deletingLastPathComponent()   // repo root
+
 /// Locates runtime resources (sidecar, Node) for both layouts:
 /// a packaged `.app` (resources under `Contents/Resources`) and a dev checkout
 /// (resources under the repo tree, derived from `repoRoot`). Packaged paths win
