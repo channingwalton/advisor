@@ -403,9 +403,9 @@ struct SessionDetailPane: View {
             onCorrect: isLive
                 ? nil
                 : { request, paragraph in
-                    // Saved paragraph ids are their block offsets.
-                    guard let offset = Int(paragraph.id) else { return }
-                    apply(request, toParagraph: paragraphOrdinal(before: offset))
+                    guard let ordinal = Self.paragraphOrdinal(of: paragraph, in: detail.blocks)
+                    else { return finishEdit(false) }
+                    apply(request, toParagraph: ordinal)
                 },
             onToggleCard: { card in expansion[card.id] = !card.isExpanded },
             onDeleteCard: isLive ? nil : { card in deleteBlock(id: card.id) },
@@ -420,16 +420,28 @@ struct SessionDetailPane: View {
             onDeleteNote: isLive ? nil : { id in deleteBlock(id: id) })
     }
 
+    /// The block offset a saved paragraph's id names — saved ids are their block
+    /// offsets — or nil when it doesn't name one of `blocks`' paragraphs (a row out
+    /// of step with the detail, or a malformed id; issues #84, #90). Every
+    /// paragraph action resolves its id through this, so none can index past the
+    /// blocks or land on a card or heading.
+    private static func blockOffset(of paragraph: FeedParagraph, in blocks: [TranscriptBlock]) -> Int? {
+        guard let offset = Int(paragraph.id), blocks.indices.contains(offset),
+            case .paragraph = blocks[offset]
+        else { return nil }
+        return offset
+    }
+
     /// "Add note here…": insert `text` into `file` after the line that character
     /// `offset` of `paragraph` falls in. False — the edit-failed path, which
-    /// reloads — when the paragraph's id isn't one of `blocks`' offsets (a row out
-    /// of step with the detail, or a malformed id; issue #84) or the note on disk
-    /// no longer matches.
+    /// reloads — when the paragraph's id doesn't name one of `blocks`' paragraphs
+    /// (a row out of step with the detail, or a malformed id; issue #84) or the
+    /// note on disk no longer matches.
     static func addNote(
         _ text: String, atCharacter offset: Int, in paragraph: FeedParagraph, of blocks: [TranscriptBlock],
         to file: SessionFile
     ) -> Bool {
-        guard let block = Int(paragraph.id), blocks.indices.contains(block) else { return false }
+        guard let block = blockOffset(of: paragraph, in: blocks) else { return false }
         return SessionArchive.insertNote(
             text, inParagraphAt: block, expecting: blocks[block], atCharacter: offset, in: file)
     }
@@ -455,9 +467,10 @@ struct SessionDetailPane: View {
     /// Context / Fact check). The card streams in under the paragraph and, once
     /// done, is saved into the note under the paragraph's last line — where the
     /// live feed anchors a manual card. A failed or skipped card stays until
-    /// deleted, and isn't saved.
+    /// deleted, and isn't saved. A paragraph out of step with the note takes the
+    /// edit-failed path before anything is sent.
     private func startResearch(_ kind: String, on selection: String, in paragraph: FeedParagraph) {
-        guard let offset = Int(paragraph.id), detail.blocks.indices.contains(offset) else { return }
+        guard let offset = Self.blockOffset(of: paragraph, in: detail.blocks) else { return finishEdit(false) }
         guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
         let document = SessionArchive.contents(of: file)
         guard let anchor = NoteEdit.anchor(ofParagraphAt: offset, expecting: detail.blocks[offset], in: document)
@@ -550,11 +563,13 @@ struct SessionDetailPane: View {
 
     private static let editFailed = "Couldn't update the note — it may have changed on disk, so it has been reloaded."
 
-    /// The 0-based index of the paragraph at block `offset` among paragraph blocks
-    /// only — the index `TranscriptCorrection` keys on (it groups paragraphs the
-    /// same way `TranscriptDoc` does, skipping cards and headings) (issue #32).
-    private func paragraphOrdinal(before offset: Int) -> Int {
-        detail.blocks[..<offset].reduce(0) {
+    /// The 0-based index of `paragraph` among paragraph blocks only — the index
+    /// `TranscriptCorrection` keys on (it groups paragraphs the same way
+    /// `TranscriptDoc` does, skipping cards and headings) (issue #32). Nil when its
+    /// id doesn't name one of `blocks`' paragraphs (issue #90).
+    static func paragraphOrdinal(of paragraph: FeedParagraph, in blocks: [TranscriptBlock]) -> Int? {
+        guard let offset = blockOffset(of: paragraph, in: blocks) else { return nil }
+        return blocks[..<offset].reduce(0) {
             if case .paragraph = $1 { return $0 + 1 }
             return $0
         }

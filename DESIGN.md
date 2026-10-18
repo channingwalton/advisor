@@ -2428,7 +2428,30 @@ it gets the message rather than vanishing. `SessionDetailPaneTests` drive
 `addNote` with each kind of bad id and with a real paragraph. Not covered: the
 correction closure turns the id into a paragraph ordinal by slicing
 `detail.blocks[..<offset]`, unchecked, and would trap the same way (issue
-#90).
+#90). Both that and `startResearch`'s silent return changed in the next entry.
+
+**Correct transcription on a stale row reloads (issue #90).** The correction
+closure turned the paragraph's id into an ordinal by slicing
+`detail.blocks[..<offset]` unchecked, so a negative offset, or one beyond
+`blocks.count`, trapped (one at the count gave an ordinal past the last
+paragraph). Defensive, like #84: not seen in use. The three paragraph actions
+now resolve the id through one helper, `SessionDetailPane.blockOffset(of:in:)`,
+so the next action can't miss the check. It accepts only an offset that names a
+paragraph block: a heading or card offset would otherwise give the ordinal of
+the next paragraph, a wrong paragraph rather than a trap. `paragraphOrdinal(of:in:)`
+returns nil for a bad id, and the correction then takes the edit-failed path
+for either scope. "All in session" doesn't need the paragraph, but an id the
+pane can't place means its rows are out of step, so it reloads and the user can
+try again. `startResearch` now takes that path too instead of returning
+silently: its anchor miss, a few lines on, already did, and a right-click that
+does nothing gives no hint the note moved. The guard catches ids the detail
+can't place, not a detail that is behind the file: a correction on a stale row
+whose offset still names a paragraph re-reads the file and edits the paragraph
+at that ordinal, as before, and a correction that finds nothing to change still
+does nothing (Add note and research compare the block's text first).
+`SessionDetailPaneTests` drive `paragraphOrdinal` and `addNote` with each kind
+of bad id, the heading's among them, and `paragraphOrdinal` with both real
+paragraphs.
 
 ## Revisit as it grows
 

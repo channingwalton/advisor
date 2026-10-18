@@ -29,12 +29,13 @@ private func savedNote() throws -> (file: SessionFile, detail: SessionDetail, di
     return (file, SessionDetail.parse(contents: markdown, fallbackTitle: name), dir)
 }
 
-/// "Add note here…" on a paragraph whose id isn't one of this detail's block
-/// offsets — past the end, negative, or not a number — reports the edit as not
-/// applied, so the pane takes its edit-failed reload path, and leaves the note
-/// alone, rather than trapping on an index out of range (issue #84).
+/// "Add note here…" on a paragraph whose id doesn't name one of this detail's
+/// paragraphs — the heading, past the end, negative, or not a number — reports
+/// the edit as not applied, so the pane takes its edit-failed reload path, and
+/// leaves the note alone, rather than trapping on an index out of range (issue
+/// #84).
 @MainActor
-@Test(arguments: ["3", "99", "-1", "x"])
+@Test(arguments: ["0", "3", "99", "-1", "x"])
 func addNoteOnAParagraphOutsideTheBlocksIsNotApplied(id: String) throws {
     let (file, detail, dir) = try savedNote()
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -67,4 +68,33 @@ func addNoteOnAParagraphOutsideTheBlocksIsNotApplied(id: String) throws {
         in: markdown))
     #expect(applied)
     #expect(try String(contentsOf: file.url, encoding: .utf8) == expected)
+}
+
+/// "Correct transcription…" turns the paragraph's id into the ordinal
+/// `TranscriptCorrection` keys on. An id that doesn't name one of this detail's
+/// paragraphs — the heading, past the end, negative, or not a number — has none,
+/// so the pane takes its edit-failed reload path rather than trapping on a slice
+/// out of range, or correcting the paragraph after the heading (issue #90).
+@MainActor
+@Test(arguments: ["0", "3", "99", "-1", "x"])
+func aParagraphOutsideTheBlocksHasNoOrdinal(id: String) throws {
+    let detail = SessionDetail.parse(contents: markdown, fallbackTitle: "note.md")
+    try #require(detail.blocks.count == 3) // the heading and two paragraphs, so "3" is one past the end
+
+    #expect(SessionDetailPane.paragraphOrdinal(
+        of: FeedParagraph(id: id, lines: [], time: nil), in: detail.blocks) == nil)
+}
+
+/// The guard doesn't stop a correction on a paragraph that is there, and its
+/// ordinal counts paragraphs only, so the heading before them isn't counted.
+@MainActor
+@Test func aSavedParagraphsOrdinalCountsParagraphsOnly() throws {
+    let detail = SessionDetail.parse(contents: markdown, fallbackTitle: "note.md")
+    try #require(detail.blocks.count == 3)
+
+    let ordinals = ["1", "2"].map {
+        SessionDetailPane.paragraphOrdinal(of: FeedParagraph(id: $0, lines: [], time: nil), in: detail.blocks)
+    }
+
+    #expect(ordinals == [0, 1])
 }
