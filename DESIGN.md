@@ -2454,7 +2454,68 @@ at that ordinal, as before, and a correction that finds nothing to change still
 does nothing (Add note and research compare the block's text first).
 `SessionDetailPaneTests` drive `paragraphOrdinal` and `addNote` with each kind
 of bad id, the heading's among them, and `paragraphOrdinal` with both real
-paragraphs.
+paragraphs. Both of those gaps closed in the next entry.
+
+**Corrections on a saved session check the paragraph, report a failure and
+follow a moved note (issue #91).** Correction was the one paragraph action
+without the checks the others have. "This occurrence" turned the row into a
+paragraph ordinal from the pane's in-memory blocks, and the archive re-read the
+file and edited whichever paragraph had that ordinal. If the note had changed
+on disk since the pane loaded, with a paragraph added or merged ahead of the
+row, it rewrote a match in a different paragraph, silently. Now
+`NoteEdit.correctingOccurrence` takes the paragraph it expects at the row's
+block offset, as `insertingNote` and `anchor` do, refuses a mismatch, and edits
+that block's own lines (`TimedBlock.lines`), so no ordinal is needed. The
+ordinal had been resolved by a second grouping of the note,
+`TranscriptCorrection.replacingOccurrence(inParagraph:ofMarkdown:)`, mirrored
+from `TranscriptDoc` (the issue #32 entry), and the two had drifted.
+`TranscriptDoc` trims a line before looking for its bullet and the mirror
+didn't, so an indented line in a hand-edited note was its own paragraph on
+screen but folded into the one above for the edit. A correction on that line's
+row would have checked its paragraph and then rewritten the next one. That
+grouping, its lock-step tests and `paragraphOrdinal` are gone. "All in session"
+still reads each line its own way (`splitMemberLine`, which doesn't trim before
+looking for the bullet either), so on an indented line it takes the bullet and
+stamp as text and can rewrite the stamp. That predates this change and is left
+as it was (issue #93).
+
+Both corrections go through `rewrite`, so an unreadable or vanished note is
+never recreated (issue #41). At the pane they go through
+`SessionArchive.save(to:)`, so a note filed elsewhere since the pane loaded is
+corrected where it is now, instead of being read as empty at its old path. The
+closure body is `SessionDetailPane.correct`, and the closure hands its result
+to `finishEdit`. A correction that doesn't apply now shows the edit-failed
+message and reloads, as the bad-id path from #90 already did. "All in session"
+takes no paragraph check: it corrects every match wherever it now is. Add note
+and Delete still write to the pane's `file` without `save(to:)`. A note moved
+from outside the app makes them fail and reload, which the message reports,
+rather than follow it (issue #94).
+
+The failed path includes a correction that changes nothing on an unchanged
+note, which the issue expected the menu couldn't produce. It can: a selection
+across a line join reads as one phrase in the paragraph but matches neither
+line (the straddle limitation in the issue #32 entry). On an unchanged note,
+that is the only way either scope can change nothing: the selection comes from
+the paragraph's text, and the menu refuses a replacement equal to the original.
+The shared message says the note *may* have changed, which is hedged rather
+than wrong. A message of its own for this one rare case would need a three-way
+result through `NoteEdit`, `rewrite` and `save`, so the correction takes the
+shared path, and the reload is harmless.
+
+The straddle limitation is wider than the issue #32 entry says. It is left as
+it was, because the primitive is shared with the live window. The menu counts
+the selected occurrence over the paragraph's joined text, and the edit counts
+per line. A match across a join earlier in the paragraph shifts the count, so
+"This occurrence" rewrites a later match than the one selected. "All in
+session" corrects the matches within lines and leaves a straddling one, so it
+can report success with the selected text unchanged. Both are issue #92.
+
+`NoteEditTests` cover the pure correction: the expected paragraph past a
+heading and a card, an indented line's own paragraph, a stale paragraph, a
+card, an offset past the blocks, no such occurrence, and a phrase across lines.
+`SessionDetailPaneTests` drive `correct` for both scopes with each kind of bad
+id, a moved note and a phrase across lines. For "This occurrence" they also
+cover a stale row and the second paragraph.
 
 ## Terms of use removed (2026-10-18)
 

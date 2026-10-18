@@ -732,36 +732,37 @@ enum SessionArchive {
     }
 
     /// Correct a transcription error in a saved note (issue #32): replace the
-    /// `occurrence`-th match of `original` within the transcript paragraph at
-    /// `paragraphIndex` (counting only paragraph blocks) with `replacement`, then
-    /// write the note back. Frontmatter and cards are left untouched. Returns false
-    /// if nothing changed or the write fails. Saved-note only — the live note is
-    /// corrected through its `TranscriptStore` instead, to avoid the writer clobber.
+    /// `occurrence`-th match of `original` within the transcript paragraph at block
+    /// `paragraphOffset` with `replacement` (`NoteEdit.correctingOccurrence`).
+    /// Frontmatter and cards are left untouched. Returns false — leaving the note
+    /// untouched — when that paragraph is no longer `block` (issue #91), nothing
+    /// changed, the note can't be read, or the write fails. Saved-note only — the
+    /// live note is corrected through its `TranscriptStore` instead, to avoid the
+    /// writer clobber.
     @discardableResult
     static func correctOccurrence(
         _ occurrence: Int, of original: String, with replacement: String,
-        inParagraph paragraphIndex: Int, of file: SessionFile
+        inParagraphAt paragraphOffset: Int, expecting block: TranscriptBlock, of file: SessionFile
     ) -> Bool {
-        let existing = contents(of: file)
-        let updated = TranscriptCorrection.replacingOccurrence(
-            occurrence, of: original, with: replacement,
-            inParagraph: paragraphIndex, ofMarkdown: existing)
-        guard updated != existing else { return false }
-        return (try? updated.write(to: file.url, atomically: true, encoding: .utf8)) != nil
+        rewrite(file) {
+            NoteEdit.correctingOccurrence(
+                occurrence, of: original, with: replacement, inParagraphAt: paragraphOffset,
+                expecting: block, in: $0)
+        }
     }
 
     /// Correct every occurrence of `original` in a saved note's transcript with
     /// `replacement` (issue #32). Only the transcript utterance lines change —
     /// frontmatter, cards, and follow-ups are left byte-identical. Returns false if
-    /// nothing changed or the write fails.
+    /// nothing changed, the note can't be read, or the write fails.
     @discardableResult
     static func correctAll(
         of original: String, with replacement: String, in file: SessionFile
     ) -> Bool {
-        let existing = contents(of: file)
-        let updated = TranscriptCorrection.replacingAllInTranscript(
-            of: original, with: replacement, inMarkdown: existing)
-        guard updated != existing else { return false }
-        return (try? updated.write(to: file.url, atomically: true, encoding: .utf8)) != nil
+        rewrite(file) { existing in
+            let updated = TranscriptCorrection.replacingAllInTranscript(
+                of: original, with: replacement, inMarkdown: existing)
+            return updated == existing ? nil : updated
+        }
     }
 }

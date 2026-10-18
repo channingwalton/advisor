@@ -28,6 +28,10 @@ context: meeting about widgets
 > widgets in card body
 """
 
+private func blocks(_ markdown: String) -> [TranscriptBlock] {
+    TranscriptDoc.blocks(from: SessionArchive.strippingFrontmatter(markdown))
+}
+
 @Test func correctAllRewritesTranscriptOnly() throws {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("advisor-correct-test-\(UUID().uuidString)")
@@ -51,10 +55,11 @@ context: meeting about widgets
     defer { try? FileManager.default.removeItem(at: dir) }
 
     let file = try makeNote(note, in: dir)
-    // Paragraph 0, occurrence 1 → the "widgets again" line.
+    // The paragraph after the heading, occurrence 1 → the "widgets again" line.
+    let paragraph = blocks(note)[1]
     #expect(
         SessionArchive.correctOccurrence(
-            1, of: "widgets", with: "gadgets", inParagraph: 0, of: file))
+            1, of: "widgets", with: "gadgets", inParagraphAt: 1, expecting: paragraph, of: file))
 
     let out = SessionArchive.contents(of: file)
     #expect(out.contains("- 17:00:00 hello widgets are great")) // untouched
@@ -71,5 +76,6 @@ context: meeting about widgets
     #expect(!SessionArchive.correctAll(of: "absent", with: "x", in: file))
     #expect(
         !SessionArchive.correctOccurrence(
-            0, of: "absent", with: "x", inParagraph: 0, of: file))
+            0, of: "absent", with: "x", inParagraphAt: 1, expecting: blocks(note)[1], of: file))
+    #expect(SessionArchive.contents(of: file) == note)
 }

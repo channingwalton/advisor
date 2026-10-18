@@ -88,6 +88,33 @@ enum NoteEdit {
         return prefix + lines.joined(separator: "\n")
     }
 
+    /// `markdown` with the `n`-th occurrence of `original` in the paragraph at
+    /// block `offset` replaced by `replacement` — "Correct transcription…" on that
+    /// row. Only the text of the paragraph's own lines changes, counted line by
+    /// line (`TranscriptCorrection.replacingOccurrence`); bullets and stamps stay.
+    /// Nil for a block that isn't the expected paragraph, or when there is no
+    /// `n`-th occurrence within one of its lines.
+    static func correctingOccurrence(
+        _ n: Int, of original: String, with replacement: String, inParagraphAt offset: Int,
+        expecting expected: TranscriptBlock, in markdown: String
+    ) -> String? {
+        guard case .paragraph = expected else { return nil }
+        let (prefix, body) = TranscriptDoc.splitFrontmatter(markdown)
+        let blocks = TranscriptDoc.timedBlocks(from: body)
+        guard blocks.indices.contains(offset), blocks[offset].block == expected else { return nil }
+        var lines = body.components(separatedBy: "\n")
+        let members = blocks[offset].lines
+        let texts = members.map { TranscriptDoc.memberText(lines[$0]) }
+        guard let corrected = TranscriptCorrection.replacingOccurrence(n, of: original, with: replacement, in: texts)
+        else { return nil }
+        for (slot, index) in members.enumerated() where corrected[slot] != texts[slot] {
+            // A member's text ends its line, bar trailing whitespace.
+            guard let range = lines[index].range(of: texts[slot], options: .backwards) else { return nil }
+            lines[index].replaceSubrange(range, with: corrected[slot])
+        }
+        return prefix + lines.joined(separator: "\n")
+    }
+
     /// A transcript line a card will be placed under: its body line index when
     /// it was chosen, and the line itself, so it can be found again after other
     /// edits have moved it.

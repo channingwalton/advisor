@@ -204,6 +204,50 @@ private func paragraphOffset(_ text: String, in markdown: String) throws -> Int 
     #expect(NoteEdit.insertingNote("x", inParagraphAt: cardAt, expecting: blocks(paragraphNote)[cardAt], atCharacter: 0, in: paragraphNote) == nil)
 }
 
+// MARK: correcting
+
+@Test func correctingAnOccurrenceRewritesTheExpectedParagraph() throws {
+    // Past the heading and the card, so the paragraph count must skip both.
+    let at = try paragraphOffset("Much later.", in: paragraphNote)
+    let edited = try #require(NoteEdit.correctingOccurrence(
+        0, of: "later", with: "latter", inParagraphAt: at, expecting: blocks(paragraphNote)[at],
+        in: paragraphNote))
+
+    #expect(edited == paragraphNote.replacingOccurrences(of: "Much later.", with: "Much latter."))
+}
+
+/// The correction edits the lines of the paragraph it checked. An indented
+/// transcript line (a hand-edited note) is its own paragraph here, as shown, and a
+/// second grouping of the note that folded it into the paragraph above would
+/// send the correction to the paragraph after it.
+@Test func correctingAnOccurrenceEditsTheParagraphItChecked() throws {
+    let note = "# Transcript\n\n- 17:00:00 alpha effect\n\n  - 17:00:30 beta effect\n\n- 17:01:00 gamma effect\n"
+    let at = try paragraphOffset("beta effect", in: note)
+    let edited = try #require(NoteEdit.correctingOccurrence(
+        0, of: "effect", with: "affect", inParagraphAt: at, expecting: blocks(note)[at], in: note))
+
+    #expect(edited == note.replacingOccurrences(of: "beta effect", with: "beta affect"))
+}
+
+@Test func correctingAnOccurrenceRefusesAStaleParagraphOrNoChange() throws {
+    let at = try paragraphOffset("First line. Second line.", in: paragraphNote)
+    let block = blocks(paragraphNote)[at]
+    func correcting(_ n: Int, of original: String, at offset: Int, expecting: TranscriptBlock) -> String? {
+        NoteEdit.correctingOccurrence(
+            n, of: original, with: "x", inParagraphAt: offset, expecting: expecting, in: paragraphNote)
+    }
+    // The paragraph there isn't the one the row showed.
+    #expect(correcting(0, of: "line", at: at, expecting: .paragraph("Other line.")) == nil)
+    // A card, not a paragraph.
+    let cardAt = try offset(of: "Alpha", in: paragraphNote)
+    #expect(correcting(0, of: "Alpha", at: cardAt, expecting: blocks(paragraphNote)[cardAt]) == nil)
+    // Past the blocks.
+    #expect(correcting(0, of: "line", at: blocks(paragraphNote).count, expecting: block) == nil)
+    // Nothing to change: no third "line", and a phrase across the two lines.
+    #expect(correcting(2, of: "line", at: at, expecting: block) == nil)
+    #expect(correcting(0, of: "line. Second", at: at, expecting: block) == nil)
+}
+
 @Test func noteAnchorMapsOffsetsToLines() {
     let texts = ["One", "two three", "four"]
     #expect(NoteAnchor.lineIndex(forOffset: 0, in: texts) == 0)

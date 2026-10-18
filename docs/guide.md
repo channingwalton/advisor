@@ -171,6 +171,10 @@ the recording window's controls too, and edits are saved into the note:
   skipped one isn't), **Add note here…** (a green Note card at that line), and
   **Correct "…"** / **Replace all "…"**.
 
+If the note has changed on disk since it was shown, a delete, note or
+correction that no longer fits it is not made: the pane says so and reloads, and
+you can try again.
+
 The session still being recorded can be read and collapsed here, but not edited
 until it has fully saved.
 

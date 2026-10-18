@@ -8,10 +8,11 @@ import Foundation
 /// span. Occurrence counting is non-overlapping, left-to-right, and UTF-16-based
 /// so it lines up with the selection offsets `NSTextView` reports.
 ///
-/// Limitation: a selection that straddles a paragraph join boundary (a phrase
-/// split across two utterances / two transcript lines by the 2s-gap rule) is out
-/// of scope — single-occurrence correction counts within a line/utterance, so a
-/// straddling phrase simply won't be found. Whole-session replace is unaffected.
+/// Limitation: matching is per line/utterance, but a paragraph shows its lines
+/// joined by spaces. A selection that straddles a join isn't found, and a
+/// straddling match earlier in the paragraph shifts the count the menu took from
+/// the joined text, so single-occurrence correction can hit a later match.
+/// Whole-session replace skips straddling matches (DESIGN.md, issue #91).
 enum TranscriptCorrection {
 
     // MARK: occurrence counting
@@ -96,37 +97,11 @@ enum TranscriptCorrection {
         return prefix + lines.joined(separator: "\n")
     }
 
-    /// `markdown` with the `n`-th occurrence of `original` within the transcript
-    /// paragraph at `paragraphIndex` (0-based, counting only paragraph blocks, the
-    /// same way `TranscriptDoc` groups them) replaced by `replacement`. Returns the
-    /// input unchanged when the paragraph or the `n`-th occurrence does not exist.
-    static func replacingOccurrence(
-        _ n: Int, of original: String, with replacement: String,
-        inParagraph paragraphIndex: Int, ofMarkdown markdown: String
-    ) -> String {
-        guard !original.isEmpty, n >= 0, paragraphIndex >= 0 else { return markdown }
-        let (prefix, body) = TranscriptDoc.splitFrontmatter(markdown)
-        var lines = body.components(separatedBy: "\n")
-        let paragraphs = paragraphMemberIndices(in: lines)
-        guard paragraphIndex < paragraphs.count else { return markdown }
-
-        let memberIndices = paragraphs[paragraphIndex]
-        // The text portions of this paragraph's member lines, in document order.
-        let texts = memberIndices.map { splitMemberLine(lines[$0])?.text ?? lines[$0] }
-        guard let corrected = replacingOccurrence(n, of: original, with: replacement, in: texts)
-        else { return markdown }
-
-        for (slot, lineIndex) in memberIndices.enumerated() where corrected[slot] != texts[slot] {
-            let linePrefix = splitMemberLine(lines[lineIndex])?.prefix ?? ""
-            lines[lineIndex] = linePrefix + corrected[slot]
-        }
-        return prefix + lines.joined(separator: "\n")
-    }
-
     // MARK: markdown helpers
 
     /// True for a line that contributes prose to a transcript paragraph: not a
-    /// blockquote (`>`), heading (`#`), or blank line. Mirrors `TranscriptDoc`.
+    /// blockquote (`>`), heading (`#`), or blank line, as `TranscriptDoc` reads
+    /// it — though `splitMemberLine` takes an indented bullet as plain prose.
     private static func isParagraphMemberLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         return !trimmed.isEmpty && !line.hasPrefix(">") && !trimmed.hasPrefix("# ")
@@ -159,54 +134,5 @@ enum TranscriptCorrection {
             guard c.isNumber else { return false }
         }
         return true
-    }
-
-    /// Groups `lines` into transcript paragraphs the way `TranscriptDoc` does,
-    /// returning each paragraph as the list of its member line indices (in order).
-    /// A blockquote or heading flushes the current paragraph; a >2s stamp gap
-    /// starts a new one (midnight rollover handled); blank lines don't break.
-    private static func paragraphMemberIndices(in lines: [String]) -> [[Int]] {
-        var paragraphs: [[Int]] = []
-        var current: [Int] = []
-        var prevSecs: Int?
-        func flush() {
-            if !current.isEmpty { paragraphs.append(current); current = [] }
-            prevSecs = nil
-        }
-        for (index, line) in lines.enumerated() {
-            if line.hasPrefix(">") { flush(); continue }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            if trimmed.hasPrefix("# ") { flush(); continue }
-            // Every remaining line is a paragraph member (non-blank, non-quote,
-            // non-heading), so `splitMemberLine` is non-nil here.
-            let (prefix, text) = splitMemberLine(line) ?? ("", line)
-            let secs = stampSeconds(prefix)
-            if let prev = prevSecs, let s = secs {
-                var delta = s - prev
-                if delta < 0 { delta += 86_400 }
-                if delta > 2 { flush() }
-            }
-            // Mirror TranscriptDoc: an empty-text stamp line updates the gap clock
-            // but is not a paragraph member, so paragraph indices stay in lock-step
-            // with the displayed blocks.
-            if !text.isEmpty { current.append(index) }
-            if let secs { prevSecs = secs }
-        }
-        flush()
-        return paragraphs
-    }
-
-    /// Seconds-of-day of a `- HH:MM:SS ` member-line prefix, or nil when the
-    /// prefix carries no stamp.
-    private static func stampSeconds(_ prefix: String) -> Int? {
-        guard prefix.hasPrefix("- "), prefix.count >= 10 else { return nil }
-        let stampChars = Array(prefix.dropFirst(2).prefix(8))
-        guard stampChars.count == 8,
-            let h = Int(String(stampChars[0...1])),
-            let m = Int(String(stampChars[3...4])),
-            let s = Int(String(stampChars[6...7]))
-        else { return nil }
-        return h * 3600 + m * 60 + s
     }
 }

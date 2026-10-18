@@ -403,9 +403,7 @@ struct SessionDetailPane: View {
             onCorrect: isLive
                 ? nil
                 : { request, paragraph in
-                    guard let ordinal = Self.paragraphOrdinal(of: paragraph, in: detail.blocks)
-                    else { return finishEdit(false) }
-                    apply(request, toParagraph: ordinal)
+                    finishEdit(Self.correct(request, in: paragraph, of: detail.blocks, to: file))
                 },
             onToggleCard: { card in expansion[card.id] = !card.isExpanded },
             onDeleteCard: isLive ? nil : { card in deleteBlock(id: card.id) },
@@ -563,32 +561,27 @@ struct SessionDetailPane: View {
 
     private static let editFailed = "Couldn't update the note — it may have changed on disk, so it has been reloaded."
 
-    /// The 0-based index of `paragraph` among paragraph blocks only — the index
-    /// `TranscriptCorrection` keys on (it groups paragraphs the same way
-    /// `TranscriptDoc` does, skipping cards and headings) (issue #32). Nil when its
-    /// id doesn't name one of `blocks`' paragraphs (issue #90).
-    static func paragraphOrdinal(of paragraph: FeedParagraph, in blocks: [TranscriptBlock]) -> Int? {
-        guard let offset = blockOffset(of: paragraph, in: blocks) else { return nil }
-        return blocks[..<offset].reduce(0) {
-            if case .paragraph = $1 { return $0 + 1 }
-            return $0
+    /// "Correct transcription…": apply `request` to `file`, following the note if
+    /// it has been moved meanwhile (`SessionArchive.save`). False — the edit-failed
+    /// path, which reloads — when the paragraph's id doesn't name one of `blocks`'
+    /// paragraphs (a row out of step with the detail, or a malformed id; issue
+    /// #90), "This occurrence" finds a different paragraph there on disk, or the
+    /// correction changes nothing (issue #91).
+    static func correct(
+        _ request: TranscriptCorrectionRequest, in paragraph: FeedParagraph, of blocks: [TranscriptBlock],
+        to file: SessionFile, archive: URL = SessionArchive.directory
+    ) -> Bool {
+        guard let offset = blockOffset(of: paragraph, in: blocks) else { return false }
+        return SessionArchive.save(to: file, in: archive) { file in
+            switch request.scope {
+            case .thisOccurrence:
+                SessionArchive.correctOccurrence(
+                    request.occurrenceInParagraph, of: request.original, with: request.replacement,
+                    inParagraphAt: offset, expecting: blocks[offset], of: file)
+            case .allInSession:
+                SessionArchive.correctAll(of: request.original, with: request.replacement, in: file)
+            }
         }
-    }
-
-    /// Apply a transcription correction to the saved note on disk, then refresh
-    /// the parent list cache (and so this pane's `detail`) so the edit shows.
-    private func apply(_ request: TranscriptCorrectionRequest, toParagraph paragraphIndex: Int) {
-        let changed: Bool
-        switch request.scope {
-        case .thisOccurrence:
-            changed = SessionArchive.correctOccurrence(
-                request.occurrenceInParagraph, of: request.original, with: request.replacement,
-                inParagraph: paragraphIndex, of: file)
-        case .allInSession:
-            changed = SessionArchive.correctAll(
-                of: request.original, with: request.replacement, in: file)
-        }
-        if changed { NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil) }
     }
 
     // MARK: ask
