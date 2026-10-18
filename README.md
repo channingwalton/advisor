@@ -15,12 +15,10 @@ transcripts are kept.
 1. **Install.** Build the DMG from source (see
    [docs/development.md](docs/development.md)), open it and drag Advisor to
    Applications.
-2. **Accept the terms.** First launch shows the [Terms of Use](TERMS.md) —
-   recording and AI features stay off until accepted.
-3. **Grant permissions.** On first launch Advisor asks for **Microphone** and
+2. **Grant permissions.** On first launch Advisor asks for **Microphone** and
    **Screen & System Audio Recording** — both are needed to hear the
    conversation.
-4. **Choose your AI backend.** Open Preferences (⌘,) and pick a provider under
+3. **Choose your AI backend.** Open Preferences (⌘,) and pick a provider under
    the agent backend setting:
    - **Claude** — uses your logged-in Claude Code CLI (a Claude subscription).
    - **Codex** — uses your logged-in Codex CLI (an OpenAI/ChatGPT subscription).
@@ -29,7 +27,7 @@ transcripts are kept.
    configuration most people need. (No CLI login? Switch **Authentication** to
    *API key* in Preferences and paste an Anthropic or OpenAI key instead —
    billed to that key.)
-5. **Record.** Click **New Recording**, then **Listen**. The conversation transcribes
+4. **Record.** Click **New Recording**, then **Listen**. The conversation transcribes
    live and Advisor surfaces answer, context and fact-check cards as it goes.
 
 That's it. Everything stays on your Mac — nothing is uploaded except the
