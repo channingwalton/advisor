@@ -87,9 +87,11 @@ private final class AuthHarness {
     }
 }
 
+/// Polls `predicate` every 5 ms, for 0.5 s by default; `seconds` for a path
+/// that spawns several children in a row (the crash loop).
 @MainActor
-private func waitFor(_ predicate: () -> Bool) async -> Bool {
-    for _ in 0..<100 {
+private func waitFor(seconds: Double = 0.5, _ predicate: () -> Bool) async -> Bool {
+    for _ in 0..<Int(seconds * 200) {
         if predicate() { return true }
         try? await Task.sleep(for: .milliseconds(5))
     }
@@ -338,7 +340,8 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
     defer { h.close() }
     h.childScript = "exit 7" // dies at once, every time
     h.manager.start()
-    #expect(await waitFor { h.store.status.contains("restart attempts exhausted") })
+    // Six spawns, six terminations and five backoffs: generous on a loaded runner.
+    #expect(await waitFor(seconds: 5) { h.store.status.contains("restart attempts exhausted") })
     #expect(h.children.count == 6, "the first spawn plus five restarts: \(h.children.count)")
     #expect(h.store.status.contains("sidecar crashed (7)"))
     #expect(h.store.status.contains("stop and start listening again"))
@@ -348,14 +351,17 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
 @Test func req_sidecar_crash_aHealthyRunResetsTheBudget() async throws {
     let h = try AuthHarness()
     defer { h.close() }
-    h.healthyRunSeconds = 0.05
+    // Crashes within the window count towards the budget; one after it resets
+    // the budget. The window is wide enough that a crash right after spawn is
+    // inside it even on a loaded runner, and the "healthy" run is longer still.
+    h.healthyRunSeconds = 0.5
     h.manager.start()
     h.children[0].terminate()
     #expect(await waitFor { h.children.count == 2 })
     h.children[1].terminate()
     #expect(await waitFor { h.store.status.contains("restarting (2/5)") })
     #expect(await waitFor { h.children.count == 3 })
-    try await Task.sleep(for: .milliseconds(100)) // a healthy run
+    try await Task.sleep(for: .milliseconds(700)) // a healthy run
     h.children[2].terminate()
     #expect(await waitFor { h.store.status.contains("restarting (1/5)") })
 }

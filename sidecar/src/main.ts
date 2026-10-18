@@ -419,10 +419,10 @@ rl.on("line", (line) => {
   try {
     handle(msg);
   } catch (err) {
-    const type = typeof msg === "object" && msg !== null ? String((msg as { type?: unknown }).type) : typeof msg;
-    // Our own error, capped: a thrown message could still quote the frame.
-    const reason = err instanceof Error ? `${err.name}: ${err.message.split("\n")[0].slice(0, 160)}` : "error";
-    log(`bad message (${type}): ${reason}`);
+    const type = msg !== null && typeof msg === "object" ? String((msg as { type?: unknown }).type) : `${msg} frame`;
+    // The error's name only: its message could quote the frame, and so the
+    // transcript. The stack is in the uncaughtException path if one is needed.
+    log(`bad message (${type}): ${err instanceof Error ? err.name : "error"}`);
   }
 });
 // The shutdown contract with the app (SidecarManager.discardProcess): it closes
