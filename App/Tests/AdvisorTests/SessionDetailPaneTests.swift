@@ -144,10 +144,7 @@ func aCorrectionOnAParagraphOutsideTheBlocksIsNotApplied(id: String, scope: Tran
 func aCorrectionFollowsAMovedNote(scope: TranscriptCorrectionRequest.Scope) throws {
     let (file, detail, dir) = try savedNote()
     defer { try? FileManager.default.removeItem(at: dir) }
-    let folder = dir.appendingPathComponent("Work")
-    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    let moved = folder.appendingPathComponent(file.url.lastPathComponent)
-    try FileManager.default.moveItem(at: file.url, to: moved)
+    let moved = try moveIntoFolder(file, in: dir)
 
     let applied = SessionDetailPane.correct(
         correction("effect", to: "affect", scope), in: row("1"), of: detail.blocks, to: file, archive: dir)
@@ -178,4 +175,106 @@ func aCorrectionThatChangesNothingIsNotApplied(scope: TranscriptCorrectionReques
 
     #expect(!applied)
     #expect(try String(contentsOf: file.url, encoding: .utf8) == twoLines)
+}
+
+/// `file` moved into a folder since the pane loaded — from outside the app, so
+/// the pane still holds the old URL. A bare move on purpose, as Finder would do
+/// it, rather than `SessionArchive.setFolder`: the app's own filing re-points
+/// the pane and never hits this path.
+private func moveIntoFolder(_ file: SessionFile, in dir: URL) throws -> URL {
+    let folder = dir.appendingPathComponent("Work")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let moved = folder.appendingPathComponent(file.url.lastPathComponent)
+    try FileManager.default.moveItem(at: file.url, to: moved)
+    return moved
+}
+
+/// "Add note here…" on a session moved into a folder from outside the app since
+/// the pane loaded follows the note there, rather than finding nothing at the
+/// old path and dropping the typed note on the edit-failed path (issue #94).
+@MainActor
+@Test func addNoteFollowsAMovedNote() throws {
+    let (file, detail, dir) = try savedNote()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let moved = try moveIntoFolder(file, in: dir)
+
+    let applied = SessionDetailPane.addNote(
+        "Check the figures", atCharacter: 0, in: row("1"), of: detail.blocks, to: file, archive: dir)
+
+    let expected = try #require(NoteEdit.insertingNote(
+        "Check the figures", inParagraphAt: 1, expecting: detail.blocks[1], atCharacter: 0, in: markdown))
+    #expect(applied)
+    #expect(try String(contentsOf: moved, encoding: .utf8) == expected)
+    #expect(!FileManager.default.fileExists(atPath: file.url.path))
+}
+
+/// Delete on a note of a session moved into a folder from outside the app since
+/// the pane loaded follows the note there too (issue #94).
+@MainActor
+@Test func deletingABlockFollowsAMovedNote() throws {
+    let withNote = markdown + "\n> **NOTE**\n>\n> Check the figures\n"
+    let (file, detail, dir) = try savedNote(withNote)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let offset = try #require(detail.blocks.firstIndex { if case .note = $0 { true } else { false } })
+    let moved = try moveIntoFolder(file, in: dir)
+
+    let applied = SessionDetailPane.removeBlock(at: offset, of: detail.blocks, from: file, archive: dir)
+
+    let expected = try #require(NoteEdit.removingBlock(at: offset, expecting: detail.blocks[offset], in: withNote))
+    #expect(applied)
+    #expect(try String(contentsOf: moved, encoding: .utf8) == expected)
+    #expect(!FileManager.default.fileExists(atPath: file.url.path))
+}
+
+/// A note of the same file name in a folder isn't `file` moved: a copy made
+/// outside the app, or another note filed over it. With `file` gone, Add note
+/// and Delete find it as the relocated note but their expected-block checks run
+/// there too, so a lookalike whose blocks differ is refused, not edited.
+private let lookalike = markdown.replacingOccurrences(
+    of: "- 17:00:00 OCaml is adopting effect systems.",
+    with: "- 17:00:00 Nothing of the sort was said.\n\n> **NOTE**\n>\n> Theirs, not ours")
+
+@MainActor
+@Test func addNoteRefusesALookalikeAtTheRelocatedPath() throws {
+    let (file, detail, dir) = try savedNote()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let other = try moveIntoFolder(file, in: dir)
+    try lookalike.write(to: other, atomically: true, encoding: .utf8)
+
+    let applied = SessionDetailPane.addNote(
+        "Check the figures", atCharacter: 0, in: row("1"), of: detail.blocks, to: file, archive: dir)
+
+    #expect(!applied)
+    #expect(try String(contentsOf: other, encoding: .utf8) == lookalike)
+}
+
+@MainActor
+@Test func deletingABlockRefusesALookalikeAtTheRelocatedPath() throws {
+    let withNote = markdown + "\n> **NOTE**\n>\n> Check the figures\n"
+    let (file, detail, dir) = try savedNote(withNote)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let offset = try #require(detail.blocks.firstIndex { if case .note = $0 { true } else { false } })
+    let other = try moveIntoFolder(file, in: dir)
+    try lookalike.write(to: other, atomically: true, encoding: .utf8)
+
+    let applied = SessionDetailPane.removeBlock(at: offset, of: detail.blocks, from: file, archive: dir)
+
+    #expect(!applied)
+    #expect(try String(contentsOf: other, encoding: .utf8) == lookalike)
+}
+
+/// Delete at a block offset outside `blocks` — a row out of step with the
+/// detail — reports the edit as not applied and leaves the note alone, rather
+/// than trapping on an index out of range.
+@MainActor
+@Test(arguments: [3, 99, -1])
+func deletingABlockOutsideTheBlocksIsNotApplied(offset: Int) throws {
+    let (file, detail, dir) = try savedNote()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try #require(detail.blocks.count == 3)
+
+    let applied = SessionDetailPane.removeBlock(at: offset, of: detail.blocks, from: file, archive: dir)
+
+    #expect(!applied)
+    #expect(try String(contentsOf: file.url, encoding: .utf8) == markdown)
 }

@@ -599,8 +599,13 @@ enum SessionArchive {
 
     /// Run a save against `file`, and once more against where it is now if it
     /// has moved (filed into a folder meanwhile) — a long Ask, Summarise,
-    /// research or follow-up can outlast the note's path. A deleted note has
-    /// nowhere to go, so the save fails rather than recreating it.
+    /// research or follow-up can outlast the note's path, and a note can be moved
+    /// from outside the app while its pane is open (issue #94). A deleted note
+    /// has nowhere to go, so the save fails rather than recreating it. The
+    /// `attempt` is the whole setter, so one that checks the block it expects
+    /// (`expecting:`) checks it at the new path too, and a lookalike of the same
+    /// name there is refused as it would be at the old; a setter without such a
+    /// check (a summary, follow-up, card or "all in session") writes into it.
     static func save(
         to file: SessionFile, in directory: URL = SessionArchive.directory, _ attempt: (SessionFile) -> Bool
     ) -> Bool {

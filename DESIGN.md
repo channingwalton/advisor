@@ -2493,7 +2493,7 @@ message and reloads, as the bad-id path from #90 already did. "All in session"
 takes no paragraph check: it corrects every match wherever it now is. Add note
 and Delete still write to the pane's `file` without `save(to:)`. A note moved
 from outside the app makes them fail and reload, which the message reports,
-rather than follow it (issue #94).
+rather than follow it (issue #94, closed in the entry of that name below).
 
 The failed path includes a correction that changes nothing on an unchanged
 note, which the issue expected the menu couldn't produce. It can: a selection
@@ -2730,6 +2730,56 @@ left (issue #92), and frontmatter, cards and headings stay byte-identical.
 indented bullet and an indented prose line, all keeping their indentation;
 `TranscriptDocTests` the splice itself — indentation, stamp and trailing
 whitespace kept, nil for a line with no text.
+
+**Add note and Delete follow a moved note (#94, 2026-10-18).** The residual the
+#91 entry left: `SessionDetailPane.addNote` and `deleteBlock` wrote to the
+pane's `file` directly, while corrections, research cards, follow-ups, Ask and
+Summarise went through `SessionArchive.save(to:)`, which retries a failed save
+where the note is now (`relocated`). A move from inside the app never reached
+them — `fileSession` re-points the selection and the pane is rebuilt under the
+new URL (`.id(selected.id)`) — but a note moved in Finder, or by another tool,
+while its pane was open left them reading nothing at the old path and taking
+the edit-failed path: loud, but the typed note was gone. Both now go through
+`save(to:)` — `addNote` takes the archive as `correct` does, and the Delete
+body is a static `removeBlock(at:of:from:archive:)` beside it, so the closure
+hands `finishEdit` a result the tests can drive. Their expected-block checks
+(`NoteEdit.insertingNote`, `removingBlock`) run against the relocated note as
+they did against the old path, so a lookalike at the new path — a note of the
+same name that isn't this one — is refused, not edited.
+
+`rewrite` itself does not follow a move, on purpose. It is the file-level
+primitive — read this path, transform, write it back, never recreate (#41) —
+and following a move means scanning the archive (`relocated` is `list(in:)` by
+file name), which takes an archive to scan: `save(to:)` carries it as a
+parameter the tests redirect, where `rewrite` would have to reach for
+`SessionArchive.directory`, a hidden dependency in ten setters. It also keeps
+the policy in one place with its own tests (`SessionArchiveTests`): a setter
+says what it writes, `save(to:)` says where. The two setters still called
+without it, `setName` (`renameSession`) and `setTags` (`applyTags`), are
+synchronous, with a name or tag list to retype rather than a note: `applyTags`
+reports its failure ("Couldn't save tags to disk"); `renameSession` reloads
+either way, so a rename of a note moved outside the app is lost without a
+message. Both left as they are. Also left: after any reload that follows an outside move the selection's
+old URL is gone and the browser selects the first session instead —
+`SessionsView.reload` is the place, by the same file-name match, but it is a
+separate change with its own test and not this one.
+
+Residual, not this issue: `save(to:)` follows the *write*, and the actions
+that read the note before they write — Summarise, Ask, a research card's
+anchor and a follow-up all read `SessionArchive.contents(of: file)` up front —
+still read the old path, where a note moved outside the app reads as "". A
+research card then takes the edit-failed path (no anchor), but a Summarise or
+Ask is sent an empty transcript and its answer is saved, by `save(to:)`, into
+the real note. Reading through `relocated` at the start of those actions is
+the fix; it is a separate change. Also left, from #91: `relocated` takes the
+first note of the name it finds, so with a copy of the note in another folder
+an edit can follow the copy.
+
+`SessionDetailPaneTests` cover an Add note and a Delete on a note moved into a
+folder from outside — applied where it is now, the old path left empty —
+mirroring `aCorrectionFollowsAMovedNote`; both refusing a lookalike of the
+same name at the relocated path, left unchanged; and a Delete at an offset
+outside the blocks, not applied rather than trapped.
 
 ## Terms of use removed (2026-10-18)
 

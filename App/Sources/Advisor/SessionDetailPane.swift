@@ -431,17 +431,36 @@ struct SessionDetailPane: View {
     }
 
     /// "Add note here…": insert `text` into `file` after the line that character
-    /// `offset` of `paragraph` falls in. False — the edit-failed path, which
-    /// reloads — when the paragraph's id doesn't name one of `blocks`' paragraphs
-    /// (a row out of step with the detail, or a malformed id; issue #84) or the
-    /// note on disk no longer matches.
+    /// `offset` of `paragraph` falls in, following the note if it has been moved
+    /// meanwhile (`SessionArchive.save`; issue #94). False — the edit-failed path,
+    /// which reloads — when the paragraph's id doesn't name one of `blocks`'
+    /// paragraphs (a row out of step with the detail, or a malformed id; issue
+    /// #84) or the note on disk no longer matches.
     static func addNote(
         _ text: String, atCharacter offset: Int, in paragraph: FeedParagraph, of blocks: [TranscriptBlock],
-        to file: SessionFile
+        to file: SessionFile, archive: URL = SessionArchive.directory
     ) -> Bool {
         guard let block = blockOffset(of: paragraph, in: blocks) else { return false }
-        return SessionArchive.insertNote(
-            text, inParagraphAt: block, expecting: blocks[block], atCharacter: offset, in: file)
+        return SessionArchive.save(to: file, in: archive) { file in
+            SessionArchive.insertNote(
+                text, inParagraphAt: block, expecting: blocks[block], atCharacter: offset, in: file)
+        }
+    }
+
+    /// Delete: remove the card or note at block `offset` from `file`, following
+    /// the note if it has been moved meanwhile (`SessionArchive.save`; issue #94).
+    /// False — the edit-failed path, which reloads — when the block there on disk
+    /// is no longer `blocks[offset]`, or `offset` isn't one of `blocks` at all (a
+    /// guard for the API: `deleteBlock` derives it from `blockIds`, which is
+    /// `Feed.savedIds(detail.blocks)` and so one-to-one with `blocks`).
+    static func removeBlock(
+        at offset: Int, of blocks: [TranscriptBlock], from file: SessionFile,
+        archive: URL = SessionArchive.directory
+    ) -> Bool {
+        guard blocks.indices.contains(offset) else { return false }
+        return SessionArchive.save(to: file, in: archive) { file in
+            SessionArchive.removeBlock(at: offset, expecting: blocks[offset], from: file)
+        }
     }
 
     /// Remove a card or note from the note on disk — or, for a research card not
@@ -458,7 +477,7 @@ struct SessionDetailPane: View {
             ctx.sidecar?.discardDocumentRequest(request)
         }
         guard let offset = blockIds.firstIndex(of: id) else { return }
-        finishEdit(SessionArchive.removeBlock(at: offset, expecting: detail.blocks[offset], from: file))
+        finishEdit(Self.removeBlock(at: offset, of: detail.blocks, from: file))
     }
 
     /// Research `selection` from the paragraph it's in (right-click Answer /

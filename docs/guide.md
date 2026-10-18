@@ -175,7 +175,9 @@ the recording window's controls too, and edits are saved into the note:
 
 If the note has changed on disk since it was shown, a delete, note or
 correction that no longer fits it is not made: the pane says so and reloads, and
-you can try again.
+you can try again. A note moved into or out of a folder meanwhile — in Finder,
+say — is edited where it is now; the browser then reloads, and shows the first
+session until you select the moved one again.
 
 The session still being recorded can be read and collapsed here, but not edited
 until it has fully saved.
