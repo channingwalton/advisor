@@ -21,7 +21,7 @@ decision.
   and editorial NOTE cards), session markdown writer,
   a Sessions browser (master/detail: date-grouped list + detail with cards,
   questions and transcript; folders with per-folder context and tags, session
-  tags, search, ask-and-append, summarise), saved contexts, first-run terms,
+  tags, search, ask-and-append, summarise), saved contexts,
   quit/close teardown (`QuitSequence`, `SessionClose`), preferences.
 - `sidecar/` — Node 26 + TypeScript, two agent backends: Claude Agent SDK and
   Codex SDK (`src/providers.ts`, kept in step with the app's Preferences).

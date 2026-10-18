@@ -35,14 +35,4 @@ enum AppResources {
         else { return nil }
         return url.path
     }
-
-    /// The terms document (TERMS.md): the bundled copy when packaged
-    /// (package.sh), the repo root in a dev checkout.
-    static var termsURL: URL {
-        if let url = Bundle.main.resourceURL?.appendingPathComponent("TERMS.md"),
-            FileManager.default.fileExists(atPath: url.path) {
-            return url
-        }
-        return repoRoot.appendingPathComponent("TERMS.md")
-    }
 }

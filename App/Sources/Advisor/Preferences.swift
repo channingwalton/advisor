@@ -67,9 +67,6 @@ struct AdvisorConfig: Codable, Equatable {
     /// session notes, so the sidecar never sees this — like `sttLocale`. Resolved
     /// through `SessionArchive.directory`.
     var sessionDir = ""
-    /// App-side only: the TERMS.md version the user accepted at first run
-    /// (`TermsAcceptance`). "" = not yet accepted. The sidecar never sees it.
-    var acceptedTermsVersion = ""
     /// App-side only: whether recognised utterance text is written to the log
     /// file (`~/Library/Logs/Advisor`). Off by default, so the log carries only
     /// diagnostics and the transcripts live only in the session folder (code
@@ -83,7 +80,7 @@ struct AdvisorConfig: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
         case provider, model, effort, sttLocale, authMode, appearance, contexts, tags, sessionDir
-        case acceptedTermsVersion, logTranscriptText
+        case logTranscriptText
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -107,7 +104,6 @@ struct AdvisorConfig: Codable, Equatable {
         contexts = try c.decodeIfPresent([SavedContext].self, forKey: .contexts) ?? []
         tags = try c.decodeIfPresent([SavedTag].self, forKey: .tags) ?? []
         sessionDir = try c.decodeIfPresent(String.self, forKey: .sessionDir) ?? ""
-        acceptedTermsVersion = try c.decodeIfPresent(String.self, forKey: .acceptedTermsVersion) ?? ""
         logTranscriptText = try c.decodeIfPresent(Bool.self, forKey: .logTranscriptText) ?? false
     }
 

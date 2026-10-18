@@ -57,7 +57,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Transcription.** Apple SpeechAnalyzer/SpeechTranscriber (macOS 26), on-device, one engine per source (`AppleSpeechEngine`), locale from the `sttLocale` preference. Streaming with built-in endpointing; volatile (in-progress) text shows at the feed tail. `Recorder` takes each final result, drops `um`/`uh`/`er`/`erm` and immediately repeated words (`cleanedTranscript`) and non-speech junk, then dedupes echo: while system audio is captured a mic final is held 1.5 s, and dropped if its distinctive words (>3 chars) overlap ≥0.7 (on the smaller set) with a `them` line from the last 15 s — or, for a short reply with no distinctive word, exactly matches one. A `them` line arriving later also removes a matching mic line from the previous 12 s. Emits `Utterance{id, time, source, text, latencyMs}` (`text` is mutable for corrections). Start, recovery and teardown run on one serial lifecycle queue. (Originally whisper.cpp; see *STT engine switch* and *Whisper removed*.)
 
-**AppServices.** Launch-lifetime owner of the shared `TranscriptStore` (utterances, cards, editorial notes, volatile text, status), `SidecarManager` and `SessionWriter`, started from the Sessions scene so saved sessions can be queried with no recording open. The `Recorder` belongs to the recording window and is held weakly. Scenes (`AdvisorApp.swift`): **Sessions** (the main window, opens at launch), **Recording** (a single-instance SwiftUI `Window`, ⌘N; never auto-opens) and **Settings**. There is no menu-bar item and no `NSPanel`: the recording window's **Float** toggle raises it to `.floating` level on all Spaces. A first-run terms sheet gates recording (`TermsAcceptance`).
+**AppServices.** Launch-lifetime owner of the shared `TranscriptStore` (utterances, cards, editorial notes, volatile text, status), `SidecarManager` and `SessionWriter`, started from the Sessions scene so saved sessions can be queried with no recording open. The `Recorder` belongs to the recording window and is held weakly. Scenes (`AdvisorApp.swift`): **Sessions** (the main window, opens at launch), **Recording** (a single-instance SwiftUI `Window`, ⌘N; never auto-opens) and **Settings**. There is no menu-bar item and no `NSPanel`: the recording window's **Float** toggle raises it to `.floating` level on all Spaces.
 
 **Recording window** (`TranscriptView`, `ListeningToolbar`, `AskBar`, `RecordControl`). Toolbar: Listen / Stop / Resume with the timer (Stop is resumable), mic mute, audio source, then the folder indicator, Name, Context and Tags chips, Auto cards, Hide Transcript, Summarise, Float and Export. The Ask bar sends free-text queries. Closing the window ends the session; if cards are still researching, `WindowCloseGuard` (`SessionClose.swift`) asks whether to wait for them or stop them. ⌘Q runs the same close through `QuitSequence` (`AppServices.shutdown`, 5 s deadline, then a synchronous save, sidecar stop and `_exit`).
 
@@ -1499,6 +1499,9 @@ chokepoint — the sheet is the enforcement, the guards close the ⌘N gap.
 Known gap, accepted: Monoidal Ltd's company number/registered office and a
 contact email are still to be added to TERMS.md and terms.html.
 
+(Superseded 2026-10-18: the terms and the sheet are gone — see *Terms of use
+removed*.)
+
 ## Review-suggestion batch: hardening + de-duplication (2026-07-04, issues #55–66)
 
 The 2026-07-03 codebase review's lower-severity half landed as a batch. Most were
@@ -2452,6 +2455,18 @@ does nothing (Add note and research compare the block's text first).
 `SessionDetailPaneTests` drive `paragraphOrdinal` and `addNote` with each kind
 of bad id, the heading's among them, and `paragraphOrdinal` with both real
 paragraphs.
+
+## Terms of use removed (2026-10-18)
+
+Advisor is open source under the MIT licence (*MIT licence*, 2026-10-04), so it
+no longer has terms of its own to accept. `TERMS.md` is deleted, and so are the
+first-run sheet (`TermsSheet`), `TermsAcceptance` with its three entry-point
+guards in the recording window, `AppResources.termsURL`, `package.sh`'s copy
+into the bundle and requirement F19. The app-side `acceptedTermsVersion` key
+goes too: an existing `config.json` that still has it decodes as before, since
+unknown keys are ignored, and the next save drops it. The terms'
+recording-consent and AI-accuracy disclaimers went with them. The earlier dated
+entries that mention the terms are kept as history.
 
 ## Revisit as it grows
 

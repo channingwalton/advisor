@@ -562,11 +562,6 @@ struct TranscriptView: View {
     /// `session_start`/note). The frozen-timer state holds until audio is live.
     private func resumeRecording() {
         guard let recorder, !services.isClosingRecording else { return }
-        // Terms gate — ⌘N can open this window behind the sheet.
-        if let notice = TermsAcceptance.notice {
-            store.status = notice
-            return
-        }
         recordingControl.resume(recorder: recorder,
             device: selectedDevice, captureSystem: captureSystem)
     }
@@ -602,12 +597,6 @@ struct TranscriptView: View {
     private func submitQuery() {
         let text = queryText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
-        // Terms gate: keep the typed question rather than clearing it into a
-        // query that must be refused.
-        if let notice = TermsAcceptance.notice {
-            store.status = notice
-            return
-        }
         services.sidecar.sendQuery(text)
         queryText = ""
     }
@@ -741,11 +730,6 @@ struct TranscriptView: View {
     /// window and opening a new one from the Sessions browser.
     private func startSession() {
         guard let recorder, sessionStart == nil, !services.isClosingRecording else { return }
-        // Terms gate: no recording before first-run acceptance.
-        if let notice = TermsAcceptance.notice {
-            store.status = notice
-            return
-        }
         // Open a new STT session generation before clearing/starting, on the
         // main actor with no `await` in between, so a previous session's
         // in-flight finals are already stale by the time they try to write.

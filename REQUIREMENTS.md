@@ -80,9 +80,6 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - Quitting (⌘Q) saves the same tail — echo-delayed microphone text and finals emitted while the engines stop — before exiting. `#quit-saves-tail-finals`
   - Quitting still exits if speech teardown hangs, after a deadline, and saves the note first. `#quit-deadline`
 
-### First run
-- F19. Terms of use: on first run, and whenever the terms change, the user must accept the current terms (including the recording-consent and AI-accuracy disclaimers) before recording or asking; declining quits.
-
 ## Non-functional requirements
 
 - N1. **Latency:** best efforts; ~2–5 s after the triggering utterance is the aspiration, not a hard requirement (relaxed 2026-06-11).
@@ -148,7 +145,7 @@ Two-tier latency strategy: a fast classifier decides *whether* to act (<1 s); th
 
 ## Risks / open issues
 
-- **Consent & legality:** recording calls may require participant consent depending on jurisdiction. App should make recording status obvious. Audio vs transcript-only resolved: transcripts only, no audio stored (see Decided (2026-06-11)); the first-run terms carry a recording-consent disclaimer (F19).
+- **Consent & legality:** recording calls may require participant consent depending on jurisdiction. App should make recording status obvious. Audio vs transcript-only resolved: transcripts only, no audio stored (see Decided (2026-06-11)). There is no terms-of-use disclaimer since F19 was withdrawn (see Changed (2026-10-18)).
 - **Echo/duplication:** own voice may appear in both mic and system audio during calls.
 - **Trigger precision:** too sensitive → noisy sidebar; too conservative → useless. Needs tuning loop.
 - **Fact-check hallucination:** must show sources and degrade to "couldn't verify" rather than guess.
@@ -177,3 +174,7 @@ DESIGN.md.)
 ## Changed (2026-06-14)
 
 - **STT:** dropped whisper.cpp entirely; Apple SpeechAnalyzer is now the only engine. It needs no model download, no vendored build, and hallucinates far less on noise. Supersedes the 2026-06-11 Whisper decision above.
+
+## Changed (2026-10-18)
+
+- **Terms of use:** withdrawn. Advisor is open source under the MIT licence, so there is no terms document and no first-run acceptance sheet. F19 is gone.

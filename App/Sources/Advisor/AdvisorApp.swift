@@ -67,11 +67,6 @@ struct AdvisorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var services = AppServices()
     @AppStorage("agentLanes") private var agentLanes = 3
-    /// First-run terms gate: true until the current TERMS.md version has been
-    /// accepted. Presents the blocking sheet over the Sessions window; the
-    /// recording/query entry points are also gated (`TermsAcceptance.notice`)
-    /// so ⌘N can't sidestep it.
-    @State private var termsNeeded = TermsAcceptance.needed
 
     var body: some Scene {
         // The Sessions browser is the main window: it opens at launch and is a
@@ -81,13 +76,6 @@ struct AdvisorApp: App {
         Window("Sessions", id: "sessions") {
             SessionsView()
                 .task { services.start(lanes: agentLanes) }
-                .sheet(isPresented: $termsNeeded) {
-                    TermsSheet {
-                        TermsAcceptance.accept()
-                        termsNeeded = false
-                    }
-                    .interactiveDismissDisabled()
-                }
         }
         .windowStyle(.hiddenTitleBar)
         // Compact: smaller toolbar buttons and a shorter traffic-light row, so
