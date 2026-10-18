@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct TranscriptView: View {
     /// Launch-lifetime services (store, sidecar, writer) shared with the Sessions
@@ -582,12 +581,7 @@ struct TranscriptView: View {
     private func exportSession() {
         let writer = services.writer
         guard writer.hasExportContent else { return }
-        let panel = NSSavePanel()
-        panel.title = "Export Session"
-        panel.nameFieldStringValue = writer.suggestedFilename()
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = exportDestination(suggestedName: writer.suggestedFilename()) else { return }
         do {
             try writer.export(to: url)
         } catch {

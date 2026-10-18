@@ -2398,6 +2398,21 @@ rest; the backoff delay and the healthy-run threshold are now injectable (the
 production defaults unchanged), so the tests run in well under a second where
 the real 1/2/4/8 s backoff would take half a minute.
 
+**Two files became seven.** `AdvisorApp.swift` (1,200 lines) held the app
+delegate and scenes, the whole recording window and an `NSTextView` subclass;
+`SessionsView.swift` (1,630) held the sidebar with its folder controls, three
+free functions shared with the detail pane, and the 650-line detail pane. Both
+are now split along those seams — `TranscriptView.swift`, `ActionTextView.swift`;
+`SessionFolders.swift`, `SessionActions.swift`, `SessionDetailPane.swift` — as
+moves: declarations used across a new file boundary lost their file-scope
+`private`, the browser's export free function became `exportSessionCopy` (it
+had shared a name with the recording window's method, which only member lookup
+kept apart), and `repoRoot` moved to `AppResources.swift`, where it is used.
+One change rode along: the two Export save panels (recording window via the
+writer, browser as a file copy) differed — only one offered the `.md` content
+type — and now share `exportDestination(suggestedName:)` in
+`SessionActions.swift`.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
