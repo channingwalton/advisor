@@ -8,10 +8,15 @@ import UniformTypeIdentifiers
 /// Live-note-aware rename: routes through the recording writer when `file` is the
 /// note being recorded right now (so its next debounced rewrite carries the new
 /// name), else edits the saved note on disk. Posts `advisorSessionsChanged` so the
-/// browser reloads from disk.
+/// browser reloads from disk. The live note is only ever renamed through its
+/// writer: with none published the rename is refused (issue #85) — a direct
+/// frontmatter write would be undone by the writer's next debounced rewrite, so
+/// it would save and then silently vanish. DESIGN.md (#85) has why the app never
+/// reaches the refusal today.
 @MainActor func renameSession(_ file: SessionFile, to name: String, ctx: TranscriptWindowContext) {
     let new = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    if file.url == ctx.liveFileURL, let writer = ctx.writer {
+    if file.url == ctx.liveFileURL {
+        guard let writer = ctx.writer else { return }
         writer.renameOwnedNote(new)
     } else {
         SessionArchive.setName(new, in: file)

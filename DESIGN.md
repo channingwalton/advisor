@@ -2591,6 +2591,34 @@ across a join with leading whitespace, overlapping an earlier copy of itself
 of the text, and with no `lines` given. Observing the menu in the running app
 needs a right-click the agent can't make; the menu tests stand in for it.
 
+**The live note is renamed only through its writer (#85, 2026-10-18).**
+`renameSession` routed a rename through the writer when the note was the live
+one *and* `TranscriptWindowContext.writer` was set, else wrote the frontmatter
+on disk — so a live note with no writer published would be renamed on disk and
+the writer's next debounced rewrite (a research card finishing, post-stop too)
+would put the old name back, with `advisorSessionsChanged` reloading the
+reverted note as if nothing had been typed. The window the fallthrough left
+open cannot occur today: `writer` is published once, by `AppServices.start`
+from the Sessions window's `.task` at launch, and is never cleared — `releaseRecording`
+clears `liveFileURL` and releases the writer's note but keeps the handle — while
+`liveFileURL` is only set by the recording window's session start, which the
+Sessions window (or its ⌘N) opens, after the writer and in the same synchronous
+step as `writer.start`. The fallthrough was wrong all the same, so the branch
+now refuses: a live note with no writer is left untouched and nothing is posted,
+rather than saved-then-clobbered. The invariant lives in that one `guard` rather
+than in a reading of the launch order. `SessionRenameTests` cover the three
+states — live and unowned (left alone), live and owned (renamed through the
+writer, and still so after its next `flush`), saved (renamed on disk). Residual, not
+this issue: the live check is a raw `file.url == liveFileURL`, and the browser's
+rows come from `contentsOfDirectory`, which returns symlink-resolved paths,
+while the writer names its note under the configured folder as given — under a
+`sessionDir` that passes through a symlink (`/var` → `/private/var`; a linked
+`~/Dropbox`) the two differ, every live-note check in the browser misses, and
+this rename falls to the on-disk branch and is clobbered after all. The default
+archive under `~/Library` has no symlink. One resolved-URL comparison shared by
+those sites is the fix; the test builds its `SessionFile` from the writer's URL
+to stay on the routing.
+
 ## Terms of use removed (2026-10-18)
 
 Advisor is open source under the MIT licence (*MIT licence*, 2026-10-04), so it
