@@ -747,8 +747,10 @@ final class SidecarManager {
         return (frames, rest)
     }
 
+    /// Dispatch one decoded frame. Internal, not private, so the contract test
+    /// (ProtocolContractTests, issue #97) can feed it the shared example frames.
     @MainActor
-    private func handle(type: String, _ obj: [String: Any]) {
+    func handle(type: String, _ obj: [String: Any]) {
         switch type {
         case "card":
             guard let id = obj["id"] as? String else { return }

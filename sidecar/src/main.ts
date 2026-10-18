@@ -396,6 +396,13 @@ function handle(msg: Inbound): void {
       pipeline.end();
       log("session ended");
       break;
+    default: {
+      // Exhaustive: a variant added to `Inbound` (and so to the shared examples,
+      // which protocol.test.ts holds together) must be handled above to compile.
+      // At runtime an unknown type from the app is logged, then dropped.
+      const unhandled: never = msg;
+      log(`bad message: unhandled type ${String((unhandled as { type?: unknown }).type)}`);
+    }
   }
 }
 

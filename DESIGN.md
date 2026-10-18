@@ -96,7 +96,9 @@ Detail and rationale live in the dated sections below; this is the map.
 
 ## IPC contract (NDJSON, one object per line)
 
-Types live in `sidecar/src/protocol.ts`. Swift → sidecar:
+Types live in `sidecar/src/protocol.ts`; `protocol/examples.json` holds one
+example frame per type in each direction, and both test suites hold their
+side to it (see *Protocol contract test*). Swift → sidecar:
 
 ```json
 {"type":"session_start","sessionId":"...","ts":...,"context":"..."}
@@ -2838,6 +2840,59 @@ fence; inline code at a line start; an indented `#` line under an item
 keeping the list nested, and a tab-indented one in a snippet under an item
 staying text; and a `#` header cell over a delimiter row, with and without a
 whitespace-only line between.
+
+## Protocol contract test (2026-10-18)
+
+The NDJSON protocol was written down twice — `Inbound`/`Outbound` in
+`sidecar/src/protocol.ts`, string-keyed dictionaries in `SidecarManager` — with
+no test running one side against the other, and neither side checks shape at
+runtime (the sidecar casts `JSON.parse` to `Inbound`; the app reads fields with
+silent defaults). A field renamed on one side showed up as empty cards or
+ignored frames with both suites green (issue #97). A version handshake would
+not help: `package.sh` builds the sidecar into the .app from the same checkout,
+so a release never pairs mismatched halves; the drift is within a checkout.
+
+`protocol/examples.json` is now the one place both sides test against: one
+frame per message type in each direction, in full form (every optional field
+present), and per type the fields a frame may leave out (`optional`). Each
+suite holds its own side to it:
+
+- `sidecar/src/protocol.test.ts`: per-type field descriptors (`Fields<Inbound>`,
+  `Fields<Outbound>`) that the compiler holds to the types — a field renamed,
+  added or dropped, a variant added or removed, or an optional field made
+  required, is a type error on the test — and that the test holds the examples
+  to: one example per type, exactly the type's field names, each of its
+  primitive kind, and `optional` naming exactly the type's `?` fields. The
+  descriptors live in the test, not `protocol.ts`: nothing at runtime uses
+  them. `main.ts`'s dispatcher gained an exhaustive `default` arm, so a variant
+  added to `Inbound` (and so to the examples) fails to compile until handled,
+  and an unknown type from the app is logged, then dropped.
+- `App/Tests/AdvisorTests/ProtocolContractTests.swift`: every `send*` of
+  `SidecarManager` runs against a shell child that records its stdin (the
+  authentication tests' harness), and each frame sent must carry every required
+  field of its example and none outside it, of the same JSON kind, with the
+  sends between them covering every field of every example — so a field the
+  app stops sending fails too, optional or not;
+  and each sidecar → app example is fed through `handle` (internal now, for
+  this), in full and without its optional fields, checking every field lands on
+  the `Card`, the document answer handler or the status line. The test pins
+  each example's field set to the fields it checks, so a field that joins an
+  example fails until its landing check is written (`hello.version` and
+  `error.fatal` are pinned as unread).
+
+Verified by renaming a field in each place: `text` on the Swift utterance send
+and `body` on the card read (both app tests fail), `text` on the `Inbound`
+utterance type (`tsc` fails), `body` in the card_update example (both runtime
+suites fail); and by dropping `ts` from the note send (the app test names it),
+adding an unhandled `Inbound` variant (`tsc` fails in `main.ts` and the test)
+and mis-declaring an optional field in the examples (the sidecar test fails).
+Not covered: the values of the literal unions (`source`, `action`, `kind`,
+`state`), which both sides check only as strings; and a field the app reads
+that no example carries — `sources` and `verdict` on card frames, which the
+sidecar has never sent; that is issue #89, which updates the examples if it
+implements them. The runtime cast itself is still open: a decoder built from
+the same descriptors could replace `as Inbound` and reject a malformed frame
+with a logged reason.
 
 ## Revisit as it grows
 

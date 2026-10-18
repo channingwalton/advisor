@@ -1,0 +1,152 @@
+{
+  "about": "One example NDJSON frame per message type in each direction, in full form (every optional field present); `optional` names, per type, the fields a frame may leave out. This is the one place the protocol is written down that both sides test against (issue #97): sidecar/src/protocol.test.ts holds the Inbound/Outbound types to these frames, and App/Tests/AdvisorTests/ProtocolContractTests.swift holds SidecarManager's sends and its inbound handling to them. Change this file with the protocol. Types: sidecar/src/protocol.ts; prose: DESIGN.md, IPC contract.",
+  "appToSidecar": {
+    "frames": [
+      {
+        "type": "session_start",
+        "sessionId": "0F3B5C2A-7D1E-4F8A-9B6C-2E4D8A1F3C5B",
+        "ts": 1760821200.5,
+        "context": "Planning call with the Cedar team about the billing rewrite"
+      },
+      {
+        "type": "session_context",
+        "text": "Planning call; Cedar is the new billing service"
+      },
+      {
+        "type": "utterance",
+        "id": "6A1D9E4B-3C2F-4E8A-B7D5-9F0C1A2B3D4E",
+        "source": "them",
+        "text": "Has anyone looked at Cedar's rate limits?",
+        "ts": 1760821260.25
+      },
+      {
+        "type": "note",
+        "id": "B2C3D4E5-F6A7-4B8C-9D0E-1F2A3B4C5D6E",
+        "text": "Cedar is our internal name for the billing rewrite",
+        "ts": 1760821270
+      },
+      {
+        "type": "query",
+        "id": "C3D4E5F6-A7B8-4C9D-0E1F-2A3B4C5D6E7F",
+        "text": "Cedar's rate limits",
+        "action": "answer",
+        "triggerId": "6A1D9E4B-3C2F-4E8A-B7D5-9F0C1A2B3D4E"
+      },
+      {
+        "type": "config",
+        "auto": true,
+        "lanes": 3
+      },
+      {
+        "type": "cancel",
+        "cardId": "k7p2-7"
+      },
+      {
+        "type": "card_reply",
+        "cardId": "k7p2-7",
+        "kind": "answer",
+        "title": "Cedar's rate limits",
+        "base": "Cedar allows 100 requests a second per tenant.",
+        "replyText": "Is that per region?",
+        "transcript": "them: Has anyone looked at Cedar's rate limits?\nme: I think it is 100 a second."
+      },
+      {
+        "type": "summarise_live",
+        "cardId": "k7p2-9",
+        "transcript": "them: Has anyone looked at Cedar's rate limits?\nme: I think it is 100 a second."
+      },
+      {
+        "type": "ask_document",
+        "id": "D4E5F6A7-B8C9-4D0E-1F2A-3B4C5D6E7F8A",
+        "question": "What did we decide about rate limits?",
+        "document": "# Planning call\n\nthem: Has anyone looked at Cedar's rate limits?\nme: I think it is 100 a second."
+      },
+      {
+        "type": "research_document",
+        "id": "E5F6A7B8-C9D0-4E1F-2A3B-4C5D6E7F8A9B",
+        "action": "factcheck",
+        "text": "Cedar allows 100 requests a second",
+        "document": "# Planning call\n\nthem: Has anyone looked at Cedar's rate limits?\nme: I think it is 100 a second."
+      },
+      {
+        "type": "reply_document",
+        "id": "F6A7B8C9-D0E1-4F2A-3B4C-5D6E7F8A9B0C",
+        "kind": "answer",
+        "title": "Cedar's rate limits",
+        "base": "Cedar allows 100 requests a second per tenant.",
+        "replyText": "Is that per region?",
+        "document": "# Planning call\n\nthem: Has anyone looked at Cedar's rate limits?\nme: I think it is 100 a second."
+      },
+      {
+        "type": "summarise_document",
+        "id": "A7B8C9D0-E1F2-4A3B-4C5D-6E7F8A9B0C1D",
+        "transcript": "# Planning call\n\nthem: Has anyone looked at Cedar's rate limits?\nme: I think it is 100 a second."
+      },
+      {
+        "type": "session_end"
+      }
+    ],
+    "optional": {
+      "session_start": [
+        "context"
+      ],
+      "query": [
+        "action",
+        "triggerId"
+      ],
+      "config": [
+        "auto",
+        "lanes"
+      ],
+      "card_reply": [
+        "transcript"
+      ],
+      "summarise_live": [
+        "cardId"
+      ]
+    }
+  },
+  "sidecarToApp": {
+    "frames": [
+      {
+        "type": "hello",
+        "version": 1
+      },
+      {
+        "type": "card",
+        "id": "k7p2-7",
+        "trigger": "6A1D9E4B-3C2F-4E8A-B7D5-9F0C1A2B3D4E",
+        "kind": "answer",
+        "title": "Cedar's rate limits",
+        "body": "…",
+        "state": "pending"
+      },
+      {
+        "type": "card_update",
+        "id": "k7p2-7",
+        "body": "Cedar allows 100 requests a second per tenant.",
+        "state": "streaming",
+        "activity": "Searching the web for “Cedar rate limits”"
+      },
+      {
+        "type": "document_answer",
+        "id": "D4E5F6A7-B8C9-4D0E-1F2A-3B4C5D6E7F8A",
+        "body": "The call settled on 100 requests a second per tenant.",
+        "state": "done"
+      },
+      {
+        "type": "error",
+        "fatal": false,
+        "message": "already answering — wait for the current card"
+      }
+    ],
+    "optional": {
+      "card": [
+        "trigger"
+      ],
+      "card_update": [
+        "activity"
+      ]
+    }
+  }
+}

@@ -29,6 +29,10 @@ decision.
   automatic cards (`autoPipeline.ts`); pooled research and query lanes plus
   short-lived reply, document and summary lanes (`lanes.ts`); tool sandbox.
   NDJSON over stdio to the app (protocol in `src/protocol.ts`, both directions).
+- `protocol/examples.json` — one example frame per message type, each
+  direction: the contract both test suites load (`sidecar/src/protocol.test.ts`,
+  `App/Tests/AdvisorTests/ProtocolContractTests.swift`). Change it with the
+  protocol; a field renamed on either side fails a test.
 
 ## Build & test
 
