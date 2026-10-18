@@ -2679,6 +2679,36 @@ gain is confined to invented names. Kept as recorded: the lists are the
 defence and actions-off-by-default the backstop; a connector that ships such
 a name is added to the action list when met. No code changed.
 
+**The launcher denial reaches LaunchServices, not just the binaries (#88,
+2026-10-18).** The residual above — the `process-exec` denial of `osascript`,
+`open`, `launchctl` and `shortcuts` is by literal path, so a copied binary run
+from a writable root would bypass it, and `open` hands a program to
+LaunchServices over mach/XPC that `(deny appleevent-send)` does not cover — was
+prototyped under `sandbox-exec` on macOS 27. Two findings. The copied-binary
+bypass is closed by the OS already: a copy of any of the four launchers, run
+from `TMPDIR` or `~/.codex`, is killed with a `Launch Constraint Violation`
+(CODESIGNING) *before it executes*, sandboxed or not — macOS launch constraints
+pin those system binaries to their canonical path. The real gap is the library
+route: a process need not run `open` at all, it can call `LSOpenCFURLRef`
+directly (an ordinary compiled binary, or a scripting bridge with FFI), and a
+launch-free probe confirmed that under the old profile such a process still
+reached LaunchServices and resolved a handler. The profile now adds `(deny
+mach-lookup (global-name-regex "^com\.apple\.lsd"))`: denying the `com.apple.lsd`
+family — the LaunchServices daemon — makes it unreachable, so no handler can be
+resolved and nothing launched by either route. The family must be matched by
+regex, not a name list: an explicit `com.apple.lsd`/`launchservicesd` denial
+still resolves through the `lsd.*` sub-services; only `launchservicesd` itself
+left open the other way round. The rule costs nothing the backend needs — node
+spawns, DNS, `child_process`, file reads, `git` and HTTPS all work under it, and
+the real vendored CLI completes its turns (`codex.sdk.test.ts`); Codex's own
+browser-based login happens outside Advisor's turn-time sandbox. Pinned in the
+profile text and exercised live in `codexSandbox.test.ts` (a compiled probe
+resolves an `https` handler unsandboxed and is refused under the profile, where
+it can be built; it self-skips without the toolchain). The exec denial stays as
+defence in depth. Residual: a route to launchd that does not go through
+LaunchServices (a direct `bootstrap_look_up` of some other launching service) is
+still open under `(allow default)`.
+
 ## Terms of use removed (2026-10-18)
 
 Advisor is open source under the MIT licence (*MIT licence*, 2026-10-04), so it

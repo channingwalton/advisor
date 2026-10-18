@@ -265,6 +265,52 @@ test("a sandboxed process cannot run the launchers", darwin, () => {
   assert.notEqual(o.code, 0);
 });
 
+test("the profile denies the LaunchServices mach services", () => {
+  // The exec denial only stops the launcher *binaries*. A process can reach
+  // LaunchServices directly — `LSOpenCFURLRef` over mach/XPC — and hand a
+  // program to launchd without ever running `open`. Denying the `com.apple.lsd`
+  // family at the mach port closes that route; the family (bare `com.apple.lsd`
+  // plus every `com.apple.lsd.*` sub-service) must be matched by regex, since an
+  // explicit `com.apple.lsd`/`launchservicesd` list leaves resolution working
+  // through the sub-services. Verified live below.
+  const profile = seatbeltProfile([], ["/home/u/.codex"], []);
+  assert.match(profile, /\(deny mach-lookup \(global-name-regex "\^com\\\.apple\\\.lsd"\)\)/);
+  // After the launcher exec denial, before the write rules — it is a deny, so
+  // position only matters against a later allow, and there is no mach allow.
+  assert.ok(profile.indexOf("(deny process-exec") < profile.indexOf("(deny mach-lookup"));
+});
+
+/// Compile a launch-free LaunchServices probe: it *resolves* the default handler
+/// for an `https` URL (no app is launched) and exits 0 when LS answered, non-0
+/// when the port was unreachable. Returns its path, or undefined when the
+/// toolchain to build it is absent (then the live test below self-skips).
+function launchServicesProbe(dir: string): string | undefined {
+  const src = path.join(dir, "ls-resolve.c");
+  const bin = path.join(dir, "ls-resolve");
+  fs.writeFileSync(
+    src,
+    `#include <CoreServices/CoreServices.h>\n#include <stdio.h>\n` +
+      `int main(void){ CFURLRef in=CFURLCreateWithString(NULL,CFSTR("https://example.com"),NULL);\n` +
+      ` CFErrorRef e=NULL; CFURLRef a=LSCopyDefaultApplicationURLForURL(in,kLSRolesAll,&e);\n` +
+      ` if(a){printf("resolved\\n");return 0;} printf("unreachable %ld\\n",e?(long)CFErrorGetCode(e):-1L);return 3; }\n`
+  );
+  const cc = spawnSync("/usr/bin/clang", ["-framework", "CoreServices", "-o", bin, src], { encoding: "utf8" });
+  return cc.status === 0 && fs.existsSync(bin) ? bin : undefined;
+}
+
+test("a sandboxed process cannot reach LaunchServices to launch a program", darwin, (t) => {
+  const { home, profile } = fakeHome();
+  const probe = launchServicesProbe(home);
+  if (!probe) return t.skip("no clang/CoreServices toolchain to build the probe");
+  // Unsandboxed the probe resolves a handler — LS is reachable on this machine.
+  assert.equal(spawnSync(probe, { encoding: "utf8" }).status, 0, "probe should resolve unsandboxed");
+  // Under the profile LS is unreachable, so nothing can be resolved — hence
+  // nothing launched — through the library route either.
+  const r = sandboxed(profile, [probe]);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /unreachable/);
+});
+
 test("a sandboxed process cannot create files outside the writable roots", darwin, () => {
   const { home, profile } = fakeHome();
   const evil = path.join(home, "Documents", "evil.txt");

@@ -125,8 +125,27 @@ function realpathLeaf(p: string): string {
 }
 
 /// Programs that start another program outside the profile, through launchd or
-/// Apple Events: refused outright.
+/// Apple Events: refused outright. The exec denial is by path, but a copy of
+/// one of these system binaries will not run either — macOS launch constraints
+/// pin them to their canonical location and kill a copy with a Launch
+/// Constraint Violation (verified on macOS 27, sandboxed and not). What the
+/// exec denial cannot reach is the library route: a process can call
+/// LaunchServices directly (`LSOpenCFURLRef` over mach/XPC) and hand a program
+/// to launchd without running any launcher binary. `LAUNCH_SERVICES_REGEX`
+/// closes that route at the mach port.
 const LAUNCHERS = ["/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl", "/usr/bin/shortcuts"];
+
+/// The `com.apple.lsd` mach services — the LaunchServices daemon — matched as a
+/// family: the bare `com.apple.lsd` and every `com.apple.lsd.*` sub-service. The
+/// family is what resolves a URL or bundle id to the app to launch; deny the
+/// whole lookup and LaunchServices is unreachable, so neither `open` nor a
+/// direct `LSOpenCFURLRef` call can resolve a handler, let alone launch it. A
+/// regex rather than a name list because resolution has fallbacks: an explicit
+/// `com.apple.lsd`/`launchservicesd` denial still resolves through the
+/// sub-services (verified against the kernel). Nothing the CLI or an MCP server
+/// does needs to launch an app — the real CLI completes its turns regardless
+/// (`codex.sdk.test.ts`). Code review #88.
+const LAUNCH_SERVICES_REGEX = "^com\\.apple\\.lsd";
 
 /// The sidecar's own `TMPDIR` plus the two macOS temp roots, because the CLI and
 /// the MCP servers it spawns need not share this process's `TMPDIR`.
@@ -157,6 +176,7 @@ export function seatbeltProfile(
     // Events or those launchers.
     "(deny appleevent-send)",
     `(deny process-exec ${LAUNCHERS.map((p) => `(literal "${p}")`).join(" ")})`,
+    `(deny mach-lookup (global-name-regex "${LAUNCH_SERVICES_REGEX}"))`,
   ];
   if (readDenials.length > 0) lines.push(`(deny file-read* ${subpaths(readDenials)})`);
   lines.push("(deny file-write*)");
