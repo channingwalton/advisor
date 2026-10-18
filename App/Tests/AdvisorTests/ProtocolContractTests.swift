@@ -219,8 +219,7 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
     let before = h.store.status
 
     // Every field of every example has a landing check below, so a field that
-    // joins an example fails here until its check is written. (The app reads
-    // `sources` and `verdict` too, which no example carries: issue #89.)
+    // joins an example fails here until its check is written.
     let checked: [String: Set<String>] = [
         "hello": ["type", "version"],
         "card": ["type", "id", "trigger", "kind", "title", "body", "state"],

@@ -129,7 +129,7 @@ Sidecar → Swift:
 {"type":"error","fatal":false,"message":"..."}
 ```
 
-The sidecar sends `hello` once at startup; the app ignores it — there is no version handshake. The app also accepts optional `sources` and `verdict` fields on card frames, which the sidecar doesn't send yet. Card ids are opaque: they carry a random per-process prefix, so a restarted sidecar cannot collide with cards the app still holds.
+The sidecar sends `hello` once at startup; the app ignores it — there is no version handshake. Card frames carry no separate `sources` or `verdict`: a fact-check's verdict and every card's citations are in the body markdown (removed 2026-10-18, see *Card sources and verdict removed*). Card ids are opaque: they carry a random per-process prefix, so a restarted sidecar cannot collide with cards the app still holds.
 
 ## Latency
 
@@ -466,7 +466,8 @@ interim line.
 
 Card-model changes: `isExpanded` (fact-checks collapse by default),
 `triggerQuote` (derived from the anchor utterance), `sources` and `verdict`
-(parsed when the sidecar emits them; absent for now); `toggleCard`/`dismissCard`
+(parsed when the sidecar emits them; absent for now — removed 2026-10-18, see
+*Card sources and verdict removed*); `toggleCard`/`dismissCard`
 on the store. Pause now freezes the session timer (`sessionStart` shifted
 forward by paused durations so elapsed excludes pauses); dismissing an in-flight
 card cancels its research; the session note re-writes only on output-bearing
@@ -1013,7 +1014,8 @@ revisit if card bodies grow richer. (Superseded: nested lists 2026-10-04, see
 *Sessions window restyle*; tables 2026-10-15, see *Card tables*.) `MarkdownUI` is now unused and the dependency
 is dropped. The footer's discrete source `Link`s (live feed) keep a SwiftUI
 `linkCursor()` (`NSCursor.pointingHand` on hover) since they aren't `NSTextView`
-links.
+links. (Both went with the sources footer 2026-10-18 — see *Card sources and
+verdict removed*.)
 
 ## Floating sidebar (2026-06-21)
 
@@ -1787,13 +1789,12 @@ replied to, and the paragraph-to-run grouping was written twice
   blocks (`Feed.saved`); `Feed.grouped` merges adjacent paragraphs into runs and
   applies Hide Transcript (paragraphs and headings go, cards and notes stay).
 - **Saved cards are `Card`s.** `SavedCard.card(from:id:)` is the inverse of
-  `SessionMarkdown.cardBlock`: the header label gives the kind and verdict, the
-  one-line footer the trigger quote and sources. Only the writer's own footer
-  forms count — an italic `↳ quote`, grounded line or follow-up `Asked …`,
-  optionally followed by links — so a body that merely ends in italics or links
-  keeps that line (a links-only footer can't be told apart from the body's own
-  citations, and the sidecar doesn't emit sources yet); link labels may contain
-  ` · `. The `Asked …` stamp has no live field, so it's kept in
+  `SessionMarkdown.cardBlock`: the header label gives the kind, the one-line
+  footer the trigger quote. Only the writer's own footer forms count — an
+  italic `↳ quote`, grounded line or follow-up `Asked …` — so a body that
+  merely ends in italics or links keeps that line. (Until 2026-10-18 the header
+  could also carry a verdict and the footer trailing source links — see *Card
+  sources and verdict removed*.) The `Asked …` stamp has no live field, so it's kept in
   `Card.footnote`. Saved follow-ups are kind `question` (labelled Question); a
   blockquote without a known header (one the user typed) has no kind, so it
   shows no label and no grounded footer.
@@ -2887,12 +2888,55 @@ suites fail); and by dropping `ts` from the note send (the app test names it),
 adding an unhandled `Inbound` variant (`tsc` fails in `main.ts` and the test)
 and mis-declaring an optional field in the examples (the sidecar test fails).
 Not covered: the values of the literal unions (`source`, `action`, `kind`,
-`state`), which both sides check only as strings; and a field the app reads
-that no example carries — `sources` and `verdict` on card frames, which the
-sidecar has never sent; that is issue #89, which updates the examples if it
-implements them. The runtime cast itself is still open: a decoder built from
+`state`), which both sides check only as strings. (The app also read
+`sources` and `verdict` on card frames, which no example carried and the
+sidecar never sent; removed 2026-10-18 — see *Card sources and verdict
+removed*.) The runtime cast itself is still open: a decoder built from
 the same descriptors could replace `as Inbound` and reject a malformed frame
 with a logged reason.
+
+## Card sources and verdict removed (2026-10-18)
+
+Issue #89, from the 2026-10-17 code review. Since 2026-06 the app accepted
+optional `sources` (`[{label, url}]`) and `verdict`
+(`verified | needsContext | misleading`) on `card` and `card_update` frames and
+rendered them — a coloured verdict pill in place of the FACT-CHECK label, a
+source-links footer, links in the clipboard copy, `VERIFIED`/`NEEDS CONTEXT`/
+`MISLEADING` header labels and ` · `-joined links on the footer line of the
+saved note, and the parser to read both back. The sidecar never emitted either
+field: `protocol.ts` has no such fields, and no example in
+`protocol/examples.json` carries them.
+
+**Decision: delete rather than implement.** Both already travel in the card
+body by prompt design — the fact-check task asks for a verdict first
+(`true / false / mixed / couldn't verify`, `trigger.ts`), and the research core
+says to cite inline as markdown links (`prompts.ts`). A structured channel
+would duplicate that and would need both backends to produce structured fields
+alongside the streamed body, against the two-pass streaming design (the body
+starts before research ends, so a verdict couldn't be known at `card` time and
+the sources list would trail the text that cites them). Nothing was lost: the
+verdict still leads the body, the links are still in it. The Fact-check label
+keeps the grey (`Theme.textSecondary`) every fact-check card has in fact always
+shown — it was the no-verdict fallback, and it is now the kind's colour; the
+verdict's colour belongs in the body text, not the label. The `factGreen` /
+`factRed` tokens stay, under their old names, for the generic success and
+failure states that use them.
+
+Removed: `Verdict`, `Citation`, `Card.sources`/`Card.verdict` and their ingest
+in `SidecarManager`, the verdict/sources branches of `FeedCardView`
+(`kindName`, `kindColour`, footer, clipboard), `SessionMarkdown.label(for:)`'s
+verdict labels and the footer's link suffix, `SavedCard`'s verdict labels and
+link-footer parsing (`parseSources`, the link regex — the footer is now just
+the writer's italic note), the then-unused `linkCursor()` and
+`Theme.factAmber`. Safe for existing notes: the writer only persisted what a
+live card had, so no saved note ever carried a verdict label or a link footer
+— checked against the user's own transcripts folder (11 notes, 4 with
+`FACT-CHECK` headers, none with a verdict header or a `_note_ · [link]`
+footer) — and the parser tests for notes without those fields pass unchanged.
+If a structured verdict is ever wanted, it is a protocol change on both sides:
+add the field to `protocol.ts`, an example frame to `protocol/examples.json`
+(the contract tests fail until both sides handle it) and a `label(for:)`
+value the parser reads back.
 
 ## Revisit as it grows
 

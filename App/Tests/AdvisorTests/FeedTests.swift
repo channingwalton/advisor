@@ -18,50 +18,39 @@ import Testing
     #expect(card.state == "done")
 }
 
-@Test func savedCardMapsVerdictLabelsToFactChecks() {
-    let cases: [(String, Verdict?)] = [
-        ("VERIFIED", .verified), ("NEEDS CONTEXT", .needsContext),
-        ("MISLEADING", .misleading), ("FACT-CHECK", nil),
-    ]
-    for (label, verdict) in cases {
-        let card = SavedCard.card(from: "**\(label) · A claim**\n\nEvidence.", id: "x")
-        #expect(card.kind == "factcheck")
-        #expect(card.verdict == verdict)
-        #expect(card.title == "A claim")
-    }
+@Test func savedCardMapsTheFactCheckLabel() {
+    let card = SavedCard.card(from: "**FACT-CHECK · A claim**\n\nEvidence.", id: "x")
+    #expect(card.kind == "factcheck")
+    #expect(card.title == "A claim")
+    #expect(card.isExpanded == false)
 }
 
-@Test func savedCardSplitsGroundedFooterAndSources() {
+@Test func savedCardSplitsTheGroundedFooter() {
     let card = SavedCard.card(
-        from: "**ANSWER · Who wrote it?**\n\nAda did.\n\n_Grounded in the live conversation_ · [Wiki](https://w.example) · [Doc](https://d.example)",
+        from: "**ANSWER · Who wrote it?**\n\nAda did.\n\n_Grounded in the live conversation_",
         id: "x")
     #expect(card.kind == "answer")
     #expect(card.body == "Ada did.")
     #expect(card.footnote == nil)
     #expect(card.triggerQuote == nil)
-    #expect(card.sources == [
-        Citation(label: "Wiki", url: "https://w.example"),
-        Citation(label: "Doc", url: "https://d.example"),
-    ])
 }
 
 @Test func savedCardKeepsATrailingLinkLineInTheBody() {
-    // Indistinguishable from a sources-only footer, so it stays where it renders
-    // as the body's own link rather than moving into the footer.
+    // The body's own citation: only the writer's italic footer forms leave the body.
     let card = SavedCard.card(from: "**CONTEXT · X**\n\nBody.\n\n[A](https://a.example)", id: "x")
     #expect(card.body == "Body.\n\n[A](https://a.example)")
-    #expect(card.sources.isEmpty)
+    #expect(card.footnote == nil)
+    #expect(card.triggerQuote == nil)
 }
 
-@Test func savedCardSourceLabelsMayContainTheSeparator() {
-    let card = SavedCard.card(
-        from: "**ANSWER · Q**\n\nA.\n\n_Grounded in the live conversation_ · [Pull requests · openai/codex · GitHub](https://github.com/openai/codex/pulls) · [Foo](https://en.wikipedia.org/wiki/Foo_(bar))",
-        id: "x")
-    #expect(card.body == "A.")
-    #expect(card.sources == [
-        Citation(label: "Pull requests · openai/codex · GitHub", url: "https://github.com/openai/codex/pulls"),
-        Citation(label: "Foo", url: "https://en.wikipedia.org/wiki/Foo_(bar)"),
-    ])
+@Test func savedCardKeepsAFooterNoteFollowedByLinksInTheBody() {
+    // The writer never appends links to its footer, so a line that looks like
+    // one isn't a footer: it stays in the body rather than being half-parsed.
+    let line = "_Grounded in the live conversation_ · [Wiki](https://w.example)"
+    let card = SavedCard.card(from: "**ANSWER · Q**\n\nA.\n\n\(line)", id: "x")
+    #expect(card.body == "A.\n\n\(line)")
+    #expect(card.footnote == nil)
+    #expect(card.triggerQuote == nil)
 }
 
 @Test func savedCardKeepsATrailingItalicBodyLineThatIsNotAFooter() {
@@ -74,7 +63,7 @@ import Testing
 @Test func savedSummaryNeverHasAFooter() {
     let card = SavedCard.card(from: "**SUMMARY**\n\nGist.\n\n[Spec](https://s.example)", id: "x")
     #expect(card.body == "Gist.\n\n[Spec](https://s.example)")
-    #expect(card.sources.isEmpty)
+    #expect(card.footnote == nil)
 }
 
 @Test func savedBlockquoteWithoutHeaderHasNoKind() {
@@ -107,6 +96,13 @@ import Testing
     #expect(card.footnote == "Asked 10:15:02 · 2026-10-05")
 }
 
+@Test func savedCardKeepsAnAskedLineInTheBodyUnlessItIsAFollowUp() {
+    // Only a follow-up (`Q`) card carries the writer's `Asked …` stamp.
+    let card = SavedCard.card(from: "**ANSWER · What next?**\n\nShip it.\n\n_Asked 10:15:02 · 2026-10-05_", id: "x")
+    #expect(card.body == "Ship it.\n\n_Asked 10:15:02 · 2026-10-05_")
+    #expect(card.footnote == nil)
+}
+
 @Test func savedCardWithoutHeaderIsAllBody() {
     let card = SavedCard.card(from: "Just a body.\n- item", id: "x")
     #expect(card.kind == "")
@@ -119,8 +115,7 @@ import Testing
     let written = Card(
         id: "c1", created: t, kind: "factcheck", title: "Rust is older than Go",
         body: "**False.** Go shipped first.\n\n- Go: 2009\n- Rust: 2010",
-        state: "done", triggerQuote: "Rust is older than Go",
-        sources: [Citation(label: "Go", url: "https://go.dev")], verdict: .misleading)
+        state: "done", triggerQuote: "Rust is older than Go")
     let md = SessionMarkdown.inline(
         utterances: [Utterance(time: t, source: .them, text: "Rust is older than Go", latencyMs: 0)],
         cards: [written], started: t, ended: t)
@@ -131,17 +126,15 @@ import Testing
 
     let card = SavedCard.card(from: inner, id: "s")
     #expect(card.kind == written.kind)
-    #expect(card.verdict == written.verdict)
     #expect(card.title == written.title)
     #expect(card.body == written.body)
     #expect(card.triggerQuote == written.triggerQuote)
-    #expect(card.sources == written.sources)
+    #expect(card.isExpanded == false)
 }
 
-@Test func cardKindNameIsSentenceCaseOrVerdict() {
+@Test func cardKindNameIsSentenceCase() {
     func name(_ header: String) -> String { FeedCardView.kindName(SavedCard.card(from: header, id: "x")) }
     #expect(name("**CONTEXT · x**") == "Context")
-    #expect(name("**NEEDS CONTEXT · x**") == "Needs context")
     #expect(name("**FACT-CHECK · x**") == "Fact-check")
     #expect(name("**Q · Which is production-ready?**") == "Question")
     #expect(name("**SUMMARY**") == "Summary")
@@ -237,7 +230,7 @@ private func paragraphs(_ item: FeedItem) -> [FeedParagraph] {
 // MARK: saved collapse
 
 @Test func savedFactChecksStartCollapsedLikeLiveOnes() {
-    #expect(SavedCard.card(from: "**VERIFIED · X**\n\nY.", id: "a").isExpanded == false)
+    #expect(SavedCard.card(from: "**FACT-CHECK · X**\n\nY.", id: "a").isExpanded == false)
     #expect(SavedCard.card(from: "**CONTEXT · X**\n\nY.", id: "b").isExpanded == true)
 }
 
@@ -247,7 +240,7 @@ private func expansion(_ items: [FeedItem]) -> [Bool] {
 
 @Test func expansionOverridesApplyByCardIdOverTheDisplayedList() {
     let blocks: [TranscriptBlock] = [
-        .paragraph("Hi."), .card("**CONTEXT · A**\n\nx"), .card("**VERIFIED · B**\n\ny"),
+        .paragraph("Hi."), .card("**CONTEXT · A**\n\nx"), .card("**FACT-CHECK · B**\n\ny"),
     ]
     let ids = Feed.savedIds(blocks)
     let shown = Feed.grouped(Feed.saved(blocks: blocks, times: [nil, nil, nil]), hideTranscript: true)

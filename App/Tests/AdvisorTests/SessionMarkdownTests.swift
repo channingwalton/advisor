@@ -10,13 +10,11 @@ private func makeCard(
     title: String = "Title",
     body: String = "Body text.",
     state: String = "done",
-    triggerQuote: String? = nil,
-    verdict: Verdict? = nil,
-    sources: [Citation] = []
+    triggerQuote: String? = nil
 ) -> Card {
     Card(
         id: id, created: created, kind: kind, title: title, body: body, state: state,
-        triggerId: nil, triggerQuote: triggerQuote, sources: sources, verdict: verdict)
+        triggerId: nil, triggerQuote: triggerQuote)
 }
 
 @Test func inlinesCardsAsBlockquotesWithoutFootnotes() {
@@ -91,14 +89,13 @@ private func makeCard(
     #expect(lineIdx!.lowerBound < cardIdx!.lowerBound)
 }
 
-@Test func factcheckUsesVerdictLabel() {
+@Test func factcheckUsesTheFactCheckLabel() {
     let t = Date(timeIntervalSince1970: 1_000)
-    let card = makeCard(
-        created: t, kind: "factcheck", title: "Claim", state: "done", verdict: .misleading)
+    let card = makeCard(created: t, kind: "factcheck", title: "Claim", state: "done")
 
     let md = SessionMarkdown.inline(utterances: [], cards: [card], started: t, ended: nil)
 
-    #expect(md.contains("> **MISLEADING · Claim**"))
+    #expect(md.contains("> **FACT-CHECK · Claim**"))
 }
 
 @Test func answerCardShowsGroundingFooter() {
@@ -110,16 +107,13 @@ private func makeCard(
     #expect(md.contains("> _Grounded in the live conversation_"))
 }
 
-@Test func contextCardShowsTriggerQuoteAndSources() {
+@Test func contextCardShowsTriggerQuote() {
     let t = Date(timeIntervalSince1970: 1_000)
-    let card = makeCard(
-        created: t, kind: "context", title: "Ctx", triggerQuote: "the phrase",
-        sources: [Citation(label: "BBC", url: "https://bbc.co.uk")])
+    let card = makeCard(created: t, kind: "context", title: "Ctx", triggerQuote: "the phrase")
 
     let md = SessionMarkdown.inline(utterances: [], cards: [card], started: t, ended: nil)
 
-    #expect(md.contains("↳ the phrase"))
-    #expect(md.contains("[BBC](https://bbc.co.uk)"))
+    #expect(md.contains("> _↳ the phrase_"))
 }
 
 @Test func doneSummaryCardBecomesSummarySection() {

@@ -231,16 +231,12 @@ enum SavedCard {
     /// `**LABEL · Title**` (or a label-only `**SUMMARY**`) header, the body,
     /// then an optional one-line footer in the writer's own forms: an italic note
     /// (`_↳ quote_`, `_Grounded in the live conversation_` or `…saved transcript_`,
-    /// a follow-up's
-    /// `_Asked …_`), optionally followed by ` · `-separated source links. A
-    /// links-only last line stays in the body — it can't be told apart from the
-    /// body's own citations. A block without a known header isn't one Advisor
-    /// wrote, so it has no kind and no footer.
+    /// a follow-up's `_Asked …_`). Any other last line — the body's own citation
+    /// links, an italic remark — stays in the body. A block without a known
+    /// header isn't one Advisor wrote, so it has no kind and no footer.
     static func card(from markdown: String, id: String) -> Card {
         var lines = markdown.components(separatedBy: "\n")
-        var label = ""
         var kind = ""
-        var verdict: Verdict?
         var title = ""
         if let header = lines.first?.trimmingCharacters(in: .whitespaces),
             header.count > 4, header.hasPrefix("**"), header.hasSuffix("**")
@@ -249,8 +245,8 @@ enum SavedCard {
             let sep = inner.range(of: " · ")
             let headerLabel = sep.map { String(inner[..<$0.lowerBound]) } ?? inner
             // An unrecognised bold first line is the body's own text.
-            if let known = kindAndVerdict(headerLabel) {
-                (label, kind, verdict) = (headerLabel, known.kind, known.verdict)
+            if let known = cardKind(forLabel: headerLabel) {
+                kind = known
                 title = sep.map { String(inner[$0.upperBound...]) } ?? ""
                 lines.removeFirst()
             }
@@ -259,18 +255,16 @@ enum SavedCard {
 
         var quote: String?
         var footnote: String?
-        var sources: [Citation] = []
         // A summary never has a footer.
         if !kind.isEmpty, kind != "summary", let last = lines.last,
-            let footer = parseFooter(last, followUp: label == "Q")
+            let note = footerNote(last, followUp: kind == "question")
         {
             lines.removeLast()
             trimBlank(&lines)
-            sources = footer.sources
-            if footer.note.hasPrefix("↳ ") {
-                quote = String(footer.note.dropFirst(2))
-            } else if footer.note != groundedNote {
-                footnote = footer.note
+            if note.hasPrefix("↳ ") {
+                quote = String(note.dropFirst(2))
+            } else if note != groundedNote {
+                footnote = note
             }
         }
 
@@ -278,7 +272,7 @@ enum SavedCard {
             id: id, created: .distantPast, kind: kind,
             title: kind == "summary" && title.isEmpty ? "Summary" : title,
             body: lines.joined(separator: "\n"), state: "done",
-            triggerQuote: quote, sources: sources, verdict: verdict, footnote: footnote,
+            triggerQuote: quote, footnote: footnote,
             // Fact-checks start collapsed, as they do live.
             isExpanded: kind != "factcheck")
     }
@@ -289,62 +283,27 @@ enum SavedCard {
     /// kept as the card's `footnote` — it wasn't grounded in a live conversation.
     static let savedGroundedNote = "Grounded in the saved transcript"
 
-    private static func kindAndVerdict(_ label: String) -> (kind: String, verdict: Verdict?)? {
+    private static func cardKind(forLabel label: String) -> String? {
         switch label {
-        case "ANSWER": ("answer", nil)
-        case "CONTEXT": ("context", nil)
-        case "SUMMARY": ("summary", nil)
-        case "Q": ("question", nil)
-        case "VERIFIED": ("factcheck", .verified)
-        case "NEEDS CONTEXT": ("factcheck", .needsContext)
-        case "MISLEADING": ("factcheck", .misleading)
-        case "FACT-CHECK": ("factcheck", nil)
+        case "ANSWER": "answer"
+        case "CONTEXT": "context"
+        case "SUMMARY": "summary"
+        case "Q": "question"
+        case "FACT-CHECK": "factcheck"
         default: nil
         }
     }
 
-    /// The footer line's italic note and source links, or nil when `line` isn't
-    /// one of the writer's footers (so it stays part of the body).
-    private static func parseFooter(_ line: String, followUp: Bool) -> (note: String, sources: [Citation])? {
+    /// The footer line's italic note (`_note_`), or nil when `line` isn't one of
+    /// the writer's footers (so it stays part of the body).
+    private static func footerNote(_ line: String, followUp: Bool) -> String? {
         let line = line.trimmingCharacters(in: .whitespaces)
-        func isNote(_ note: Substring) -> Bool {
-            note == groundedNote || note == savedGroundedNote || note.hasPrefix("↳ ")
-                || (followUp && note.hasPrefix("Asked "))
-        }
-        guard line.hasPrefix("_") else { return nil }
-        let afterOpen = line.index(after: line.startIndex)
-        // `_note_` alone, or `_note_ · [label](url) · …`.
-        if line.count > 2, line.hasSuffix("_") {
-            let note = line[afterOpen..<line.index(before: line.endIndex)]
-            if isNote(note) { return (String(note), []) }
-        }
-        var from = afterOpen
-        while let sep = line.range(of: "_ · [", range: from..<line.endIndex) {
-            let note = line[afterOpen..<sep.lowerBound]
-            if isNote(note), let sources = parseSources(line[line.index(sep.upperBound, offsetBy: -1)...]) {
-                return (String(note), sources)
-            }
-            from = sep.upperBound
-        }
-        return nil
+        guard line.count > 2, line.hasPrefix("_"), line.hasSuffix("_") else { return nil }
+        let note = line.dropFirst().dropLast()
+        let isNote = note == groundedNote || note == savedGroundedNote || note.hasPrefix("↳ ")
+            || (followUp && note.hasPrefix("Asked "))
+        return isNote ? String(note) : nil
     }
-
-    /// `[label](url)` links joined by ` · `, or nil if `s` is anything else.
-    /// Labels may themselves contain ` · ` (page titles do) and URLs `)`.
-    private static func parseSources(_ s: Substring) -> [Citation]? {
-        let ns = String(s) as NSString
-        var location = 0
-        var sources: [Citation] = []
-        while location < ns.length {
-            let range = NSRange(location: location, length: ns.length - location)
-            guard let m = link.firstMatch(in: ns as String, options: .anchored, range: range) else { return nil }
-            sources.append(Citation(label: ns.substring(with: m.range(at: 1)), url: ns.substring(with: m.range(at: 2))))
-            location = m.range.location + m.range.length
-        }
-        return sources.isEmpty ? nil : sources
-    }
-
-    private static let link = try! NSRegularExpression(pattern: #"\[(.+?)\]\((\S+?)\)(?: · (?=\[)|$)"#)
 
     private static func trimBlank(_ lines: inout [String]) {
         while lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeFirst() }

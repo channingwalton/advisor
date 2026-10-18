@@ -28,7 +28,7 @@ import Testing
             store.cards.append(Card(
                 id: "last-card", created: Date(), kind: "answer", title: "Saved answer",
                 body: "Card after the attempted folder change", state: "done", triggerId: nil,
-                triggerQuote: nil, sources: [], verdict: nil))
+                triggerQuote: nil))
             writer.end()
             writer.releaseNote()
 

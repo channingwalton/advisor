@@ -3,7 +3,7 @@ import Foundation
 /// A card Advisor surfaced during a session, as shown in the "Cards surfaced"
 /// list — reconstructed from the saved note's inline card blocks.
 struct SurfacedCard: Equatable {
-    let label: String // ANSWER, CONTEXT, VERIFIED, NEEDS CONTEXT, MISLEADING, FACT-CHECK
+    let label: String // ANSWER, CONTEXT, FACT-CHECK, SUMMARY, Q
     let title: String
     let snippet: String
 }

@@ -98,13 +98,12 @@ enum Theme {
     static let contextCodeBg = dyn(0xF1F0F6, 0xB9A4FF, darkAlpha: 0.14)
     static let contextCodeText = dyn(0x6E54B8, 0xCCBEFF)
 
-    // MARK: fact-check verdicts
+    // MARK: success/failure colours
     static let factGreen = dyn(0x2F8D5B, 0x46D389)
     static let factGreenTint = dyn(0xE6F4EC, 0x46D389, darkAlpha: 0.16)
-    static let factAmber = dyn(0xA06A12, 0xECB845)
     static let factRed = dyn(0xC0392B, 0xFF6B5C)
 
-    // MARK: summary (teal) — distinct from answer/context/verdict pills
+    // MARK: summary (teal) — distinct from the answer/context pills
     static let summaryTeal = dyn(0x0E7C86, 0x4FD0DA)
 
     // MARK: misc

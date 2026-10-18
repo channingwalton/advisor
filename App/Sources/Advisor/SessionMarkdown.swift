@@ -147,25 +147,19 @@ enum SessionMarkdown {
         return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
     }
 
-    /// The pill label shown in the window header — kind, or the verdict for a
-    /// resolved fact-check.
+    /// The header label — the card's kind, as `SavedCard.card(from:id:)` reads
+    /// it back. (Saved follow-ups' `Q` header is written elsewhere.)
     static func label(for card: Card) -> String {
         switch card.kind {
         case "context": return "CONTEXT"
         case "summary": return "SUMMARY"
-        case "factcheck":
-            switch card.verdict {
-            case .verified: return "VERIFIED"
-            case .needsContext: return "NEEDS CONTEXT"
-            case .misleading: return "MISLEADING"
-            case nil: return "FACT-CHECK"
-            }
+        case "factcheck": return "FACT-CHECK"
         default: return "ANSWER"
         }
     }
 
     /// A card as a blockquote "chat" block: bold `LABEL · Title` header, the
-    /// body markdown, then a footer line (grounding/trigger quote + sources).
+    /// body markdown, then a footer line (grounding note or trigger quote).
     /// Every line is `>`-prefixed so multi-paragraph bodies stay in the quote.
     static func cardBlock(_ card: Card) -> String {
         var lines = ["**\(label(for: card)) · \(card.title)**"]
@@ -181,12 +175,9 @@ enum SessionMarkdown {
         if footer.isEmpty, let quote = card.triggerQuote, !quote.isEmpty {
             footer = "↳ \(quote)"
         }
-        footer = footer.isEmpty ? "" : "_\(footer)_"
-        let sources = card.sources.map { "[\($0.label)](\($0.url))" }.joined(separator: " · ")
-        if !sources.isEmpty { footer = footer.isEmpty ? sources : footer + " · " + sources }
         if !footer.isEmpty {
             lines.append("")
-            lines.append(footer)
+            lines.append("_\(footer)_")
         }
 
         return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")

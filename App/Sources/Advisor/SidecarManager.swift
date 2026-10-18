@@ -1,21 +1,5 @@
 import Foundation
 
-/// A fact-check outcome. Drives the verdict badge colour/glyph. Optional on a
-/// card because the sidecar does not emit a verdict yet — `factcheck` cards
-/// render a neutral pill until it does (see DESIGN.md / handoff Open Questions).
-enum Verdict: String, Equatable {
-    case verified, needsContext, misleading
-}
-
-/// A source link shown in a card footer. The sidecar does not emit these yet
-/// (research lanes cite inline in the body markdown); the row stays hidden when
-/// `sources` is empty, and lights up if/when the protocol carries them.
-struct Citation: Identifiable, Equatable {
-    var id: String { url }
-    let label: String
-    let url: String
-}
-
 struct Card: Identifiable, Equatable {
     let id: String
     let created: Date
@@ -30,11 +14,6 @@ struct Card: Identifiable, Equatable {
     /// The transcript phrase that spawned the card, shown in the footer
     /// (`↳ "…"`). Derived from `triggerId` → utterance text on ingest.
     var triggerQuote: String?
-    /// Source links for the footer. Empty until the sidecar emits them.
-    var sources: [Citation] = []
-    /// Fact-check outcome, when known. Nil for non-factcheck cards and for
-    /// factcheck cards before the sidecar emits a verdict.
-    var verdict: Verdict?
     /// A footer line with no live equivalent, kept from a saved note — a
     /// follow-up's `Asked …` stamp. Nil for live cards.
     var footnote: String?
@@ -77,7 +56,7 @@ struct Card: Identifiable, Equatable {
     /// changes it too.
     static func writerKey(_ cards: [Card]) -> [String] {
         cards.compactMap(\.persisted).map {
-            "\($0.id)|\($0.state)|\($0.title)|\($0.body)|\($0.verdict?.rawValue ?? "")|\($0.sources.count)"
+            "\($0.id)|\($0.state)|\($0.title)|\($0.body)"
         }
     }
 
@@ -710,16 +689,6 @@ final class SidecarManager {
 
     // MARK: inbound
 
-    /// Decodes a protocol `sources` value (array of `{label,url}`) defensively;
-    /// any malformed entry is skipped. The sidecar does not emit this yet.
-    private static func parseSources(_ raw: Any?) -> [Citation] {
-        guard let arr = raw as? [[String: Any]] else { return [] }
-        return arr.compactMap { entry in
-            guard let url = entry["url"] as? String, !url.isEmpty else { return nil }
-            return Citation(label: entry["label"] as? String ?? url, url: url)
-        }
-    }
-
     private func consume(_ data: Data) {
         buffer.append(data)
         let (frames, remainder) = Self.ndjsonFrames(buffer)
@@ -774,8 +743,6 @@ final class SidecarManager {
                     state: state,
                     triggerId: triggerId,
                     triggerQuote: anchor?.text,
-                    sources: Self.parseSources(obj["sources"]),
-                    verdict: (obj["verdict"] as? String).flatMap(Verdict.init(rawValue:)),
                     // Fact-checks default collapsed so they don't bury the
                     // transcript; everything else opens expanded.
                     isExpanded: kind != "factcheck",
@@ -784,10 +751,6 @@ final class SidecarManager {
             guard let id = obj["id"] as? String,
                 let idx = store.cards.firstIndex(where: { $0.id == id })
             else { return }
-            if let sources = obj["sources"] { store.cards[idx].sources = Self.parseSources(sources) }
-            if let verdict = (obj["verdict"] as? String).flatMap(Verdict.init(rawValue:)) {
-                store.cards[idx].verdict = verdict
-            }
             store.cards[idx].apply(
                 body: obj["body"] as? String, state: obj["state"] as? String,
                 activity: obj["activity"] as? String)

@@ -101,7 +101,7 @@ private struct FeedTranscriptRun: View {
 
 /// A card in the feed — answer, context, fact-check, summary or saved follow-up:
 /// a coloured kind label over its title, then the body, footer (trigger quote or
-/// note, and sources) and follow-up field, on a faint fill. Copy and Delete show
+/// note) and follow-up field, on a faint fill. Copy and Delete show
 /// while the pointer is over the card (`HoverReveal`, so hovering doesn't redraw
 /// the text); the collapse chevron also stays visible while collapsed, so a
 /// collapsed card shows it can open.
@@ -226,21 +226,16 @@ struct FeedCardView: View {
         !kindName(card).isEmpty || !card.title.isEmpty
     }
 
-    /// The label above the title: the kind, or a fact-check's verdict. Empty for
-    /// a saved blockquote Advisor didn't write.
+    /// The label above the title: the kind. Empty for a saved blockquote Advisor
+    /// didn't write. A fact-check's verdict is in its body (the prompt asks for
+    /// it first), not a separate field.
     static func kindName(_ card: Card) -> String {
         switch card.kind {
         case "": ""
         case "context": "Context"
         case "summary": "Summary"
         case "question": "Question"
-        case "factcheck":
-            switch card.verdict {
-            case .verified: "Verified"
-            case .needsContext: "Needs context"
-            case .misleading: "Misleading"
-            case nil: "Fact-check"
-            }
+        case "factcheck": "Fact-check"
         default: "Answer"
         }
     }
@@ -249,13 +244,7 @@ struct FeedCardView: View {
         switch card.kind {
         case "context": Theme.contextViolet
         case "summary": Theme.summaryTeal
-        case "factcheck":
-            switch card.verdict {
-            case .verified: Theme.factGreen
-            case .needsContext: Theme.factAmber
-            case .misleading: Theme.factRed
-            case nil: Theme.textSecondary
-            }
+        case "factcheck": Theme.textSecondary
         default: Theme.accent
         }
     }
@@ -265,39 +254,26 @@ struct FeedCardView: View {
     @ViewBuilder private var footer: some View {
         let note: String? = card.footnote
             ?? (isAnswer ? SavedCard.groundedNote : card.triggerQuote.map { "↳ “\($0)”" })
-        if note != nil || !card.sources.isEmpty {
-            HStack(alignment: .top, spacing: 8) {
-                if let note {
-                    Text(note)
-                        .font(.system(size: 11).italic())
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 8)
-                ForEach(card.sources) { src in
-                    Link(src.label, destination: URL(string: src.url) ?? URL(string: "about:blank")!)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.accent)
-                        .linkCursor()
-                }
-            }
-            .padding(.top, 2)
+        if let note {
+            Text(note)
+                .font(.system(size: 11).italic())
+                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
         }
     }
 
     // MARK: copy
 
-    /// Plain-text snapshot of the card for the clipboard: title, body, then any
-    /// source links. Available whether the card is collapsed or expanded.
+    /// Plain-text snapshot of the card for the clipboard: title, then body.
+    /// Available whether the card is collapsed or expanded.
     private var clipboardText: String {
         var parts: [String] = []
         let title = card.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !title.isEmpty { parts.append(title) }
         let body = card.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty && body != "…" { parts.append(body) }
-        if !card.sources.isEmpty {
-            parts.append(card.sources.map { "\($0.label) — \($0.url)" }.joined(separator: "\n"))
-        }
         return parts.joined(separator: "\n\n")
     }
 
@@ -364,18 +340,6 @@ private struct HoverReveal<Content: View>: View {
     @ViewBuilder let content: (Bool) -> Content
 
     var body: some View { content(hover.isOn) }
-}
-
-extension View {
-    /// Shows the standard pointing-hand cursor while the pointer is over the
-    /// view. SwiftUI `Link`/markdown links don't change the cursor on macOS, so
-    /// we drive `NSCursor` from the hover state. Push/pop stays balanced because
-    /// reaching any other control means moving off this view first.
-    func linkCursor() -> some View {
-        onHover { inside in
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-    }
 }
 
 /// 26×26 transparent icon button used for collapse/dismiss/skip; lightens on hover.
