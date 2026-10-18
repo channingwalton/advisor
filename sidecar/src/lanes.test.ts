@@ -161,17 +161,100 @@ test("#lane-pool a grow after a shrink never mints a name still in use", () => {
   assert.ok(names.includes("research1"), names.join(","));
 });
 
-test("#lane-pool releasing a lane the pool has already dropped only marks it idle", () => {
-  const { pool: p, lanes } = pool(1);
+test("#lane-pool a session start mid-card aborts the busy lane but keeps it listed, under its name, until it releases", () => {
+  const { pool: p, lanes, made, shed } = pool(1);
   p.free();
   const old = lanes.get("research0")!;
   old.busy = true;
-  p.reset(); // a session start mid-card: the old lane is dropped and rebuilt
+  p.reset(); // a session start mid-card
+  assert.equal(old.resets, 1, "its turn is aborted at once");
+  assert.deepEqual(shed, ["research0"]);
   const fresh = p.all[0];
-  assert.notEqual(fresh, old);
+  assert.notEqual(fresh, old, "the rebuilt pool leads `all`: it is the warm-up target");
+  assert.deepEqual(p.all, [fresh, old], "the old lane stays where cancel and the exit path look (#86)");
+  assert.notEqual(fresh.name, old.name, "its name keys a cursor its card's failure path will still forget");
   p.release(old);
   assert.equal(old.busy, false);
-  assert.deepEqual(p.all, [fresh], "the dropped lane's release leaves the pool alone");
+  assert.deepEqual(p.all, [fresh], "the retired lane's release leaves the pool alone");
+  // The name is reserved only while the lane is retired.
+  p.resize(2);
+  fresh.busy = true;
+  assert.equal(p.free()?.name, "research0");
+  assert.deepEqual(made, ["research0", "research1", "research0"]);
+});
+
+// An invariant test, not a reproduction: both backends settle an aborted turn
+// synchronously inside reset(), so today runCard's forget lands before the new
+// lane can be sent anything. The pool must not depend on that timing (#86).
+test("#lane-pool the card a session start aborted cannot wipe the new lane's transcript cursor", async () => {
+  const transcript = new Transcript();
+  const { pool: p, lanes } = pool(1);
+  const d = deps(transcript);
+  const old = p.free()!;
+  let settle!: (r: TaskResult) => void;
+  old.session.run = () => new Promise<TaskResult>((resolve) => { settle = resolve; });
+  old.busy = true;
+  say(transcript, "u1", "Before the restart");
+  const aborted = runCard(old, "answer", "old", "Answer: old?", "u1", d);
+  // session_start: the conversation is cleared, the pool rebuilt, and the new
+  // lane answers a card before the aborted turn has settled.
+  transcript.clear();
+  p.reset();
+  const fresh = p.free()!;
+  say(transcript, "u2", "After the restart");
+  await runCard(fresh, "answer", "new", "Answer: new?", "u2", d);
+  assert.equal(transcript.cursor(fresh.name), 1);
+  // The aborted turn settles after that; runCard recycles its lane and
+  // forgets that lane's cursor.
+  settle({ text: "", error: "agent session reset" });
+  await aborted;
+  assert.equal(transcript.cursor(fresh.name), 1, "the new lane's cursor survives the old card's forget (#86)");
+  say(transcript, "u3", "Next");
+  await runCard(fresh, "answer", "next", "Answer: next?", "u3", d);
+  const last = lanes.get(fresh.name)!.prompts.at(-1)!;
+  assert.doesNotMatch(last, /After the restart/, "no replay of what the lane was already sent");
+  assert.match(last, /Next/);
+  // The pipeline releases the lane after runCard's own finally: only now is
+  // the name free to mint again.
+  p.release(old);
+  assert.deepEqual(p.all, [fresh]);
+  p.resize(2);
+  fresh.busy = true;
+  assert.equal(p.free()?.name, old.name);
+});
+
+test("#lane-pool a drop that throws at reset still retires that lane once and rebuilds the pool", () => {
+  const { pool: p, lanes, shed } = pool(2);
+  p.free();
+  const [r0, r1] = [lanes.get("research0")!, lanes.get("research1")!]; // the rebuilt pool re-mints research1
+  r0.busy = true;
+  r0.session.reset = () => { throw new Error("stream torn down"); };
+  p.reset();
+  assert.equal(r1.resets, 1, "the lanes after the thrower are still dropped");
+  assert.deepEqual(shed, ["research1"]);
+  assert.deepEqual(p.all.map((l) => l.name), ["research1", "research2", "research0"], "rebuilt to size; the thrower retired once");
+  p.release(r0);
+  assert.deepEqual(p.all.map((l) => l.name), ["research1", "research2"]);
+  assert.equal(p.free()?.name, "research1");
+});
+
+test("#lane-pool a second session start while a lane is retired retires the next, and drops each once", () => {
+  const { pool: p, lanes, shed } = pool(1);
+  p.free();
+  const r0 = lanes.get("research0")!;
+  r0.busy = true;
+  p.reset();
+  const r1 = lanes.get("research1")!;
+  r1.busy = true;
+  p.reset();
+  const r2 = p.all[0];
+  assert.deepEqual(p.all, [r2, r0, r1]);
+  assert.equal(new Set(p.all.map((l) => l.name)).size, 3, "three names");
+  assert.deepEqual(shed, ["research0", "research1"], "each shed once");
+  assert.equal(r0.resets, 1);
+  p.release(r0);
+  p.release(r1);
+  assert.deepEqual(p.all, [r2]);
 });
 
 test("#lane-pool growing again makes fresh lanes", () => {

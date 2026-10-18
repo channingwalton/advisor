@@ -2,7 +2,7 @@ import { Agent, type AgentSessionOptions } from "./agent.js";
 import { AdvisorConfig, effortArg, modelArg } from "./config.js";
 import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
 import { buildResearchSystem, sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
-import { Outbound } from "./protocol.js";
+import { log, Outbound } from "./protocol.js";
 
 const CARD_TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
 
@@ -147,9 +147,15 @@ export async function runCard(
 /// at the resize for idle ones, at `release()` for one that was mid-card.
 /// `shed` runs for every lane that goes, so its owner can forget the lane's
 /// transcript cursor: a lane re-created later under the same name is a fresh
-/// session that has seen nothing.
+/// session that has seen nothing. A `reset()` (session start) that catches a
+/// lane mid-card aborts its session at once but retires the lane rather than
+/// forgetting it: it stays in `all`, where `cancel` and the exit path look, and
+/// keeps its name — which keys a transcript cursor its card's failure path will
+/// still forget — until the card is over (#86).
 export class LanePool {
   private lanes: Lane[] = [];
+  /// Dropped by reset() mid-card; listed, and their names taken, until release().
+  private retired: Lane[] = [];
 
   constructor(
     private readonly make: (name: string) => Lane,
@@ -157,9 +163,10 @@ export class LanePool {
     private readonly shed: (lane: Lane) => void = () => {}
   ) {}
 
-  /// Every lane, including excess ones still finishing a card.
+  /// Every lane, including excess and retired ones still finishing a card. The
+  /// pool proper leads, so `all[0]` is a live lane.
   get all(): readonly Lane[] {
-    return this.lanes;
+    return [...this.lanes, ...this.retired];
   }
 
   get size(): number {
@@ -184,25 +191,37 @@ export class LanePool {
 
   /// The lowest `research<n>` not in use. Names key the transcript cursors, so
   /// a shrink that sheds `research1` while `research2` finishes its card must
-  /// not let the next grow mint a second `research2`.
+  /// not let the next grow mint a second `research2` — nor a reset() re-mint a
+  /// retired lane's name.
   private nextName(): string {
-    const taken = new Set(this.lanes.map((l) => l.name));
+    const taken = new Set(this.all.map((l) => l.name));
     for (let i = 0; ; i++) {
       if (!taken.has(`research${i}`)) return `research${i}`;
     }
   }
 
   /// A lane's card is done. An excess lane leaves now rather than at the next
-  /// dispatch — in a quiet conversation there may be none. A lane the pool has
-  /// already dropped (reset() mid-card) is just marked idle.
+  /// dispatch — in a quiet conversation there may be none. A retired lane
+  /// (its session already dropped by reset()) is delisted and its name freed.
   release(lane: Lane): void {
     lane.busy = false;
     if (this.lanes.includes(lane)) this.trim();
+    else this.retired = this.retired.filter((l) => l !== lane);
   }
 
   /// A new session: every lane's session dropped, the pool rebuilt to size.
+  /// A lane mid-card is retired, not forgotten (see the class note).
   reset(): void {
-    for (const lane of this.lanes) this.drop(lane);
+    for (const lane of this.lanes) {
+      if (lane.busy) this.retired.push(lane);
+      // A drop that throws must not stop the others, or leave this lane listed
+      // twice: the loop always completes and the pool is always rebuilt.
+      try {
+        this.drop(lane);
+      } catch (err) {
+        log(`${lane.name}: reset failed: ${err}`);
+      }
+    }
     this.lanes = [];
     this.free();
   }

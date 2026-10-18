@@ -2619,6 +2619,39 @@ archive under `~/Library` has no symlink. One resolved-URL comparison shared by
 those sites is the fix; the test builds its `SessionFile` from the writer's URL
 to stay on the routing.
 
+**A session start mid-card retires the lane (#86, 2026-10-18).** `LanePool.reset()`
+(the *Hardening batch* above) dropped every lane and rebuilt the pool at once,
+so a research lane caught mid-card fell out of `all` — where `cancel` and the
+stdin-close exit path look for lanes — while its name was re-minted for the new
+pool, and its `runCard` was still to run: its failure path forgets the name's
+transcript cursor, which the *new* lane now owned. The issue read this as a
+live race — the old card streaming into the new session, and its late `forget`
+wiping a cursor the new lane had already advanced, so its next card replayed
+the whole conversation. Checked against both backends, it is not reachable
+today: `Agent.reset()` resolves the pending task synchronously (the stream
+loop stops emitting for a settled task) and `CodexSession.reset()` →
+`active.stop()` → `finish()` does the same, so `runCard`'s `finally` runs in
+the microtasks straight after `research.reset()` — the cursor it forgets is
+the cleared transcript's, `currentCardId` is gone before any `cancel` could
+match it, and the session was reset at the drop. What was wrong is that the
+pool's correctness rested on that timing, which no backend contract promises,
+while the pool already had the rule that covers it — a shrink never re-mints a
+name still in use (*Hardening batch*). `reset()` now follows it: a busy lane is
+still aborted at the reset but moves to a `retired` list that `all` still
+exposes (after the live lanes, so `all[0]` stays the warm-up target) and that
+`nextName` counts as taken; `release()` — the pipeline's `finally`, after
+`runCard`'s own — delists it and frees the name. Keying cursors by lane
+instance instead would have touched `Transcript`, `runCard` and `main.ts`'s
+shed callback and left the lane unlisted all the same. Unit-tested in
+`lanes.test.ts` as invariants, not a reproduction: the listing and naming
+across one and two mid-card resets (and a drop that throws, which no longer
+stops the rebuild), and a `runCard` whose aborted turn is made
+to settle only after the new lane has been sent a delta — the cursor survives
+and the next prompt carries no replay. Not changed: the query lane is rebuilt
+the same way at session start (`queryLane = makeLane("query")`), with the same
+synchronous settle behind it and a `busy` flag rather than a name rule — the
+same hardening would apply if that ever changes.
+
 ## Terms of use removed (2026-10-18)
 
 Advisor is open source under the MIT licence (*MIT licence*, 2026-10-04), so it
