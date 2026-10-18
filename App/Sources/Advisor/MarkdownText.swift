@@ -123,17 +123,20 @@ struct MarkdownText: NSViewRepresentable {
         var rows: [[String]]
     }
 
-    /// Card markdown → laid-out lines. Blocks split on blank lines; a block with
-    /// list lines keeps one line per item (a following non-item line continues
-    /// it, as in CommonMark), and prose directly above an item becomes its lead.
+    /// Card markdown → laid-out lines. Blocks split on blank lines and around
+    /// heading lines (`splittingAtHeadings`); a block with list lines keeps one
+    /// line per item (a following non-item line continues it, as in
+    /// CommonMark), and prose directly above an item becomes its lead.
     /// An item's nesting level is relative to the items above it, so any
     /// consistent indentation (two spaces, four, a tab) nests one level, and it
     /// carries across the blank lines of a loose list.
     static func lines(from markdown: String) -> [Line] {
         var indents: [Int] = []
+        var fence: Fence?
         return markdown
             .replacingOccurrences(of: "\r\n", with: "\n")
             .components(separatedBy: "\n\n")
+            .flatMap { splittingAtHeadings($0, fence: &fence) }
             .map { $0.trimmingCharacters(in: .newlines) }
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             .flatMap { block -> [Line] in
@@ -153,7 +156,7 @@ struct MarkdownText: NSViewRepresentable {
         // Whitespace-only lines are blank lines, not content.
         let raw = block.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        if raw.count == 1, let h = raw[0].range(of: #"^\s{0,3}#{1,6}\s+"#, options: .regularExpression) {
+        if raw.count == 1, let h = headingMarker(raw[0]) {
             indents = []
             return [Line(kind: .heading, text: String(raw[0][h.upperBound...]), endsBlock: false)]
         }
@@ -188,6 +191,62 @@ struct MarkdownText: NSViewRepresentable {
     }
 
     private static let bullets = ["•", "◦", "▪"]
+
+    /// A heading line's `#` marker and the space after it; nil for any other line.
+    private static func headingMarker(_ line: String) -> Range<String.Index>? {
+        line.range(of: #"^\s{0,3}#{1,6}\s+"#, options: .regularExpression)
+    }
+
+    /// `block` cut so that each heading line starting at the margin is a block
+    /// of its own, as if blank lines set it apart: a heading ends the paragraph
+    /// or list above it, as in CommonMark (issue #96). An indented `#` line may
+    /// belong to the item above, so it stays joined on. Nor is a line inside a
+    /// code fence cut out — `fence` carries an open one across blocks, so a
+    /// `# comment` there stays put — or a header row that starts with `#` above
+    /// its table's delimiter row. Whitespace-only lines go, as in `blockLines`.
+    private static func splittingAtHeadings(_ block: String, fence: inout Fence?) -> [String] {
+        let rows = block.components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        var out: [String] = []
+        var run: [String] = []
+        for (i, row) in rows.enumerated() {
+            if let open = fence {
+                if open.isClosed(by: row) { fence = nil }
+            } else if let opened = Fence(opening: row) {
+                fence = opened
+            } else if row.hasPrefix("#"), headingMarker(row) != nil,
+                !(rows.indices.contains(i + 1) && isTableStart(rows, at: i))
+            {
+                out += [run.joined(separator: "\n"), row]
+                run = []
+                continue
+            }
+            run.append(row)
+        }
+        return out + [run.joined(separator: "\n")]
+    }
+
+    /// An open code fence: three or more backticks or tildes, as CommonMark has it.
+    private struct Fence {
+        var mark: Character
+        var length: Int
+
+        /// The fence `line` opens, indented at most three spaces; a backtick
+        /// fence's info string holds no backtick, so "```npm i``` …" is inline code.
+        init?(opening line: String) {
+            guard let m = line.wholeMatch(of: #/ {0,3}(`{3,}|~{3,})(.*)/#),
+                let mark = m.1.first, !(mark == "`" && m.2.contains("`"))
+            else { return nil }
+            self.mark = mark
+            length = m.1.count
+        }
+
+        /// Closed by a line of at least as many of the same mark, and nothing else.
+        func isClosed(by line: String) -> Bool {
+            guard let m = line.wholeMatch(of: #/ {0,3}(`{3,}|~{3,})[ \t]*/#) else { return false }
+            return m.1.first == mark && m.1.count >= length
+        }
+    }
 
     /// A block holding a pipe table: the lines above it (prose there becomes
     /// its lead), the table, then whatever follows its last piped row.

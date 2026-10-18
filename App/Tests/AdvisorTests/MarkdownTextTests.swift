@@ -176,6 +176,81 @@ private func weight(of font: NSFont) -> CGFloat {
     #expect(MarkdownText.lines(from: " # Heading")[0].text == "Heading")
 }
 
+/// A heading needn't stand alone in its block (issue #96).
+@Test func headingWithTextDirectlyUnderItIsStillAHeading() {
+    let lines = MarkdownText.lines(from: "## Summary\nThe gist.")
+    #expect(lines.map(\.kind) == [.heading, .text])
+    #expect(lines.map(\.text) == ["Summary", "The gist."])
+    let s = MarkdownText.render("## Summary\nThe gist.", style: .answer)
+    let heading = s.attribute(.font, at: 0, effectiveRange: nil) as! NSFont
+    let body = s.attribute(.font, at: s.length - 2, effectiveRange: nil) as! NSFont
+    #expect(heading.pointSize > body.pointSize)
+}
+
+@Test func headingWithAListDirectlyUnderItIsStillAHeading() {
+    let lines = MarkdownText.lines(from: "## Options\n- a\n- b")
+    #expect(lines.map(\.kind) == [.heading, .item(level: 0, marker: "•"), .item(level: 0, marker: "•")])
+    #expect(lines.map(\.text) == ["Options", "a", "b"])
+}
+
+/// Laid out as if blank lines set each heading apart.
+@Test func headingDirectlyUnderAParagraphOrListEndsIt() {
+    let lines = MarkdownText.lines(from: "Intro.\n## Next\n- a\n  - b\n### Last\n- c")
+    #expect(lines.map(\.kind) == [
+        .text, .heading, .item(level: 0, marker: "•"), .item(level: 1, marker: "◦"),
+        .heading, .item(level: 0, marker: "•"),
+    ])
+    #expect(lines.map(\.text) == ["Intro.", "Next", "a", "b", "Last", "c"])
+    #expect(lines == MarkdownText.lines(from: "Intro.\n\n## Next\n\n- a\n  - b\n\n### Last\n\n- c"))
+}
+
+@Test func hashLineInACodeFenceIsNotAHeading() {
+    let lines = MarkdownText.lines(from: "```\n# install\nbrew install jq\n```")
+    #expect(!lines.contains { $0.kind == .heading })
+}
+
+@Test func hashLineInAFenceAcrossABlankLineIsNotAHeading() {
+    let lines = MarkdownText.lines(from: "```bash\n# install\nbrew install jq\n\n# configure\njq . f\n```")
+    #expect(!lines.contains { $0.kind == .heading })
+}
+
+@Test func headingAfterAFenceAcrossABlankLineIsAHeading() {
+    let lines = MarkdownText.lines(from: "```\nfoo\n\nbar\n```\n## Next\nThe gist.")
+    #expect(lines.suffix(2).map(\.kind) == [.heading, .text])
+    #expect(lines.suffix(2).map(\.text) == ["Next", "The gist."])
+}
+
+@Test func inlineCodeAtALineStartDoesNotOpenAFence() {
+    let lines = MarkdownText.lines(from: "```npm i``` first:\n## Setup\nRun it.")
+    #expect(lines.map(\.kind) == [.text, .heading, .text])
+}
+
+@Test func aFenceClosesOnlyOnItsOwnMarker() {
+    #expect(!MarkdownText.lines(from: "~~~\n```\n# not a heading\nx\n~~~").contains { $0.kind == .heading })
+    #expect(!MarkdownText.lines(from: "````\n```\n# not a heading\nx\n````").contains { $0.kind == .heading })
+}
+
+@Test func aHashHeaderCellAboveADelimiterRowIsATable() {
+    for markdown in ["# | Task\n--|--\n1 | Ship", "# | Task\n   \n--|--\n1 | Ship"] {
+        let lines = MarkdownText.lines(from: markdown)
+        #expect(lines.count == 1)
+        #expect(lines.first?.isTable == true)
+    }
+}
+
+/// An indented `#` line may belong to the item above, so it stays joined on.
+@Test func indentedHashLineUnderAnItemLeavesTheListNested() {
+    let lines = MarkdownText.lines(from: "- Step one\n  # Note\n  - sub a\n  - sub b")
+    #expect(lines.map(\.kind) == [
+        .item(level: 0, marker: "•"), .item(level: 1, marker: "◦"), .item(level: 1, marker: "◦"),
+    ])
+}
+
+@Test func tabIndentedHashLineInASnippetUnderAnItemIsNotAHeading() {
+    let lines = MarkdownText.lines(from: "1. Install:\n\t```bash\n\t# install deps\n\tbrew install jq\n\t```")
+    #expect(!lines.contains { $0.kind == .heading })
+}
+
 @Test func leadLineClosesThePreviousList() {
     let lines = MarkdownText.lines(from: "- a\n  - nested\n\nIntro:\n  - b")
     #expect(lines.map(\.kind) == [

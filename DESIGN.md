@@ -2793,6 +2793,52 @@ unknown keys are ignored, and the next save drops it. The terms'
 recording-consent and AI-accuracy disclaimers went with them. The earlier dated
 entries that mention the terms are kept as history.
 
+## Card headings need not stand alone (2026-10-18)
+
+A `## Heading` line in a card body showed as plain text, hashes and all, unless
+blank lines set it apart (issue #96): `MarkdownText.blockLines` took a heading
+only when it was its block's single line, so a heading with text or a list
+straight under it, or a paragraph straight above, was joined into that
+paragraph. `lines(from:)` now cuts each blank-line block around its heading
+lines (`splittingAtHeadings`) before laying it out, so a heading lays out
+exactly as if blank lines set it apart: it ends the paragraph or list above
+it, as in CommonMark, and closes any open list.
+
+Only a heading line that starts at the margin is cut out. An indented `#`
+line may belong to the list item above (CommonMark nests it there), so it
+stays joined on as before rather than ending the list and losing the nesting
+of the items after it; alone between blank lines it is still a heading, as
+before.
+
+Two kinds of `#` line at the margin are not cut out either. One is a line
+inside a code fence, where a `# comment` in a shell snippet would otherwise
+become a heading. Fences follow CommonMark: three or more backticks or tildes
+indented at most three spaces, closed only by at least as many of the same
+mark, and a backtick line with a backtick after its marker ("```npm i``` …")
+is inline code, not a fence. The open fence carries across blank lines; an
+unclosed one keeps the rest of the card fenced, so `#` lines after it are cut
+out no more than they were before this change. The other is a header row
+starting with `#` directly above a table's delimiter row (`# | Task` over
+`--|--`), which stays a table, as it rendered before; whitespace-only lines are
+dropped first, as `blockLines` drops them, so the two agree on what follows
+the header. A body row starting `# ` does end a table and become a heading, as
+GitHub-Flavoured Markdown (GFM) has it.
+
+The renderer still has no code blocks: fence tracking only decides headings,
+fenced lines still lay out as prose, as before (a fence without a blank line
+reads as one run of inline code), and a lone `#` line between blank lines
+inside a fence is still a heading, as it was. Closing hashes
+(`## Heading ##`) stay text, as before.
+
+`MarkdownTextTests` cover a heading with text under it (rendered larger than
+the body), with a list under it, and under a paragraph and a nested list (the
+same lines as the blank-separated form); `#` lines inside a fence, one across
+a blank line, and fences that close only on their own mark; a heading after a
+fence; inline code at a line start; an indented `#` line under an item
+keeping the list nested, and a tab-indented one in a snippet under an item
+staying text; and a `#` header cell over a delimiter row, with and without a
+whitespace-only line between.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
