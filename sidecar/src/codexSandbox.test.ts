@@ -74,6 +74,11 @@ test("the profile denies the read paths and confines writes to the writable root
   assert.match(profile, /\(deny file-read\* \(subpath "\/home\/u\/\.ssh"\)\)/);
   assert.match(profile, /\(deny file-write\*\)/);
   assert.match(profile, /\(allow file-write\* \(subpath "\/home\/u\/\.codex"\)\)/);
+  // No Apple Events, no launchers: `osascript -e 'tell app "Finder" to do shell
+  // script …'` would run the script in Finder's process, `open`/`launchctl`
+  // hand one to launchd — outside this profile either way.
+  assert.match(profile, /\(deny appleevent-send\)/);
+  assert.match(profile, /\(deny process-exec \(literal "\/usr\/bin\/osascript"\) \(literal "\/usr\/bin\/open"\) \(literal "\/bin\/launchctl"\) \(literal "\/usr\/bin\/shortcuts"\)\)/);
   // The allow must follow the deny: Seatbelt takes the last matching rule.
   assert.ok(profile.indexOf("(deny file-write*)") < profile.indexOf("(allow file-write*"));
 });
@@ -247,6 +252,17 @@ test("a config.toml that is a symlink cannot be written through the link, nor re
   assert.notEqual(replace.code, 0);
   assert.ok(fs.lstatSync(link).isSymbolicLink(), "the link must survive");
   assert.equal(fs.readFileSync(target, "utf8"), 'model = "x"\n');
+});
+
+test("a sandboxed process cannot run the launchers", darwin, () => {
+  const { profile } = fakeHome();
+  // Pure arithmetic: no Apple Event to another app, so no TCC prompt — the
+  // exec itself is what must be refused.
+  const r = sandboxed(profile, ["/usr/bin/osascript", "-e", "1 + 1"]);
+  assert.notEqual(r.code, 0);
+  assert.doesNotMatch(r.out, /^2/);
+  const o = sandboxed(profile, ["/usr/bin/open", "--help"]);
+  assert.notEqual(o.code, 0);
 });
 
 test("a sandboxed process cannot create files outside the writable roots", darwin, () => {

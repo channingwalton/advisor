@@ -24,6 +24,9 @@ export interface AutoPipelineDeps {
   /// A free research lane, or undefined when every lane is busy (a lane
   /// finishing drains the queue again).
   freeLane(): Lane | undefined;
+  /// A research lane's card is done. Default: mark it idle. The pool uses this
+  /// to shed an excess lane the moment it finishes, not at the next dispatch.
+  releaseLane?(lane: Lane): void;
   /// Research one trigger as a card on `lane`.
   research(lane: Lane, trigger: Trigger): Promise<void>;
   /// Overrides DEBOUNCE_MS (tests).
@@ -49,7 +52,12 @@ export class AutoPipeline {
   /// classify that began under different conditions drops its result.
   private epoch = 0;
 
-  constructor(private readonly deps: AutoPipelineDeps) {}
+  /// One writer of `lane.busy` on the way back: the deps' releaseLane, else idle.
+  private readonly releaseLane: (lane: Lane) => void;
+
+  constructor(private readonly deps: AutoPipelineDeps) {
+    this.releaseLane = deps.releaseLane?.bind(deps) ?? ((lane) => { lane.busy = false; });
+  }
 
   /// A new session: nothing covered or queued.
   start(): void {
@@ -112,7 +120,7 @@ export class AutoPipeline {
       void this.deps.research(lane, t)
         .finally(() => {
           log(`research "${t.subject}" ${Date.now() - t0}ms`);
-          lane.busy = false;
+          this.releaseLane(lane);
           this.drain();
         })
         .catch((err) => log(`fire-and-forget research "${t.subject}" rejected: ${err}`));

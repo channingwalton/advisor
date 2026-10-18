@@ -137,3 +137,87 @@ export async function runCard(
     deps.cancelledCards.delete(cardId);
   }
 }
+
+/// The research pool: persistent lanes, `research0…`, grown to a size the app
+/// can change mid-session (at a session start up front, so the first can be
+/// warmed; otherwise on demand). Shrinking used to leave the lanes
+/// beyond the new size alive — never dispatched to, but each holding a warm
+/// CLI subprocess — until the next session start (code review 2026-10-17). Now
+/// an excess lane is reset (its session and CLI gone) as soon as it is idle:
+/// at the resize for idle ones, at `release()` for one that was mid-card.
+/// `shed` runs for every lane that goes, so its owner can forget the lane's
+/// transcript cursor: a lane re-created later under the same name is a fresh
+/// session that has seen nothing.
+export class LanePool {
+  private lanes: Lane[] = [];
+
+  constructor(
+    private readonly make: (name: string) => Lane,
+    private max: number,
+    private readonly shed: (lane: Lane) => void = () => {}
+  ) {}
+
+  /// Every lane, including excess ones still finishing a card.
+  get all(): readonly Lane[] {
+    return this.lanes;
+  }
+
+  get size(): number {
+    return this.max;
+  }
+
+  /// Change the pool size; grows on the next `free()`, shrinks now as far as
+  /// the excess lanes are idle.
+  resize(n: number): void {
+    this.max = n;
+    this.trim();
+  }
+
+  /// An idle lane within the pool size, growing the pool if it is short.
+  free(): Lane | undefined {
+    this.trim();
+    while (this.lanes.length < this.max) this.lanes.push(this.make(this.nextName()));
+    // Bounded by size, not by trim having run: an excess lane still finishing
+    // its card sits past the size and is never dispatched to.
+    return this.lanes.slice(0, this.max).find((l) => !l.busy);
+  }
+
+  /// The lowest `research<n>` not in use. Names key the transcript cursors, so
+  /// a shrink that sheds `research1` while `research2` finishes its card must
+  /// not let the next grow mint a second `research2`.
+  private nextName(): string {
+    const taken = new Set(this.lanes.map((l) => l.name));
+    for (let i = 0; ; i++) {
+      if (!taken.has(`research${i}`)) return `research${i}`;
+    }
+  }
+
+  /// A lane's card is done. An excess lane leaves now rather than at the next
+  /// dispatch — in a quiet conversation there may be none. A lane the pool has
+  /// already dropped (reset() mid-card) is just marked idle.
+  release(lane: Lane): void {
+    lane.busy = false;
+    if (this.lanes.includes(lane)) this.trim();
+  }
+
+  /// A new session: every lane's session dropped, the pool rebuilt to size.
+  reset(): void {
+    for (const lane of this.lanes) this.drop(lane);
+    this.lanes = [];
+    this.free();
+  }
+
+  private trim(): void {
+    const keep = this.lanes.slice(0, this.max);
+    for (const lane of this.lanes.slice(this.max)) {
+      if (lane.busy) keep.push(lane); // leaves at release()
+      else this.drop(lane);
+    }
+    this.lanes = keep;
+  }
+
+  private drop(lane: Lane): void {
+    lane.session.reset();
+    this.shed(lane);
+  }
+}

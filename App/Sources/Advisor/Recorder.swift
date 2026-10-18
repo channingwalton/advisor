@@ -197,6 +197,20 @@ final class Recorder: @unchecked Sendable {
     @MainActor private var currentDevice: InputDevice?
     /// Called on the main actor for each accepted utterance.
     var onUtterance: ((Utterance) -> Void)?
+    /// Whether recognised text goes into the log file (the `logTranscriptText`
+    /// preference, set from the main actor whenever it changes, read on the STT
+    /// threads). Off, the log says only that a line arrived and how long it was.
+    var logTranscriptText: Bool {
+        get { logTranscript.load(ordering: .relaxed) }
+        set { logTranscript.store(newValue, ordering: .relaxed) }
+    }
+    private let logTranscript = Atomic<Bool>(false)
+
+    /// The log line for a recognised or suppressed utterance: the text itself
+    /// only when the preference allows, else its length.
+    static func utteranceLogLine(_ event: String, _ text: String, includeText: Bool) -> String {
+        includeText ? "[advisor] \(event): \"\(text)\"" : "[advisor] \(event): \(text.count) chars"
+    }
 
     convenience init(store: TranscriptStore, locale: String) throws {
         try self.init(
@@ -413,7 +427,7 @@ final class Recorder: @unchecked Sendable {
     private func acceptAsync(_ text: String, from source: Source, gen: Int) {
         pendingAcceptance.enter()
         let spokenEnd = Date()
-        appLog.write("[advisor] apple(\(source)): \"\(text)\"")
+        appLog.write(Self.utteranceLogLine("apple(\(source))", text, includeText: logTranscriptText))
         Task { @MainActor in
             if gen == self.store.sessionGeneration { self.store.volatile[source] = nil }
         }
@@ -441,7 +455,7 @@ final class Recorder: @unchecked Sendable {
             recentThem.append((time: now, tokens: tokens))
         case .me:
             if systemActive.load(ordering: .relaxed), isEcho(tokens) {
-                appLog.write("[advisor] echo suppressed: \"\(text)\"")
+                appLog.write(Self.utteranceLogLine("echo suppressed", text, includeText: logTranscriptText))
                 pendingAcceptance.leave()
                 return
             }

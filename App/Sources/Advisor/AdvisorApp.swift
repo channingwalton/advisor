@@ -302,6 +302,7 @@ struct TranscriptView: View {
             triggers = cfg.triggers
             savedContexts = cfg.contexts
             tagLibrary = cfg.tags
+            recorder?.logTranscriptText = cfg.logTranscriptText // live, mid-recording too
             if sessionStart == nil {
                 recordingDraft.retainKnownTags(in: cfg.tags)
             }
@@ -643,8 +644,9 @@ struct TranscriptView: View {
     private func rebuildRecorder() {
         let manager = services.sidecar
         do {
-            let built = try Recorder(
-                store: store, locale: AdvisorConfig.load().sttLocale)
+            let config = AdvisorConfig.load()
+            let built = try Recorder(store: store, locale: config.sttLocale)
+            built.logTranscriptText = config.logTranscriptText
             built.onUtterance = { manager.sendUtterance($0) }
             recorder = built
             // Hand the recorder to AppServices so termination cleanup can stop

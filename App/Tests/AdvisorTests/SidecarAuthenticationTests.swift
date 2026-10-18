@@ -44,8 +44,17 @@ private final class AuthHarness {
             self.outputWriters.append(output)
         },
         environment: environment,
-        exitGrace: exitGrace
+        exitGrace: exitGrace,
+        healthyRunSeconds: healthyRunSeconds,
+        restartDelay: { [unowned self] _ in self.restartDelay }
     )
+    /// Fast in tests: the crash path's logic is under test, not its timing.
+    var restartDelay: TimeInterval = 0.01
+    var healthyRunSeconds: TimeInterval = 60
+
+    func messageTypes(_ child: Int) -> [String] {
+        messages(child).compactMap { $0["type"] as? String }
+    }
     /// The production default; a test of the backstop's timing sets it short
     /// before first touching `manager`.
     var exitGrace: TimeInterval = 2
@@ -296,4 +305,57 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
     #expect(child.isRunning || child.terminationReason == .uncaughtSignal) // terminate() is asynchronous
     child.waitUntilExit()
     #expect(child.terminationReason == .uncaughtSignal)
+}
+
+// Crash recovery (DESIGN.md: SidecarManager), pinned at the manager level —
+// before, only Card.apply and the backoff-replaced-by-a-new-session case were
+// covered (code review 2026-10-17).
+
+@MainActor
+@Test func req_sidecar_crash_failsInFlightCardsAndReplaysTheSessionOnRestart() async throws {
+    let h = try AuthHarness()
+    defer { h.close() }
+    h.manager.start()
+    h.manager.sendLanes(2)
+    h.manager.sendAuto(true)
+    h.manager.sendSessionStart("s1", context: "the context")
+    h.store.cards = [Card(id: "c1", created: Date(), kind: "answer", title: "t", body: "…", state: "streaming")]
+    h.children[0].terminate() // a crash, from the manager's point of view
+    #expect(await waitFor { h.store.status.contains("restarting (1/5)") })
+    #expect(h.store.cards[0].state == "failed", "a card the dead sidecar can never finish")
+    #expect(await waitFor { h.children.count == 2 })
+    // The replacement is told what the running conversation depends on, in order.
+    #expect(await waitFor { h.messageTypes(1).contains("session_start") })
+    #expect(h.messageTypes(1) == ["config", "config", "session_start"], "\(h.messageTypes(1))")
+    let start = h.messages(1).last { $0["type"] as? String == "session_start" }
+    #expect(start?["sessionId"] as? String == "s1")
+    #expect(start?["context"] as? String == "the context")
+}
+
+@MainActor
+@Test func req_sidecar_crash_exhaustsTheRestartBudgetInACrashLoop() async throws {
+    let h = try AuthHarness()
+    defer { h.close() }
+    h.childScript = "exit 7" // dies at once, every time
+    h.manager.start()
+    #expect(await waitFor { h.store.status.contains("restart attempts exhausted") })
+    #expect(h.children.count == 6, "the first spawn plus five restarts: \(h.children.count)")
+    #expect(h.store.status.contains("sidecar crashed (7)"))
+    #expect(h.store.status.contains("stop and start listening again"))
+}
+
+@MainActor
+@Test func req_sidecar_crash_aHealthyRunResetsTheBudget() async throws {
+    let h = try AuthHarness()
+    defer { h.close() }
+    h.healthyRunSeconds = 0.05
+    h.manager.start()
+    h.children[0].terminate()
+    #expect(await waitFor { h.children.count == 2 })
+    h.children[1].terminate()
+    #expect(await waitFor { h.store.status.contains("restarting (2/5)") })
+    #expect(await waitFor { h.children.count == 3 })
+    try await Task.sleep(for: .milliseconds(100)) // a healthy run
+    h.children[2].terminate()
+    #expect(await waitFor { h.store.status.contains("restarting (1/5)") })
 }

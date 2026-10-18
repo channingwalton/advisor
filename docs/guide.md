@@ -206,8 +206,10 @@ manual-query lanes), the card **effort** (how much Claude thinks before
 answering a card — see below), saved contexts, the **tag** library (add / rename / recolour
 / delete, each with a preset colour; renaming updates the tag on every session
 already using it), appearance (system/light/dark), system-audio capture, the
-speech-recognition locale, and the session storage folder (choose where
-transcripts are saved; changing it offers to move existing ones across).
+speech-recognition locale, the session storage folder (choose where
+transcripts are saved; changing it offers to move existing ones across), and
+whether transcript text is included in the log file (off by default; see
+*Logs*).
 
 Most settings are stored in `~/Library/Application Support/Advisor/config.json`;
 agent settings apply at the next session start, appearance straight away.
@@ -285,9 +287,15 @@ Diagnostics from both the app and the sidecar are written to
 `~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so
 it also appears in Console.app under **Log Reports**. Tail it live with
 `tail -f ~/Library/Logs/Advisor/advisor.log`. The file rotates at ~5 MB, keeping
-one previous copy (`advisor.log.1`). Diagnostic lines include recognised
-utterance text, so treat it as session data — like the transcripts themselves,
-it stays on your machine.
+one previous copy (`advisor.log.1`). By default it holds no transcript text —
+each recognised line is logged as its length only, so the conversation lives
+solely in your session folder. (The agents' own output — card text and the
+classifier's triggers, whose subjects and search queries restate what was said
+— is still logged, for diagnosing cards.) To debug transcription (echo
+suppression, disfluency cleanup), turn on **Include transcript text in the
+log** under Preferences → General; it applies at once, mid-recording too, and
+the log is then session data like the transcripts themselves. Either way, it
+stays on your machine.
 
 ## Known limits
 

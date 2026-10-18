@@ -29,7 +29,7 @@ transcripts are kept.
    configuration most people need. (No CLI login? Switch **Authentication** to
    *API key* in Preferences and paste an Anthropic or OpenAI key instead —
    billed to that key.)
-5. **Record.** Click **Record**, then **Listen**. The conversation transcribes
+5. **Record.** Click **New Recording**, then **Listen**. The conversation transcribes
    live and Advisor surfaces answer, context and fact-check cards as it goes.
 
 That's it. Everything stays on your Mac — nothing is uploaded except the

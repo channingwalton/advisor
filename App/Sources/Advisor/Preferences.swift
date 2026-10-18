@@ -70,13 +70,20 @@ struct AdvisorConfig: Codable, Equatable {
     /// App-side only: the TERMS.md version the user accepted at first run
     /// (`TermsAcceptance`). "" = not yet accepted. The sidecar never sees it.
     var acceptedTermsVersion = ""
+    /// App-side only: whether recognised utterance text is written to the log
+    /// file (`~/Library/Logs/Advisor`). Off by default, so the log carries only
+    /// diagnostics and the transcripts live only in the session folder (code
+    /// review 2026-10-17). A debugging aid for echo dedup and disfluency cleanup.
+    /// Applied to the recorder at once, mid-recording too. The sidecar never logs
+    /// transcript text, so it has no such key.
+    var logTranscriptText = false
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
         case provider, model, effort, sttLocale, authMode, appearance, contexts, tags, sessionDir
-        case acceptedTermsVersion
+        case acceptedTermsVersion, logTranscriptText
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -101,6 +108,7 @@ struct AdvisorConfig: Codable, Equatable {
         tags = try c.decodeIfPresent([SavedTag].self, forKey: .tags) ?? []
         sessionDir = try c.decodeIfPresent(String.self, forKey: .sessionDir) ?? ""
         acceptedTermsVersion = try c.decodeIfPresent(String.self, forKey: .acceptedTermsVersion) ?? ""
+        logTranscriptText = try c.decodeIfPresent(Bool.self, forKey: .logTranscriptText) ?? false
     }
 
     static var fileURL: URL {
@@ -627,7 +635,9 @@ struct PreferencesView: View {
             TagsSettingsView(tags: $config.tags)
                 .tabItem { Label("Tags", systemImage: "tag") }
 
-            GeneralSettingsView(appearance: $config.appearance, sessionDir: $config.sessionDir)
+            GeneralSettingsView(
+                appearance: $config.appearance, sessionDir: $config.sessionDir,
+                logTranscriptText: $config.logTranscriptText)
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
         .frame(width: 480, height: 420)
@@ -771,10 +781,12 @@ private struct TagsSettingsView: View {
     }
 }
 
-/// General tab: window appearance and the session-storage folder (issue #16).
+/// General tab: window appearance, the session-storage folder (issue #16) and
+/// the transcript-logging switch.
 private struct GeneralSettingsView: View {
     @Binding var appearance: String
     @Binding var sessionDir: String
+    @Binding var logTranscriptText: Bool
 
     var body: some View {
         Form {
@@ -800,6 +812,13 @@ private struct GeneralSettingsView: View {
                     }
                 }
                 Text("Where transcripts are saved. Changing the folder offers to move your existing transcripts across.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Logging") {
+                Toggle("Include transcript text in the log", isOn: $logTranscriptText)
+                Text("For debugging transcription. When on, the text of recognised and echo-suppressed lines is also written to the log file (~/Library/Logs/Advisor). Applies at once. Card text and the classifier's triggers are logged either way.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

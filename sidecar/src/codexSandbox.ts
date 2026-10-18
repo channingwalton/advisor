@@ -124,6 +124,10 @@ function realpathLeaf(p: string): string {
   }
 }
 
+/// Programs that start another program outside the profile, through launchd or
+/// Apple Events: refused outright.
+const LAUNCHERS = ["/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl", "/usr/bin/shortcuts"];
+
 /// The sidecar's own `TMPDIR` plus the two macOS temp roots, because the CLI and
 /// the MCP servers it spawns need not share this process's `TMPDIR`.
 const DEFAULT_TMPS = [os.tmpdir(), "/private/tmp", "/private/var/folders"];
@@ -143,7 +147,17 @@ export function seatbeltProfile(
 ): string {
   const subpaths = (ps: string[]): string =>
     ps.map((p) => `(subpath "${escapeSexp(p)}")`).join(" ");
-  const lines = ["(version 1)", "(allow default)"];
+  const lines = [
+    "(version 1)",
+    "(allow default)",
+    // `osascript -e 'tell app "Finder" to do shell script "cat ~/.ssh/id_rsa"'`
+    // would run the script inside Finder, outside this profile (gated only by
+    // a TCC prompt), and `open`/`launchctl`/`shortcuts` hand a program to
+    // launchd the same way. Nothing the CLI or an MCP server does needs Apple
+    // Events or those launchers.
+    "(deny appleevent-send)",
+    `(deny process-exec ${LAUNCHERS.map((p) => `(literal "${p}")`).join(" ")})`,
+  ];
   if (readDenials.length > 0) lines.push(`(deny file-read* ${subpaths(readDenials)})`);
   lines.push("(deny file-write*)");
   if (writableRoots.length > 0) lines.push(`(allow file-write* ${subpaths(writableRoots)})`);

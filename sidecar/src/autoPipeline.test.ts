@@ -277,3 +277,29 @@ test("#trigger-subject-any-script words that differ only by a mark stay distinct
     assert.deepEqual([...h.researched].sort(), [...pair].sort(), pair.join(" / "));
   }
 });
+
+// The research pool sheds an excess lane the moment its card finishes (LanePool
+// .release), so the pipeline hands a finished lane back through `releaseLane`
+// when the deps provide it, rather than only clearing `busy` itself.
+test("#lane-pool a finished research lane is handed back through releaseLane", async () => {
+  const transcript = new Transcript();
+  const lane: Lane = {
+    name: "research0", busy: false,
+    session: { run: async () => ({ text: "" }), reset: () => {}, interrupt: async () => {} },
+  };
+  const released: string[] = [];
+  const pipeline = new AutoPipeline({
+    transcript,
+    debounceMs: 0,
+    classify: async () => ({ ok: true, triggers: [{ kind: "question", subject: "Cedar", query: "Cedar" }] }),
+    freeLane: () => (lane.busy ? undefined : lane),
+    releaseLane: (l) => { released.push(l.name); l.busy = false; },
+    research: async () => {},
+  });
+  pipeline.start();
+  transcript.push({ id: "u1", source: "them", text: "What is Cedar?", ts: 1 });
+  pipeline.heard();
+  await settle();
+  assert.deepEqual(released, ["research0"]);
+  assert.equal(lane.busy, false);
+});

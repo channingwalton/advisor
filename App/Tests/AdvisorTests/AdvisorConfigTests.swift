@@ -18,6 +18,7 @@ import Testing
     #expect(c.allowMcpActions == false)
     #expect(c.triggerSensitivity == "balanced")
     #expect(c.triggers == AdvisorConfig.Triggers())
+    #expect(c.logTranscriptText == false)      // transcript text stays out of the log by default
 }
 
 @Test func configDecodeIgnoresUnknownKeys() throws {
@@ -49,6 +50,7 @@ import Testing
     c.authMode = "apiKey"
     c.appearance = "dark"
     c.sessionDir = "/tmp/notes"
+    c.logTranscriptText = true
     let decoded = try JSONDecoder().decode(
         AdvisorConfig.self, from: JSONEncoder().encode(c))
     #expect(decoded == c) // any dropped CodingKey breaks equality

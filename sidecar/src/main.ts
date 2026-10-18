@@ -10,7 +10,7 @@ import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, logSync, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
-import { cardLaneOptions, Lane, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, Lane, LanePool, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
 import { AutoPipeline } from "./autoPipeline.js";
 import {
   cardKind,
@@ -66,13 +66,7 @@ function guard(op: string): (err: unknown) => void {
 /// the next research/query/reply without rebuilding the persistent lanes.
 let sessionContext = "";
 
-/// Parallel research lanes: triggers fan out across persistent sessions.
-/// Pool grows lazily up to maxLanes (settable from the app).
-let maxLanes = 3;
-
 const cancelledCards = new Set<string>();
-
-const researchLanes: Lane[] = [];
 
 function makeLane(name: string): Lane {
   return {
@@ -82,16 +76,16 @@ function makeLane(name: string): Lane {
   };
 }
 
-function ensureLanes(): void {
-  while (researchLanes.length < maxLanes) {
-    researchLanes.push(makeLane(`research${researchLanes.length}`));
-  }
-}
-ensureLanes();
+const transcript = new Transcript();
+
+/// Parallel research lanes: triggers fan out across persistent sessions. The
+/// pool grows lazily to its size (settable from the app) and sheds excess lanes
+/// as they go idle (LanePool); a shed lane's transcript cursor goes with it, so
+/// a lane re-created under its name is sent the whole conversation.
+const research = new LanePool(makeLane, 3, (lane) => transcript.forget(lane.name));
 
 let queryLane: Lane = makeLane("query");
 
-const transcript = new Transcript();
 let busy = false; // user queries (priority lane)
 const cardIDs = new ProcessCardIDs();
 
@@ -270,11 +264,8 @@ async function runSummariseLive(msg: Extract<Inbound, { type: "summarise_live" }
 const pipeline = new AutoPipeline({
   transcript,
   classify,
-  freeLane: () => {
-    ensureLanes();
-    // Only dispatch to the first maxLanes lanes (shrinking takes effect as lanes finish).
-    return researchLanes.slice(0, maxLanes).find((l) => !l.busy);
-  },
+  freeLane: () => research.free(),
+  releaseLane: (lane) => research.release(lane),
   research: (lane, t) =>
     runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId),
 });
@@ -292,23 +283,23 @@ function handle(msg: Inbound): void {
       config = loadConfig();
       configureClassifier(config);
       resetClassifier();
-      for (const lane of researchLanes) lane.session.reset();
-      researchLanes.length = 0;
-      ensureLanes();
+      research.reset();
       queryLane.session.reset();
       queryLane = makeLane("query");
       // Warm the cold-spawn off the critical path: the first real question then
       // skips the SDK subprocess boot (~5-10s) on the classifier and lead
       // research lane. Best-effort, fire-and-forget; warm-up answers discarded.
       void warmClassifier().catch(guard("classifier warm-up"));
-      void researchLanes[0]?.session
+      void research.all[0]?.session
         .run("warm-up; reply READY", undefined, 15_000)
         .catch(guard("research warm-up"));
       log(`session ${msg.sessionId} started (sensitivity=${config.triggerSensitivity})`);
       break;
     case "utterance":
       transcript.push({ id: msg.id, source: msg.source, text: msg.text, ts: msg.ts });
-      log(`utterance(${msg.source}): ${msg.text.slice(0, 60)}`);
+      // Length, not text: the log is diagnostics, the transcript lives in the
+      // user's session folder (code review 2026-10-17).
+      log(`utterance(${msg.source}): ${msg.text.length} chars`);
       pipeline.heard();
       break;
     case "note":
@@ -316,7 +307,7 @@ function handle(msg: Inbound): void {
       // the classifier and every research/query lane pick it up via their delta.
       // Classify too: the user opted for notes to be able to trigger research.
       transcript.push({ id: msg.id, source: "note", text: msg.text, ts: msg.ts });
-      log(`note: ${msg.text.slice(0, 60)}`);
+      log(`note: ${msg.text.length} chars`);
       pipeline.heard();
       break;
     case "query":
@@ -358,16 +349,16 @@ function handle(msg: Inbound): void {
         pipeline.setAuto(msg.auto);
         log(`auto triggers: ${msg.auto}`);
       }
-      if (typeof msg.lanes === "number") {
-        maxLanes = Math.max(1, Math.min(8, Math.floor(msg.lanes)));
-        log(`research lanes: ${maxLanes}`);
+      if (typeof msg.lanes === "number" && Number.isFinite(msg.lanes)) {
+        research.resize(Math.max(1, Math.min(8, Math.floor(msg.lanes))));
+        log(`research lanes: ${research.size}`);
         pipeline.drain();
       }
       break;
     case "cancel":
       handleCancel(msg.cardId, {
         cancelledCards,
-        cardLanes: [...researchLanes, queryLane, ...replyLanes, ...summaryLanes],
+        cardLanes: [...research.all, queryLane, ...replyLanes, ...summaryLanes],
         documentLanes,
         send,
       });
@@ -415,10 +406,23 @@ const rl = createInterface({ input: process.stdin });
 rl.on("line", (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
+  // Neither failure logs the frame itself: an utterance's text is in it, and
+  // the log holds no transcript text (code review 2026-10-17).
+  let msg: Inbound;
   try {
-    handle(JSON.parse(trimmed) as Inbound);
+    msg = JSON.parse(trimmed) as Inbound;
   } catch (err) {
-    log(`bad message: ${trimmed} (${err})`);
+    // The error's own message quotes the input, so only its name is logged.
+    log(`bad message: not JSON, ${trimmed.length} chars (${err instanceof Error ? err.name : "error"})`);
+    return;
+  }
+  try {
+    handle(msg);
+  } catch (err) {
+    const type = typeof msg === "object" && msg !== null ? String((msg as { type?: unknown }).type) : typeof msg;
+    // Our own error, capped: a thrown message could still quote the frame.
+    const reason = err instanceof Error ? `${err.name}: ${err.message.split("\n")[0].slice(0, 160)}` : "error";
+    log(`bad message (${type}): ${reason}`);
   }
 });
 // The shutdown contract with the app (SidecarManager.discardProcess): it closes
@@ -439,7 +443,7 @@ rl.on("close", () => {
   logSync("stdin closed, exiting");
   for (const reset of [
     resetClassifier,
-    ...[...researchLanes, queryLane, ...replyLanes, ...documentLanes, ...summaryLanes].map((l) => () => l.session.reset()),
+    ...[...research.all, queryLane, ...replyLanes, ...documentLanes, ...summaryLanes].map((l) => () => l.session.reset()),
   ]) {
     try {
       reset();

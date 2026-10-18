@@ -1,7 +1,7 @@
 # Advisor — Design
 
 **Status:** Living document. The sections down to *Trade-offs made* describe the
-system as it is (checked against the code 2026-10-09, v0.4.3). *Milestones* and
+system as it is (checked against the code 2026-10-18, v0.4.7). *Milestones* and
 the dated sections after it are the decision history, kept as written; where a
 later change overturned an entry, the entry carries a forward pointer.
 
@@ -71,7 +71,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Logging.** All app and sidecar diagnostics go through `FileLog` (`Log.swift`) to `~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so the file shows up under Console.app → Log Reports and survives a packaged run (where stderr goes nowhere). The app is the *sole* writer: its own lines arrive via `appLog.write`, the sidecar's stderr is captured by `SidecarManager` and funnelled in via `appLog.appendSidecar` (lines reassembled across chunk boundaries, each wall-clock-timestamped). One serial queue → no write contention and a single chronological timeline that interleaves app and `[sidecar +Xs]` lines. Mirrored to stderr too for dev runs. Rotates by size (5 MB), keeping one previous file (`advisor.log.1`).
 
-**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, saved contexts and tags never reach the sidecar). Tabs: Agent (provider, model, effort, authentication, connector actions), Triggers, Transcription, Contexts, Tags, General.
+**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, `logTranscriptText`, saved contexts and tags never reach the sidecar). Tabs: Agent (provider, model, effort, authentication, connector actions), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
 
 ### TS sidecar
 
@@ -2339,6 +2339,64 @@ the flag was reachable. Tests: the sidecar exits within a second of stdin
 closing (`stdin.test.ts`); a fake sidecar that reads stdin leaves by exit
 status, not signal, one that ignores stdin is terminated after the grace
 period, not before, and the quit path does both synchronously.
+
+**Transcript text stays out of the log by default.** `Recorder` logged every
+recognised utterance and every echo-suppressed one verbatim, and the sidecar
+the first 60 characters of each utterance and note, all into
+`~/Library/Logs/Advisor/advisor.log` — up to 10 MB of rolling conversation
+text, surfaced in Console.app, whatever folder the `sessionDir` preference had
+moved the transcripts to. The guide disclosed it, but it undercut that
+preference. The log is now diagnostics: both sides log the length of a line,
+not its text (`Recorder.utteranceLogLine`), and an app-side-only preference,
+`logTranscriptText` (General tab, off by default), turns the text back on for
+debugging echo dedup and disfluency cleanup. The recorder holds it in an atomic
+and the recording window applies it on every `advisorConfigChanged`, so the
+switch works mid-recording; the sidecar has no such key because it no longer
+logs transcript text at all (utterances and notes as lengths, a bad frame as
+its size and error name, a denied tool by its path or URL only, an unparseable
+classifier reply by its length). Not covered, by choice: card bodies and the
+classifier's parsed triggers still reach the log — the agents' words about the
+conversation, kept for diagnosing cards — and a trigger's `query` restates
+what was said.
+
+**Hardening batch.** Three smaller findings from the same review. *Lane
+shrink leaked subprocesses:* lowering the parallel-agents preference only
+stopped dispatching to the lanes beyond the new count; each kept its warm CLI
+subprocess until the next session start. The research pool is now a `LanePool`
+(`lanes.ts`, unit-tested without the SDK): it grows lazily to its size and
+sheds an excess lane as soon as it is idle — at the resize for idle ones, and
+for one that was mid-card the moment its card finishes, which the pipeline
+reports through `releaseLane` (waiting for the next dispatch would not do: in a
+quiet conversation there is none). A shed lane's session is reset so the CLI
+goes, and its transcript cursor is forgotten, so a lane re-created under the
+same name is sent the whole conversation — the same rule `runCard` applies when
+it recycles a failed lane. *Session folder path:* `SessionArchive.directory(for:)` took the
+`sessionDir` preference verbatim, so a hand-edited `~/Transcripts` or a relative
+path resolved against the app's working directory (`/` when packaged) and every
+save failed with "session note not saved". A `~` now expands; a relative path
+falls back to the default folder. Preferences itself only ever writes an
+absolute path. *Apple Events and launchers:* the Codex Seatbelt profile's
+`(allow default)` left `appleevent-send` open, so `osascript -e 'tell app
+"Finder" to do shell script …'` would have run the script inside Finder,
+outside the profile, gated only by a TCC prompt — and `open`, `launchctl` and
+`shortcuts` hand a program to launchd the same way. The profile now denies
+Apple Events and the `process-exec` of those four binaries; nothing the CLI or
+an MCP server does needs them (the real-CLI tests still pass). The exec denial
+is exercised live (`osascript -e '1 + 1'`, which needs no Apple Event, is
+refused); the Apple Events rule is pinned in the profile text only, since
+driving `osascript` at Finder from a test would raise the very TCC prompt.
+Residual: any other route to launchd (a scripting bridge, a different launcher
+binary) is still open under `(allow default)`.
+
+**The crash path is tested at the manager.** `SidecarManager`'s recovery —
+failing the cards a dead sidecar can never finish, the restart budget and its
+exhaustion message, the healthy-run reset, the replay of lanes, auto and
+`session_start` to the replacement — was covered only through `Card.apply` and
+one test of a backoff being replaced by a new session. The authentication
+harness (a real `/bin/sh` child behind `launchProcess`) already supported the
+rest; the backoff delay and the healthy-run threshold are now injectable (the
+production defaults unchanged), so the tests run in well under a second where
+the real 1/2/4/8 s backoff would take half a minute.
 
 ## Revisit as it grows
 

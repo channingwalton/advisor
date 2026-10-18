@@ -26,10 +26,14 @@ enum SessionArchive {
     /// Resolve a configured `sessionDir` (issue #16) to a directory URL: the
     /// `defaultDirectory` when blank, else that absolute path. Pure, for
     /// testability — `directory` feeds it the live config value.
+    /// The folder for `sessionDir` as Preferences wrote it (an absolute path) or
+    /// as a hand edit of config.json might: a `~` is the home folder; a relative
+    /// path, which would resolve against the app's working directory (`/` when
+    /// packaged) and fail every save, falls back to the default.
     static func directory(for sessionDir: String) -> URL {
-        let trimmed = sessionDir.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty
-            ? defaultDirectory : URL(fileURLWithPath: trimmed, isDirectory: true)
+        let trimmed = (sessionDir.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
+        return trimmed.hasPrefix("/")
+            ? URL(fileURLWithPath: trimmed, isDirectory: true) : defaultDirectory
     }
 
     /// Where session notes are stored: the folder chosen in Preferences

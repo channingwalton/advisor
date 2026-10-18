@@ -31,6 +31,20 @@ import Foundation
     #expect(resolved != SessionArchive.defaultDirectory)
 }
 
+// Preferences only ever writes an absolute path, but config.json can be edited
+// by hand (code review 2026-10-17): a `~` is the home folder, and a relative
+// path — which would otherwise resolve against the app's working directory,
+// `/` when packaged — falls back to the default rather than failing every save.
+@Test func directoryForTildeExpandsToHome() {
+    let resolved = SessionArchive.directory(for: "~/Transcripts")
+    #expect(resolved.path == NSHomeDirectory() + "/Transcripts")
+}
+
+@Test func directoryForRelativePathFallsBackToDefault() {
+    #expect(SessionArchive.directory(for: "Transcripts") == SessionArchive.defaultDirectory)
+    #expect(SessionArchive.directory(for: "./notes") == SessionArchive.defaultDirectory)
+}
+
 // MARK: - move (relocating transcripts)
 
 /// A throwaway directory holding the given session files, removed on teardown.

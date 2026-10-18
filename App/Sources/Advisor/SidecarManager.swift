@@ -198,7 +198,12 @@ final class SidecarManager {
     private let maxRestarts = 5
     /// A sidecar that ran this long before crashing is treated as healthy, so
     /// the backoff budget resets — only a tight crash loop exhausts maxRestarts.
-    private let healthyRunSeconds: TimeInterval = 60
+    private let healthyRunSeconds: TimeInterval
+    /// The backoff before restart attempt n (1-based): 1, 2, 4, 8, 8 s.
+    private let restartDelay: (Int) -> TimeInterval
+    nonisolated static func defaultRestartDelay(_ attempt: Int) -> TimeInterval {
+        min(8.0, pow(2.0, Double(attempt - 1)))
+    }
     private var lastSpawn: Date?
     private var lastSessionId: String?
     private var lastSessionContext = ""
@@ -211,13 +216,17 @@ final class SidecarManager {
         readKey: @escaping (Keychain.Key) -> String? = { Keychain.read($0) },
         launchProcess: @escaping (Process) throws -> Void = { try $0.run() },
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        exitGrace: TimeInterval = 2
+        exitGrace: TimeInterval = 2,
+        healthyRunSeconds: TimeInterval = 60,
+        restartDelay: @escaping (Int) -> TimeInterval = SidecarManager.defaultRestartDelay
     ) {
         self.store = store
         self.loadConfig = loadConfig
         self.readKey = readKey
         self.launchProcess = launchProcess
         self.exitGrace = exitGrace
+        self.healthyRunSeconds = healthyRunSeconds
+        self.restartDelay = restartDelay
         baseEnvironment = environment
         // Writing to a sidecar that has died closes its read end → SIGPIPE, which
         // would kill the app. Ignore it; the write throws EPIPE instead, handled
@@ -383,7 +392,7 @@ final class SidecarManager {
         }
         restartAttempts += 1
         let attempt = restartAttempts
-        let delay = min(8.0, pow(2.0, Double(attempt - 1))) // 1, 2, 4, 8, 8 s
+        let delay = restartDelay(attempt)
         store.status = "\(reason); restarting (\(attempt)/\(maxRestarts))…"
         let generation = generation
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in

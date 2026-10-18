@@ -255,7 +255,7 @@ export function parseClassifierResponse(text: string, error?: string): ClassifyR
   }
   const obj = extractFirstJsonObject(text);
   if (!obj) {
-    log(`classifier returned no parseable JSON: ${text.slice(0, 200)}`);
+    log(`classifier returned no parseable JSON (${text.length} chars)`); // it may quote the transcript
     return { ok: false };
   }
   const enabled = cfg?.triggers ?? { question: true, context: true, factcheck: true };

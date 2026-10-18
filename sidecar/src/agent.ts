@@ -596,8 +596,16 @@ export class AgentSession implements Agent {
     };
   }
 
+  /// A path or URL argument says what was refused; any other argument (Grep's
+  /// `pattern` is a content search, a connector's are anything) can quote the
+  /// conversation and stays out of the log.
   private logDenied = (tool: string, input: unknown, message: string): void => {
-    log(`${this.opts.name}: denied ${tool} ${JSON.stringify(input)?.slice(0, 200)}: ${message}`);
+    const args = input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    const where = ["file_path", "path", "url", "glob", ...(tool === "Glob" ? ["pattern"] : [])]
+      .filter((k) => typeof args[k] === "string")
+      .map((k) => `${k}=${JSON.stringify(args[k])}`)
+      .join(" ");
+    log(`${this.opts.name}: denied ${tool}${where ? ` ${where}` : ""}: ${message}`);
   };
 
   /// The first text a task shows: the time a card stops being blank.
