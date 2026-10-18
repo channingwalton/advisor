@@ -78,7 +78,9 @@ sentence) to:
   the resulting card anchored under that line;
 - fix a mis-transcribed word: **Correct "…"** (just that instance) or **Replace
   all "…"** (every occurrence in the session); type the correction and it's
-  saved to the transcript in place;
+  saved to the transcript in place. A paragraph is several transcript lines
+  shown together, and a selection that runs from one line into the next can't be
+  corrected as one: the menu says so instead, so select within a line;
 - **Add note here…** when the audio missed context — your note lands as a green
   **Note** card at that point and the assistant reads it as part of the
   conversation (so it can inform, or trigger, research); delete it with the ✕

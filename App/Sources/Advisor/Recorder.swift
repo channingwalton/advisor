@@ -108,12 +108,16 @@ final class TranscriptStore: ObservableObject {
     /// `original` with `replacement`, across the run of utterances
     /// `utteranceIds` that composes that paragraph, in document order. Text-only —
     /// the line keeps its id/time/source and nothing is re-sent to the sidecar;
-    /// the session writer's debounced rewrite persists the edited text.
+    /// the session writer's debounced rewrite persists the edited text. The
+    /// occurrence was counted over the paragraph as shown, so if any of its
+    /// utterances has gone since (echo cleanup while the prompt was open) the
+    /// count no longer holds and nothing is changed (issue #92).
     func correctOccurrence(
         _ occurrence: Int, of original: String, with replacement: String,
         inParagraph utteranceIds: [UUID]
     ) {
         let indices = utteranceIds.compactMap { id in utterances.firstIndex { $0.id == id } }
+        guard indices.count == utteranceIds.count else { return }
         let texts = indices.map { utterances[$0].text }
         guard
             let updated = TranscriptCorrection.replacingOccurrence(

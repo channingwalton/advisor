@@ -82,7 +82,8 @@ private struct FeedTranscriptRun: View {
                     text: p.text, toolTip: p.toolTip, actions: actions.transcriptActions,
                     onAction: { kind, selection in actions.onAction(kind, selection, p) },
                     onAddNote: actions.onAddNote.map { add in { text, offset in add(text, offset, p) } },
-                    onCorrect: actions.onCorrect.map { correct in { request in correct(request, p) } })
+                    onCorrect: actions.onCorrect.map { correct in { request in correct(request, p) } },
+                    lines: p.lines.map(\.text))
                     .overlay(alignment: .topLeading) {
                         if let time = p.time {
                             Text(time).font(.system(size: 11.5)).monospacedDigit()

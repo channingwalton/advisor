@@ -281,3 +281,16 @@ private func expansion(_ items: [FeedItem]) -> [Bool] {
     triggers.context = false
     #expect(TranscriptAction.research(for: triggers).map(\.title) == ["Answer", "Fact check"])
 }
+
+/// A saved paragraph keeps its transcript lines as the feed's lines, joined by
+/// single spaces as the text, so the correction menu can tell a selection across
+/// a line join (issue #92) as it can live.
+@Test func savedParagraphsKeepTheirLines() {
+    let blocks: [TranscriptBlock] = [.paragraph("Hello there. Next."), .card("**ANSWER · Q**\n\nA.")]
+    let items = Feed.saved(blocks: blocks, times: [nil, nil], lines: [["Hello there.", "Next."], []])
+
+    let ps = paragraphs(items[0])
+    #expect(ps.map(\.text) == ["Hello there. Next."])
+    #expect(ps.first?.lines.map(\.text) == ["Hello there.", "Next."])
+    #expect(ps.first?.lines.map(\.id) == ["0", "0"])
+}

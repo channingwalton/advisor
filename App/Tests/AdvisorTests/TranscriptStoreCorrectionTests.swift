@@ -58,3 +58,38 @@ private func utterance(_ text: String, at seconds: TimeInterval = 0) -> Utteranc
     store.correctAll(of: "", with: "x")
     #expect(store.utterances[0].text == "keep me")
 }
+
+/// The menu counts the selection's occurrence over the paragraph as shown — its
+/// utterances joined by single spaces — so a match across a join counts there,
+/// and the store must count the same way (issue #92).
+@MainActor
+@Test func correctOccurrenceCountsOverTheParagraphAsShown() {
+    let store = TranscriptStore()
+    let a = utterance("this is")
+    let b = utterance("a cat, this is a dog, this is a bird", at: 1)
+    store.utterances = [a, b]
+
+    // Over "this is a cat, this is a dog, this is a bird": index 1 is "is a dog".
+    store.correctOccurrence(1, of: "is a", with: "was a", inParagraph: [a.id, b.id])
+    #expect(store.utterances[0].text == "this is")
+    #expect(store.utterances[1].text == "a cat, this was a dog, this is a bird")
+
+    // Index 0 straddles the join: refused, nothing else is rewritten.
+    store.correctOccurrence(0, of: "is a", with: "was a", inParagraph: [a.id, b.id])
+    #expect(store.utterances[0].text == "this is")
+    #expect(store.utterances[1].text == "a cat, this was a dog, this is a bird")
+}
+
+/// The count was taken over the paragraph as shown. If one of its utterances has
+/// gone since (echo cleanup while the prompt was open), counting over what is
+/// left would land on a different match, so the correction is refused.
+@MainActor
+@Test func correctOccurrenceRefusesAParagraphMissingAnUtterance() {
+    let store = TranscriptStore()
+    let a = utterance("this is")
+    let b = utterance("a cat, this is a dog, this is a bird", at: 1)
+    store.utterances = [b]  // `a` was removed after the menu counted [a, b]
+
+    store.correctOccurrence(1, of: "is a", with: "was a", inParagraph: [a.id, b.id])
+    #expect(store.utterances[0].text == "a cat, this is a dog, this is a bird")
+}

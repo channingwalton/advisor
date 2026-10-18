@@ -38,6 +38,17 @@ context: Effect systems research talk
     #expect(d.gist == "OCaml is adopting effect systems.")
 }
 
+@Test func blockLinesCarryEachParagraphsTranscriptLines() {
+    let twoLines = note.replacingOccurrences(
+        of: "- 17:00:05 More discussion follows.", with: "- 17:00:05 More discussion\n- 17:00:06 follows.")
+    let d = SessionDetail.parse(contents: twoLines, fallbackTitle: "fallback")
+    let at = d.blocks.firstIndex(of: .paragraph("More discussion follows."))
+    #expect(at != nil)
+    #expect(d.blockLines.count == d.blocks.count)
+    #expect(at.map { d.blockLines[$0] } == ["More discussion", "follows."])
+    #expect(d.blockLines[0] == [])  // the heading
+}
+
 @Test func nameOverridesContextAsTitle() {
     let named = """
     ---

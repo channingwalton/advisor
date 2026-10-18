@@ -52,7 +52,7 @@ struct SessionDetailPane: View {
         self.detail = detail
         self.library = library
         self.triggers = triggers
-        savedItems = Feed.saved(blocks: detail.blocks, times: detail.blockTimes)
+        savedItems = Feed.saved(blocks: detail.blocks, times: detail.blockTimes, lines: detail.blockLines)
         blockIds = Feed.savedIds(detail.blocks)
     }
 

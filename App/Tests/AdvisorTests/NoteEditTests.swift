@@ -137,6 +137,22 @@ private func offset(of title: String, in markdown: String) throws -> Int {
     #expect(remaining.first?.hasPrefix("**CONTEXT · Beta**") == true)
 }
 
+/// The occurrence is counted over the paragraph as shown, its lines joined by
+/// single spaces, so a match across the join counts and a later match isn't
+/// taken for it (issue #92).
+@Test func correctingAnOccurrenceCountsOverTheParagraphAsShown() throws {
+    let note = SessionMarkdown.inline(
+        utterances: [utterance(0, "this is"), utterance(1, "a cat, this is a dog, this is a bird")],
+        cards: [], started: t0, ended: t0.addingTimeInterval(60))
+    let at = try paragraphOffset("this is a cat, this is a dog, this is a bird", in: note)
+    let edited = try #require(NoteEdit.correctingOccurrence(
+        1, of: "is a", with: "was a", inParagraphAt: at, expecting: blocks(note)[at], in: note))
+
+    #expect(edited == note.replacingOccurrences(of: "this is a dog", with: "this was a dog"))
+    #expect(NoteEdit.correctingOccurrence(
+        0, of: "is a", with: "was a", inParagraphAt: at, expecting: blocks(note)[at], in: note) == nil)
+}
+
 // MARK: adding notes
 
 /// Two lines 1s apart (one paragraph), then a card anchored under the second.

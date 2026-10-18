@@ -90,17 +90,22 @@ enum Feed {
 
     /// A saved session's display blocks as feed items, one paragraph per
     /// `.transcript`. Paragraph ids are block offsets (corrections key on them);
-    /// cards and notes take their `savedIds`. `times` parallels `blocks`
-    /// (`SessionDetail.blockTimes`). The `# Transcript` heading is dropped — the
-    /// detail labels that section itself.
-    static func saved(blocks: [TranscriptBlock], times: [String?]) -> [FeedItem] {
+    /// cards and notes take their `savedIds`. `times` and `lines` parallel
+    /// `blocks` (`SessionDetail.blockTimes`, `blockLines`): a paragraph's feed
+    /// lines are its transcript lines, which it shows joined by single spaces, so
+    /// the correction menu can tell a selection across a join (issue #92); with
+    /// no lines for it, the paragraph is one line. All of a paragraph's lines
+    /// share its id. The `# Transcript` heading is dropped — the detail labels
+    /// that section itself.
+    static func saved(blocks: [TranscriptBlock], times: [String?], lines: [[String]] = []) -> [FeedItem] {
         let ids = savedIds(blocks)
         return blocks.enumerated().compactMap { offset, block in
             switch block {
             case .paragraph(let text):
                 let time = times.indices.contains(offset) ? times[offset] : nil
+                let texts = lines.indices.contains(offset) && !lines[offset].isEmpty ? lines[offset] : [text]
                 return .transcript([FeedParagraph(
-                    id: "\(offset)", lines: [FeedLine(id: "\(offset)", text: text)], time: time)])
+                    id: "\(offset)", lines: texts.map { FeedLine(id: "\(offset)", text: $0) }, time: time)])
             case .card(let markdown):
                 return .card(SavedCard.card(from: markdown, id: ids[offset] ?? "\(offset)"))
             case .note(let text):

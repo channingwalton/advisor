@@ -1123,12 +1123,16 @@ both surfaces:
 Paragraph indexing for "this occurrence" must stay in lock-step with how
 `TranscriptDoc` groups display blocks (cards/headings/2s-gap breaks, empty-text
 lines skipped) — the grouping is mirrored in `TranscriptCorrection` and guarded by
-a test, since a drift would silently correct the wrong line.
+a test, since a drift would silently correct the wrong line. *Superseded:* the
+mirror drifted and is gone; a saved correction now edits the block it was shown
+(the issue #91 entry).
 
 Out of scope (documented limitation): a selection that straddles a paragraph join
 boundary — a phrase split across two utterances / two transcript lines by the 2s
 rule — isn't matched for single-occurrence correction (it's counted per line).
-Whole-session replace is unaffected.
+Whole-session replace is unaffected. *Superseded:* the count is now taken over the
+joined text, and the menu refuses a straddling selection for both scopes (the
+issue #92 entry).
 
 ## Summarise a conversation (2026-06-22, issue #30)
 
@@ -2516,6 +2520,76 @@ card, an offset past the blocks, no such occurrence, and a phrase across lines.
 `SessionDetailPaneTests` drive `correct` for both scopes with each kind of bad
 id, a moved note and a phrase across lines. For "This occurrence" they also
 cover a stale row and the second paragraph.
+
+**Corrections count the paragraph as shown, and the menu refuses a selection
+across a line join (issue #92).** A paragraph shows its lines (live, its
+utterances) joined by single spaces, and the right-click menu takes the
+selected occurrence's index over that text. The edit counted matches line by
+line, so a match that straddled a join counted in the menu's index and not in
+the edit's, and "This occurrence" rewrote the match after the one selected and
+reported success (`this is` / `a cat, this is a dog, this is a bird`: selecting
+`is a` in "…is a dog" corrected "…is a bird"). Now
+`TranscriptCorrection.location(ofOccurrence:of:in:)` finds the n-th match over
+the lines joined by single spaces — the text the menu counted — and maps its
+range back to the line it lies in; `replacingOccurrence` edits that line, so
+`TranscriptStore.correctOccurrence` (live) and `NoteEdit.correctingOccurrence`
+(saved) count as the menu does. A match that crosses a join lies in no one line
+and gives nil, a refusal rather than a miscount or a crash. Live,
+`TranscriptStore.correctOccurrence` also refuses a paragraph one of whose
+utterances has gone since the menu counted it (echo cleanup while the prompt
+was open): counting over what is left would land on a different match.
+
+The menu tells two refusals apart. `TranscriptCorrection.range(ofOccurrence:of:in:)`
+is the match the menu's index names over the joined text, join or no join; when
+that match doesn't start where the highlight does, the selection overlaps an
+earlier copy of itself (the second `aa` of `aaa`: non-overlapping counting puts
+it at index 1, which has no match; the middle `the the` of `the the the the`:
+index 1 is the trailing copy), and the item says so rather than claiming a
+straddle. "Replace all" stays offered there: it takes no index and rewrites the
+highlight along with the rest. Before, the first case silently did nothing
+(live) or showed the hedged edit-failed message (saved), and the second rewrote
+the later copy and reported success. The trimmed text's start within the
+highlight is found with the trim set itself, so a no-break space or CRLF ahead
+of the text doesn't read as an overlap.
+
+A straddling selection isn't corrected across the two lines. Each line carries
+its own stamp (live, its own utterance with a time and source), and a
+replacement has no right split between them: `is a` → `was a` across `this is`
+/ `a cat` could put `was a` on either line, moving a word's spoken time.
+Instead the menu refuses it: `SelectableTranscriptText` takes the paragraph's
+`lines`, and when the trimmed highlight's occurrence has no `location` the two
+correction items are replaced by one disabled "Can't correct “…” — it spans two
+lines". Live, a `FeedParagraph`'s lines are its utterances already. A saved
+paragraph was one `FeedLine` holding the joined text, which would have made
+every selection look within-line, so the lines now travel with the block:
+`TranscriptDoc.TimedBlock.texts` keeps a paragraph's member texts,
+`SessionDetail.blockLines` carries them parallel to `blocks`, and `Feed.saved`
+makes one `FeedLine` per transcript line, all with the paragraph's id (its
+callers key on the paragraph's id, not a line's). That covers "Replace all" too, which works line by line
+(`TranscriptStore.correctAll`, `replacingAllInTranscript`) and would otherwise
+have corrected the same phrase where it lies within a line and reported success
+with the selected text unchanged. So a straddling highlight no longer offers
+"Replace all" for the phrase's intact copies elsewhere, a capability dropped on
+purpose: the user asked for the text under the cursor to change, and a menu that
+corrects everything but that is the misreport this entry removes. An intact copy
+offers it. The one way a correction on an unchanged
+saved note could change nothing (the #91 entry, above) is gone from the menu,
+so the hedged edit-failed message there is now only ever about a note that did
+change or couldn't be written. Residual: "Replace all" still leaves a copy of
+the phrase that straddles a join elsewhere in the session, as before; the
+selected copy is now always within a line, so success is not misreported.
+
+`TranscriptCorrectionTests` cover the probe above for both later matches, a
+refused straddle (and a phrase starting on the join space), UTF-16 offsets, and
+the location's line and range. `TranscriptStoreCorrectionTests` and
+`NoteEditTests` drive the two callers with the probe; `FeedTests` and
+`SessionDetailTests` the saved lines' journey to the feed. `ActionTextViewMenuTests`
+build the real menu from an `ActionTextView` with a selection within a line
+(both items, enabled), across a join (the disabled refusal, neither item),
+across a join with leading whitespace, overlapping an earlier copy of itself
+(its own refusal, "Replace all" kept), with a no-break space, CRLF or tab ahead
+of the text, and with no `lines` given. Observing the menu in the running app
+needs a right-click the agent can't make; the menu tests stand in for it.
 
 ## Terms of use removed (2026-10-18)
 

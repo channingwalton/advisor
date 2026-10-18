@@ -8,11 +8,13 @@ import Foundation
 /// span. Occurrence counting is non-overlapping, left-to-right, and UTF-16-based
 /// so it lines up with the selection offsets `NSTextView` reports.
 ///
-/// Limitation: matching is per line/utterance, but a paragraph shows its lines
-/// joined by spaces. A selection that straddles a join isn't found, and a
-/// straddling match earlier in the paragraph shifts the count the menu took from
-/// the joined text, so single-occurrence correction can hit a later match.
-/// Whole-session replace skips straddling matches (DESIGN.md, issue #91).
+/// A paragraph shows its lines (utterances) joined by single spaces, and the
+/// menu counts the selected occurrence over that text, so single-occurrence
+/// correction counts the same way (`location(ofOccurrence:of:in:)`) and then
+/// edits the one line the match lies in. A match across a join lies in neither
+/// line and is refused rather than corrected or miscounted; the menu doesn't
+/// offer it. Whole-session replace works line by line and leaves such matches
+/// (DESIGN.md, issue #92).
 enum TranscriptCorrection {
 
     // MARK: occurrence counting
@@ -21,51 +23,93 @@ enum TranscriptCorrection {
     /// offset `location` in `text` — i.e. how many non-overlapping occurrences of
     /// `original` begin strictly before `location`. Empty `original` → 0.
     static func occurrenceIndex(of original: String, before location: Int, in text: String) -> Int {
-        guard !original.isEmpty else { return 0 }
-        let ns = text as NSString
         var count = 0
+        for range in nonOverlappingRanges(of: original, in: text) {
+            guard range.location < location else { break }
+            count += 1
+        }
+        return count
+    }
+
+    /// The non-overlapping matches of `original` in `text`, left to right, as
+    /// UTF-16 ranges — the one walk every count and lookup here is taken from, so
+    /// they can't disagree. Empty `original` → no matches.
+    private static func nonOverlappingRanges(of original: String, in text: String) -> [NSRange] {
+        guard !original.isEmpty else { return [] }
+        let ns = text as NSString
+        var ranges: [NSRange] = []
         var searchStart = 0
         while searchStart <= ns.length {
             let range = ns.range(
                 of: original, options: [],
                 range: NSRange(location: searchStart, length: ns.length - searchStart))
-            guard range.location != NSNotFound, range.location < location else { break }
-            count += 1
+            guard range.location != NSNotFound else { break }
+            ranges.append(range)
             searchStart = range.location + max(range.length, 1)
         }
-        return count
+        return ranges
+    }
+
+    // MARK: locating an occurrence in a paragraph's lines
+
+    /// Where an occurrence lies: the index of the line in `texts` and its UTF-16
+    /// range within that line.
+    struct OccurrenceLocation: Equatable {
+        let line: Int
+        let range: NSRange
+    }
+
+    /// The `n`-th (0-based) non-overlapping occurrence of `original` in `texts`
+    /// joined by single spaces — the paragraph as shown, which is what
+    /// `occurrenceIndex` counted the selection against — mapped back to the line
+    /// it lies in. Nil when `original` is empty, `n` is negative, there is no
+    /// `n`-th occurrence, or it crosses a join, so lies in no one line.
+    static func location(ofOccurrence n: Int, of original: String, in texts: [String]) -> OccurrenceLocation? {
+        guard let match = range(ofOccurrence: n, of: original, in: texts.joined(separator: " ")) else { return nil }
+        // Walk the lines to the one the match starts in; it must also end there.
+        // A match starting on a join space starts in no line.
+        var lineStart = 0
+        for (index, text) in texts.enumerated() {
+            let length = (text as NSString).length
+            if match.location < lineStart + length {
+                guard match.location >= lineStart, match.location + match.length <= lineStart + length
+                else { return nil }
+                return OccurrenceLocation(
+                    line: index, range: NSRange(location: match.location - lineStart, length: match.length))
+            }
+            lineStart += length + 1
+        }
+        return nil
+    }
+
+    /// The UTF-16 range of the `n`-th (0-based) non-overlapping occurrence of
+    /// `original` in `text`, or nil when `original` is empty, `n` is negative, or
+    /// there is no `n`-th occurrence. Over a paragraph's joined text this is the
+    /// match the menu's `occurrenceIndex` counted to — found even when it crosses
+    /// a join, which `location(ofOccurrence:of:in:)` then refuses. Nil here means
+    /// the selection isn't the `n`-th match at all: it overlaps an earlier match
+    /// of itself, as the second `aa` of `aaa` does.
+    static func range(ofOccurrence n: Int, of original: String, in text: String) -> NSRange? {
+        guard n >= 0 else { return nil }
+        let ranges = nonOverlappingRanges(of: original, in: text)
+        return ranges.indices.contains(n) ? ranges[n] : nil
     }
 
     // MARK: live ([String]) corrections
 
     /// `texts` with the `n`-th (0-based) non-overlapping occurrence of `original`
-    /// — counted across the whole sequence in document order — replaced by
-    /// `replacement`. Returns `nil` (leave the source untouched) when `original`
-    /// is empty, `n` is negative, or there is no `n`-th occurrence. Exactly one
-    /// occurrence changes.
+    /// — counted over the texts joined by single spaces, in document order
+    /// (`location(ofOccurrence:of:in:)`) — replaced by `replacement`. Returns
+    /// `nil` (leave the source untouched) when `original` is empty, `n` is
+    /// negative, there is no `n`-th occurrence, or it crosses a join. Exactly one
+    /// occurrence changes, within one text.
     static func replacingOccurrence(
         _ n: Int, of original: String, with replacement: String, in texts: [String]
     ) -> [String]? {
-        guard !original.isEmpty, n >= 0 else { return nil }
-        var remaining = n
+        guard let at = location(ofOccurrence: n, of: original, in: texts) else { return nil }
         var out = texts
-        for index in texts.indices {
-            let ns = texts[index] as NSString
-            var searchStart = 0
-            while searchStart <= ns.length {
-                let range = ns.range(
-                    of: original, options: [],
-                    range: NSRange(location: searchStart, length: ns.length - searchStart))
-                guard range.location != NSNotFound else { break }
-                if remaining == 0 {
-                    out[index] = ns.replacingCharacters(in: range, with: replacement)
-                    return out
-                }
-                remaining -= 1
-                searchStart = range.location + max(range.length, 1)
-            }
-        }
-        return nil
+        out[at.line] = (texts[at.line] as NSString).replacingCharacters(in: at.range, with: replacement)
+        return out
     }
 
     /// `texts` with every non-overlapping occurrence of `original` replaced.

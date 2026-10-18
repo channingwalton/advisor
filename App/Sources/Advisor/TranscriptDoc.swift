@@ -35,6 +35,9 @@ enum TranscriptDoc {
         /// from: a paragraph's text-bearing lines in order, a card's or note's
         /// `>` lines, a heading's line — so an edit can splice the note.
         let lines: [Int]
+        /// A paragraph's lines as text (`memberText`), in order — what its
+        /// `block` joins by single spaces. Empty for the other blocks.
+        var texts: [String] = []
     }
 
     /// Splits leading YAML frontmatter (`---` … `---`, plus the blank lines after
@@ -74,7 +77,8 @@ enum TranscriptDoc {
         func flushPara() {
             if !para.isEmpty {
                 blocks.append(TimedBlock(
-                    block: .paragraph(para.joined(separator: " ")), time: paraTime, lines: paraLines))
+                    block: .paragraph(para.joined(separator: " ")), time: paraTime, lines: paraLines,
+                    texts: para))
                 para = []
                 paraLines = []
             }

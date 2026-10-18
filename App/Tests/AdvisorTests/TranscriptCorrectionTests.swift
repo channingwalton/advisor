@@ -123,10 +123,72 @@ tags: work
     #expect(TranscriptCorrection.occurrenceIndex(of: "cat", before: 6, in: text) == 1)
 }
 
-@Test func phraseStraddlingTwoStringsIsNotMatched() {
-    // Documents the limitation: a phrase split across a join boundary (two
-    // utterances / two lines) is out of scope — counted per-string, so not found.
+// MARK: matches across a join (issue #92)
+
+/// The paragraph shows its lines joined by single spaces, and the menu counts
+/// the selection's occurrence over that text. A match that straddles a join
+/// counts there too, so the edit must count the same way or every later match
+/// is off by one.
+private let straddling = ["this is", "a cat, this is a dog, this is a bird"]
+
+@Test func replaceNthCountsOverTheJoinedTextTheMenuCounted() {
+    // Over the joined text "is a" matches at: the join (0), "is a dog" (1),
+    // "is a bird" (2).
+    #expect(
+        TranscriptCorrection.replacingOccurrence(1, of: "is a", with: "was a", in: straddling)
+            == ["this is", "a cat, this was a dog, this is a bird"])
+    #expect(
+        TranscriptCorrection.replacingOccurrence(2, of: "is a", with: "was a", in: straddling)
+            == ["this is", "a cat, this is a dog, this was a bird"])
+}
+
+@Test func replaceNthRefusesAMatchAcrossAJoin() {
+    // The match lies in neither line, so it isn't corrected — not miscounted.
+    #expect(TranscriptCorrection.replacingOccurrence(0, of: "is a", with: "x", in: straddling) == nil)
     #expect(
         TranscriptCorrection.replacingOccurrence(0, of: "cat fish", with: "x", in: ["a cat", "fish"])
             == nil)
+    // A join is one space: a phrase with two spaces across it doesn't match.
+    #expect(TranscriptCorrection.replacingOccurrence(0, of: "cat  fish", with: "x", in: ["a cat", "fish"]) == nil)
+}
+
+@Test func locationOfAnOccurrenceNamesItsLineOrNilAcrossAJoin() {
+    #expect(TranscriptCorrection.location(ofOccurrence: 0, of: "is a", in: straddling) == nil)
+    #expect(
+        TranscriptCorrection.location(ofOccurrence: 1, of: "is a", in: straddling)
+            == TranscriptCorrection.OccurrenceLocation(line: 1, range: NSRange(location: 12, length: 4)))
+    #expect(
+        TranscriptCorrection.location(ofOccurrence: 0, of: "this", in: straddling)
+            == TranscriptCorrection.OccurrenceLocation(line: 0, range: NSRange(location: 0, length: 4)))
+    // Edges of a line, and an occurrence that isn't there.
+    #expect(
+        TranscriptCorrection.location(ofOccurrence: 1, of: "a bird", in: straddling)?.line == nil)
+    #expect(
+        TranscriptCorrection.location(ofOccurrence: 0, of: "a bird", in: straddling)
+            == TranscriptCorrection.OccurrenceLocation(line: 1, range: NSRange(location: 30, length: 6)))
+    // Starts on the join space itself: in no line.
+    #expect(TranscriptCorrection.location(ofOccurrence: 0, of: " a cat", in: straddling) == nil)
+    #expect(TranscriptCorrection.location(ofOccurrence: 0, of: "", in: straddling) == nil)
+    #expect(TranscriptCorrection.location(ofOccurrence: -1, of: "is", in: straddling) == nil)
+}
+
+@Test func rangeOfAnOccurrenceFindsTheMenusMatchEvenAcrossAJoin() {
+    let joined = straddling.joined(separator: " ")
+    #expect(TranscriptCorrection.range(ofOccurrence: 0, of: "is a", in: joined) == NSRange(location: 5, length: 4))
+    #expect(TranscriptCorrection.range(ofOccurrence: 2, of: "is a", in: joined) == NSRange(location: 35, length: 4))
+    #expect(TranscriptCorrection.range(ofOccurrence: 3, of: "is a", in: joined) == nil)
+    // The second "aa" of "aaa" overlaps the first: not a non-overlapping match.
+    #expect(TranscriptCorrection.range(ofOccurrence: 1, of: "aa", in: "aaa") == nil)
+    #expect(TranscriptCorrection.range(ofOccurrence: 0, of: "", in: "aaa") == nil)
+}
+
+@Test func locationCountsInUTF16LikeTheMenu() {
+    // "👋" is two UTF-16 units, so the second line's offsets shift by two.
+    let texts = ["👋 cat", "cat"]
+    #expect(
+        TranscriptCorrection.location(ofOccurrence: 1, of: "cat", in: texts)
+            == TranscriptCorrection.OccurrenceLocation(line: 1, range: NSRange(location: 0, length: 3)))
+    #expect(
+        TranscriptCorrection.location(ofOccurrence: 0, of: "cat", in: texts)
+            == TranscriptCorrection.OccurrenceLocation(line: 0, range: NSRange(location: 3, length: 3)))
 }

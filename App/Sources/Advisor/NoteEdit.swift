@@ -90,10 +90,11 @@ enum NoteEdit {
 
     /// `markdown` with the `n`-th occurrence of `original` in the paragraph at
     /// block `offset` replaced by `replacement` — "Correct transcription…" on that
-    /// row. Only the text of the paragraph's own lines changes, counted line by
-    /// line (`TranscriptCorrection.replacingOccurrence`); bullets and stamps stay.
-    /// Nil for a block that isn't the expected paragraph, or when there is no
-    /// `n`-th occurrence within one of its lines.
+    /// row. The occurrence is counted over the paragraph as shown, its lines
+    /// joined by spaces (`TranscriptCorrection.replacingOccurrence`), and only
+    /// the text of the line it lies in changes; bullets and stamps stay. Nil for
+    /// a block that isn't the expected paragraph, when there is no `n`-th
+    /// occurrence, or when it runs across two lines (issue #92).
     static func correctingOccurrence(
         _ n: Int, of original: String, with replacement: String, inParagraphAt offset: Int,
         expecting expected: TranscriptBlock, in markdown: String

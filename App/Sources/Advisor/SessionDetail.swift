@@ -41,6 +41,10 @@ struct SessionDetail: Equatable {
     /// `HH:mm` each block's first transcript line was spoken, parallel to
     /// `blocks` (nil for cards, notes, headings and unstamped prose).
     let blockTimes: [String?]
+    /// Each paragraph's transcript lines as text, parallel to `blocks` (empty for
+    /// cards, notes and headings): the lines the paragraph shows joined by single
+    /// spaces, so the feed can tell a selection across a join (issue #92).
+    let blockLines: [[String]]
 
     /// Session length in whole minutes, when both ends are known.
     var durationMinutes: Int? {
@@ -91,7 +95,8 @@ struct SessionDetail: Equatable {
             cards: cards,
             questions: questions,
             blocks: blocks,
-            blockTimes: timed.map(\.time))
+            blockTimes: timed.map(\.time),
+            blockLines: timed.map(\.texts))
     }
 
     /// Splits a card's inner markdown into (label, title, snippet). The header is

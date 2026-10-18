@@ -48,6 +48,10 @@ struct SelectableTranscriptText: NSViewRepresentable {
     /// Fired when a correction is confirmed (issue #32). Nil hides the correction
     /// menu items — e.g. the still-being-written live note in the browser.
     var onCorrect: ((TranscriptCorrectionRequest) -> Void)? = nil
+    /// The paragraph's lines, which `text` shows joined by single spaces. A
+    /// selection across a join can't be corrected (issue #92), so the menu needs
+    /// to know where the joins are. Nil: `text` is a single line.
+    var lines: [String]? = nil
 
     func makeNSView(context: Context) -> ActionTextView {
         // Convenience init builds a TextKit stack the view *owns* (storage
@@ -101,6 +105,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
         tv.onAction = onAction
         tv.onAddNote = onAddNote
         tv.onCorrect = onCorrect
+        tv.lines = lines ?? [text]
         guard tv.renderedContent != AnyHashable(text) else { return false }
         tv.renderedContent = AnyHashable(text)
 
@@ -129,6 +134,8 @@ final class ActionTextView: IntrinsicHeightTextView {
     var onAction: ((String, String) -> Void)?
     var onAddNote: ((String, Int) -> Void)?
     var onCorrect: ((TranscriptCorrectionRequest) -> Void)?
+    /// The lines `string` shows joined by single spaces (`SelectableTranscriptText.lines`).
+    var lines: [String] = []
     /// Where an "Add note here…" should anchor: the end of the current selection,
     /// or — with no selection — the character nearest the right-click point.
     /// Captured when the menu opens (issue #34).
@@ -175,18 +182,37 @@ final class ActionTextView: IntrinsicHeightTextView {
         }
 
         // Correction (issue #32): only on a real highlight, and only where a
-        // handler is wired (live feed + saved non-live notes).
-        if onCorrect != nil, selectedRange().length > 0 {
-            let correct = NSMenuItem(
-                title: "Correct “\(label)”…", action: #selector(correctThisOccurrence(_:)),
-                keyEquivalent: "")
-            correct.target = self
-            menu.addItem(correct)
-            let all = NSMenuItem(
-                title: "Replace all “\(label)”…", action: #selector(correctAllOccurrences(_:)),
-                keyEquivalent: "")
-            all.target = self
-            menu.addItem(all)
+        // handler is wired (live feed + saved non-live notes). A highlight across
+        // a line join lies in no one line, so neither scope can correct it
+        // (issue #92): say so, disabled, rather than offer it. One that overlaps
+        // an earlier copy of itself (the second `aa` of `aaa`, the middle `the the`
+        // of `the the the the`) can't be corrected on its own either: the count is
+        // of non-overlapping matches, so the match its index names isn't the
+        // highlight — it may be a later one the edit would rewrite instead, or
+        // none at all. "Replace all" takes no index and changes it with the rest,
+        // so it stays.
+        if onCorrect != nil, let selected = selectedCorrection() {
+            let match = TranscriptCorrection.range(ofOccurrence: selected.occurrence, of: selected.original, in: string)
+            if match?.location != selected.start {
+                let overlaps = NSMenuItem(
+                    title: "Can't correct “\(label)” — it overlaps an earlier “\(label)”", action: nil,
+                    keyEquivalent: "")
+                overlaps.isEnabled = false
+                menu.addItem(overlaps)
+                menu.addItem(replaceAllItem(label))
+            } else if TranscriptCorrection.location(ofOccurrence: selected.occurrence, of: selected.original, in: lines) == nil {
+                let spans = NSMenuItem(
+                    title: "Can't correct “\(label)” — it spans two lines", action: nil, keyEquivalent: "")
+                spans.isEnabled = false
+                menu.addItem(spans)
+            } else {
+                let correct = NSMenuItem(
+                    title: "Correct “\(label)”…", action: #selector(correctThisOccurrence(_:)),
+                    keyEquivalent: "")
+                correct.target = self
+                menu.addItem(correct)
+                menu.addItem(replaceAllItem(label))
+            }
             menu.addItem(.separator())
         }
 
@@ -194,6 +220,13 @@ final class ActionTextView: IntrinsicHeightTextView {
         copy.target = self
         menu.addItem(copy)
         return menu
+    }
+
+    private func replaceAllItem(_ label: String) -> NSMenuItem {
+        let all = NSMenuItem(
+            title: "Replace all “\(label)”…", action: #selector(correctAllOccurrences(_:)), keyEquivalent: "")
+        all.target = self
+        return all
     }
 
     @objc private func performAction(_ sender: NSMenuItem) {
@@ -236,19 +269,28 @@ final class ActionTextView: IntrinsicHeightTextView {
         beginCorrection(scope: .allInSession)
     }
 
-    /// Resolve the highlighted span to a correction request and prompt for the
-    /// replacement. The selected text is trimmed of surrounding whitespace, and
-    /// its paragraph-local occurrence index is taken from where the trimmed text
-    /// starts — so the same word selected twice still pins the right instance.
-    private func beginCorrection(scope: TranscriptCorrectionRequest.Scope) {
+    /// The highlighted span as the text to correct: trimmed of surrounding
+    /// whitespace, with its paragraph-local occurrence index taken from where the
+    /// trimmed text starts (`start`, UTF-16) — so the same word selected twice
+    /// still pins the right instance. Nil with no highlight, or only whitespace
+    /// highlighted.
+    private func selectedCorrection() -> (original: String, occurrence: Int, start: Int)? {
         let range = selectedRange()
-        guard range.length > 0 else { return }
+        guard range.length > 0 else { return nil }
         let raw = (string as NSString).substring(with: range)
-        let leading = raw.prefix { $0 == " " || $0 == "\t" || $0 == "\n" }.count
         let original = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !original.isEmpty else { return }
-        let occurrence = TranscriptCorrection.occurrenceIndex(
-            of: original, before: range.location + leading, in: string)
+        guard !original.isEmpty else { return nil }
+        // Where the trimmed text starts within the highlight, whatever whitespace
+        // was trimmed (the trim set, not a list of its own).
+        let start = range.location + (raw as NSString).range(of: original).location
+        let occurrence = TranscriptCorrection.occurrenceIndex(of: original, before: start, in: string)
+        return (original, occurrence, start)
+    }
+
+    /// Resolve the highlighted span to a correction request and prompt for the
+    /// replacement.
+    private func beginCorrection(scope: TranscriptCorrectionRequest.Scope) {
+        guard let (original, occurrence, _) = selectedCorrection() else { return }
         guard let replacement = promptForReplacement(of: original), replacement != original
         else { return }
         onCorrect?(
