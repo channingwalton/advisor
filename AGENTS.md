@@ -46,7 +46,7 @@ sh sidecar/test/replay.sh              # replay fragments through the pipeline (
 cd App && sh package.sh                # → dist/Advisor.app (self-contained; sign-local.sh: Developer ID › "Advisor Dev" › ad-hoc)
 cd App && sh install.sh                # clean build + install to ~/Applications
 cd App && sh dmg.sh                    # signed + notarised DMG (runs sign.sh; one notary round)
-mise run release                       # DMG + tag vVERSION
+mise run release                       # DMG + tag vVERSION + push + GitHub release
 ```
 
 Versioning: the repo-root `VERSION` file is the single source of truth —

@@ -21,7 +21,7 @@ description = "Build the signed and notarised DMG"
 run = "cd App && sh dmg.sh"
 
 [tasks.release]
-description = "Build the DMG and tag vVERSION"
+description = "Build the DMG, tag vVERSION and publish it as a GitHub release"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -39,8 +39,14 @@ fi
 mise run dmg
 dmg="App/dist/Advisor-$version.dmg"
 git tag "v$version"
+git push origin main "v$version"
+# --verify-tag: without it gh would create a missing tag from the remote
+# default branch, which need not be the commit tagged above.
+gh release create "v$version" "$dmg" \
+    --verify-tag \
+    --title "Advisor $version" \
+    --generate-notes
 echo "==> v$version released: $dmg"
-echo "    now: git push origin main v$version"
 '''
 
 [tasks.install]

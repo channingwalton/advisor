@@ -2964,6 +2964,19 @@ Three latent drifts between `SessionMarkdown.cardBlock` and its inverse
   utterance would need the transcript at parse time and wasn't worth it for a
   P3.
 
+## DMG published to GitHub Releases (2026-10-19)
+
+The DMG's new home, left open when the website went: `mise run release` now
+pushes `main` and the tag, then runs `gh release create` with the DMG attached
+and notes generated from the commits since the previous tag. It runs locally,
+not in CI, because signing and notarisation use the local keychain; moving it
+to Actions would mean putting those credentials into repository secrets.
+`--verify-tag` makes `gh` fail rather than create a missing tag from the remote
+default branch, which need not be the commit the task tagged. The repo is
+private, so the release is visible only to collaborators. If `gh` fails after
+the push, a re-run refuses the existing tag; finish by running the
+`gh release create` line by hand.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

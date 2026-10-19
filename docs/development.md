@@ -68,7 +68,7 @@ If `mise` is installed, common tasks are available from the repo root:
 mise run commit-check   # clean build and test both sides; Swift warnings fail it (alias: mise run cc)
 mise run run            # run the debug build
 mise run dmg            # create App/dist/Advisor-<version>.dmg
-mise run release        # dmg + tag vVERSION
+mise run release        # dmg + tag vVERSION + push + GitHub release
 mise run install        # install to ~/Applications/Advisor.app
 ```
 
@@ -168,8 +168,9 @@ release: bump `VERSION` and commit the bump, then
 mise run release
 ```
 
-which builds the DMG and tags `vVERSION` at `HEAD`. It refuses to run if the
-tag already exists (bump `VERSION` first) or if `VERSION` has uncommitted
-changes (the tag must point at a commit carrying the version it names). Push
-the tag yourself (`git push origin main vVERSION`); the DMG in `App/dist` is
-not published anywhere.
+which builds the DMG, tags `vVERSION` at `HEAD`, pushes `main` and the tag, and
+creates a GitHub release for the tag with the DMG attached and notes generated
+from the commits since the previous tag. It refuses to run if the tag already
+exists (bump `VERSION` first) or if `VERSION` has uncommitted changes (the tag
+must point at a commit carrying the version it names). It needs `gh` logged in
+with push access to the repo.
