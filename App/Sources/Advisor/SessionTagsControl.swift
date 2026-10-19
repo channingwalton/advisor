@@ -72,6 +72,7 @@ struct SessionTagsEditor: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .help("Add tag")
                 }
             }
         }

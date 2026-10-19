@@ -29,7 +29,8 @@ The toolbar keeps only in-session controls: the record cluster (waveform,
 timer, mic mute, stop) and audio source on the left; on the right the target
 folder (when recording into one), **Name**, **Context**, **Tags**, **Auto
 cards**, **Hide transcript**, **Summarise**, **Float** and **Export**. Idle
-collapses the cluster to a single **Listen** pill.
+collapses the cluster to a single **Listen** pill. Hover an icon for its
+tooltip; tooltips show even while another app is in front.
 
 - **Stop** is resumable — it pauses capture but keeps the session live, and the
   cluster offers **Resume** to pick it back up with full context. The session is

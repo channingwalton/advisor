@@ -2977,6 +2977,32 @@ private, so the release is visible only to collaborators. If `gh` fails after
 the push, a re-run refuses the existing tag; finish by running the
 `gh release create` line by hand.
 
+## Tooltips while in the background (2026-10-19)
+
+Issue #105 ("Icons need hover tool tips"). The icon controls already carried
+`.help` text, and a scan of the live toolbar, cards and tags editor (asking
+the hosting view's tooltip manager for the string at each point) confirmed
+SwiftUI resolves it for each one. What hid them is AppKit's gate: SwiftUI's
+tooltips go through `NSViewDynamicToolTipManager`, whose `_canShowToolTip`
+asks the window's `_showToolTip`, and that refuses unless `NSApp.isActive` or
+the window's `allowsToolTipsWhenApplicationIsInactive` is set (read from the
+disassembly, then checked in a background-only probe app: false by default,
+true with the flag). The manager's hover tracking area is `.activeAlways`
+with or without the flag, so that gate is the only block. Advisor's usual
+place is floating over the meeting app, so a hover never showed anything
+until a click brought Advisor forward.
+
+`showsToolTipsWhenInactive()` puts an empty view behind each scene's root
+(Sessions, Recording, Preferences) that sets the flag in
+`viewDidMoveToWindow`, so a reopened recording window's fresh `NSWindow` gets
+it too. Popovers are windows of their own but don't need it: SwiftUI's
+transient popovers close when the app resigns active (seen in a probe), so
+none is open while Advisor is in the background. Preferences sheets do stay
+open, but hold no icon tooltips. The tag picker's `+` rows were the one
+symbol icon without a tooltip; they now say "Add tag", matching the pill's
+"Remove tag". The tag colour swatches are plain circles with no tooltip, and
+stay that way.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

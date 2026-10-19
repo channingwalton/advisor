@@ -76,6 +76,7 @@ struct AdvisorApp: App {
         Window("Sessions", id: "sessions") {
             SessionsView()
                 .task { services.start(lanes: agentLanes) }
+                .showsToolTipsWhenInactive()
         }
         .windowStyle(.hiddenTitleBar)
         // Compact: smaller toolbar buttons and a shorter traffic-light row, so
@@ -88,6 +89,7 @@ struct AdvisorApp: App {
         Window("Recording", id: "recording") {
             TranscriptView(services: services)
                 .frame(minWidth: 420, minHeight: 480)
+                .showsToolTipsWhenInactive()
         }
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
@@ -96,6 +98,7 @@ struct AdvisorApp: App {
         .commands { RecordingCommands() }
         Settings {
             PreferencesView()
+                .showsToolTipsWhenInactive()
         }
     }
 }
