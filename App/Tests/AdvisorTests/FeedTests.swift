@@ -287,3 +287,19 @@ private func expansion(_ items: [FeedItem]) -> [Bool] {
     #expect(ps.first?.lines.map(\.text) == ["Hello there.", "Next."])
     #expect(ps.first?.lines.map(\.id) == ["0", "0"])
 }
+
+@Test func savedCardKeepsAnArrowItalicLineGluedToTheBody() {
+    // #101: the writer puts its footer after a blank line, as the sole trailing
+    // paragraph. An italic arrow line that ends a body paragraph is body text.
+    let card = SavedCard.card(from: "**CONTEXT · X**\n\nBody.\n_↳ see the linked thread_", id: "x")
+    #expect(card.body == "Body.\n_↳ see the linked thread_")
+    #expect(card.triggerQuote == nil)
+    #expect(card.footnote == nil)
+}
+
+@Test func savedCardWithNoBodyStillReadsItsFooter() {
+    // The writer's shape for an empty body: header, blank, footer.
+    let card = SavedCard.card(from: "**CONTEXT · X**\n\n_↳ the quote_", id: "x")
+    #expect(card.body == "")
+    #expect(card.triggerQuote == "the quote")
+}

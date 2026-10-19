@@ -106,25 +106,19 @@ enum SessionMarkdown {
         return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
     }
 
-    /// A follow-up Q&A (asked from the history browser) as a blockquote "chat"
-    /// block, matching the inline card style: a bold `Q · question` header, the
-    /// answer markdown, then an `_Asked …_` footer. Every line is `>`-prefixed so
-    /// a multi-paragraph answer stays in the quote. Appended to the saved note.
+    /// A follow-up Q&A (asked from the history browser) as a card block: a bold
+    /// `Q · question` header, the answer markdown, then an `_Asked …_` footer —
+    /// a `question` card through `cardBlock`, so `SavedCard` reads it back as one.
+    /// Appended to the saved note.
     static func followUpBlock(question: String, answer: String, asked: Date) -> String {
         let stamp = DateFormatter()
         stamp.locale = Locale(identifier: "en_US_POSIX")
         stamp.calendar = Calendar(identifier: .gregorian)
         stamp.dateFormat = "HH:mm:ss · yyyy-MM-dd"
 
-        var lines = ["**Q · \(question)**"]
-        let body = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !body.isEmpty {
-            lines.append("")
-            lines += body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        }
-        lines.append("")
-        lines.append("_Asked \(stamp.string(from: asked))_")
-        return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
+        return cardBlock(Card(
+            id: "", created: asked, kind: "question", title: question, body: answer, state: "done",
+            footnote: "Asked \(stamp.string(from: asked))"))
     }
 
     /// A card's body after a follow-up: the body so far, a rule, the user's
@@ -148,19 +142,23 @@ enum SessionMarkdown {
     }
 
     /// The header label — the card's kind, as `SavedCard.card(from:id:)` reads
-    /// it back. (Saved follow-ups' `Q` header is written elsewhere.)
+    /// it back: the two maps must stay inverses (#99).
     static func label(for card: Card) -> String {
         switch card.kind {
         case "context": return "CONTEXT"
         case "summary": return "SUMMARY"
         case "factcheck": return "FACT-CHECK"
+        case "question": return "Q"
         default: return "ANSWER"
         }
     }
 
     /// A card as a blockquote "chat" block: bold `LABEL · Title` header, the
-    /// body markdown, then a footer line (grounding note or trigger quote).
-    /// Every line is `>`-prefixed so multi-paragraph bodies stay in the quote.
+    /// body markdown, then — after a blank line, as the sole trailing paragraph —
+    /// a one-line footer (grounding note, `Asked …` stamp or `↳ trigger quote`).
+    /// Every line is `>`-prefixed so multi-paragraph bodies stay in the quote;
+    /// a newline in the footer's text would break out of it (#100), so the
+    /// footer is collapsed to one line.
     static func cardBlock(_ card: Card) -> String {
         var lines = ["**\(label(for: card)) · \(card.title)**"]
 
@@ -171,8 +169,8 @@ enum SessionMarkdown {
         }
 
         let isAnswer = card.kind == "answer" || card.kind == "query"
-        var footer = card.footnote ?? (isAnswer ? SavedCard.groundedNote : "")
-        if footer.isEmpty, let quote = card.triggerQuote, !quote.isEmpty {
+        var footer = oneLine(card.footnote ?? (isAnswer ? SavedCard.groundedNote : ""))
+        if footer.isEmpty, let quote = card.triggerQuote.map(oneLine), !quote.isEmpty {
             footer = "↳ \(quote)"
         }
         if !footer.isEmpty {
@@ -181,5 +179,11 @@ enum SessionMarkdown {
         }
 
         return lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
+    }
+
+    /// `text` as one line: newlines collapsed to single spaces, ends trimmed.
+    private static func oneLine(_ text: String) -> String {
+        text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 }

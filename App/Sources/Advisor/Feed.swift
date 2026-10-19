@@ -229,11 +229,12 @@ enum Feed {
 /// feed uses, so a saved session renders through the same card view.
 enum SavedCard {
     /// `**LABEL · Title**` (or a label-only `**SUMMARY**`) header, the body,
-    /// then an optional one-line footer in the writer's own forms: an italic note
-    /// (`_↳ quote_`, `_Grounded in the live conversation_` or `…saved transcript_`,
-    /// a follow-up's `_Asked …_`). Any other last line — the body's own citation
-    /// links, an italic remark — stays in the body. A block without a known
-    /// header isn't one Advisor wrote, so it has no kind and no footer.
+    /// then an optional one-line footer in the writer's own shape: its own
+    /// paragraph, an italic note (`_↳ quote_`, `_Grounded in the live
+    /// conversation_` or `…saved transcript_`, a follow-up's `_Asked …_`). Any
+    /// other last line — the body's own citation links, an italic remark, an
+    /// arrow line ending a body paragraph — stays in the body. A block without a
+    /// known header isn't one Advisor wrote, so it has no kind and no footer.
     static func card(from markdown: String, id: String) -> Card {
         var lines = markdown.components(separatedBy: "\n")
         var kind = ""
@@ -255,8 +256,11 @@ enum SavedCard {
 
         var quote: String?
         var footnote: String?
-        // A summary never has a footer.
-        if !kind.isEmpty, kind != "summary", let last = lines.last,
+        // A summary never has a footer. The writer puts its footer after a blank
+        // line (or straight after the header when the body is empty), so a
+        // matching line that ends a body paragraph is body text (#101).
+        let endsOwnParagraph = lines.count == 1 || lines.dropLast().last?.trimmingCharacters(in: .whitespaces).isEmpty == true
+        if !kind.isEmpty, kind != "summary", endsOwnParagraph, let last = lines.last,
             let note = footerNote(last, followUp: kind == "question")
         {
             lines.removeLast()

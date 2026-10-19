@@ -2938,6 +2938,32 @@ add the field to `protocol.ts`, an example frame to `protocol/examples.json`
 (the contract tests fail until both sides handle it) and a `label(for:)`
 value the parser reads back.
 
+## Saved-card footer: one shape, both ways (2026-10-19)
+
+Three latent drifts between `SessionMarkdown.cardBlock` and its inverse
+`SavedCard.card(from:id:)`, all found in the #89 review passes (#99, #100,
+#101):
+
+- **Question cards.** The parser read a `Q` header as kind `question`, but the
+  writer's `label(for:)` had no `question` case, so a question `Card` through
+  `cardBlock` came back as an `ANSWER` with the `Asked …` stamp stuck in the
+  body. `label(for:)` now writes `Q`, and `followUpBlock` is a `question` card
+  through `cardBlock` rather than a hand-built copy of its layout — one writer,
+  so the maps can't drift apart again (a round-trip test pins them).
+- **Newlines in the footer.** The body is split on newlines before `>`-prefixing
+  but the footer was appended whole, so a trigger quote containing a newline
+  broke out of the blockquote and ended the card early. The footer is one line
+  by contract: `cardBlock` collapses its newlines to spaces.
+- **Body text read as the footer.** The parser took any trailing italic `↳ …`
+  line as the trigger quote, including one that merely ended a body paragraph
+  (a common quoting form in model output), and a re-save then persisted the
+  drift. The writer only ever puts the footer after a blank line (or straight
+  after the header when the body is empty), so the parser now requires that
+  shape. An italic arrow line that is its own trailing paragraph remains
+  indistinguishable from a footer by text alone; matching it against the anchor
+  utterance would need the transcript at parse time and wasn't worth it for a
+  P3.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

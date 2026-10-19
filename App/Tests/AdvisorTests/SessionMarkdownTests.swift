@@ -166,3 +166,77 @@ private func makeCard(
     #expect(md.contains("started: "))
     #expect(md.contains("ended: "))
 }
+
+// MARK: card block ↔ saved card
+
+/// The inner markdown of a card block, as `TranscriptDoc` hands it to `SavedCard`.
+private func inner(_ block: String) throws -> String {
+    let cards = TranscriptDoc.blocks(from: block).compactMap { b -> String? in if case .card(let m) = b { m } else { nil } }
+    try #require(cards.count == 1, "one card block, nothing escaped the blockquote")
+    return cards[0]
+}
+
+@Test func questionCardRoundTripsThroughCardBlock() throws {
+    // #99: the writer's label map and the parser's kind map are inverses.
+    let written = Card(
+        id: "q", created: Date(timeIntervalSince1970: 1_000), kind: "question", title: "What next?",
+        body: "Ship it.", state: "done", footnote: "Asked 10:15:02 · 2026-10-05")
+    let block = SessionMarkdown.cardBlock(written)
+    #expect(block.hasPrefix("> **Q · What next?**"))
+
+    let parsed = SavedCard.card(from: try inner(block), id: "x")
+    #expect(parsed.kind == "question")
+    #expect(parsed.title == "What next?")
+    #expect(parsed.body == "Ship it.")
+    #expect(parsed.footnote == "Asked 10:15:02 · 2026-10-05")
+    #expect(parsed.triggerQuote == nil)
+}
+
+@Test func followUpBlockIsAQuestionCardBlock() throws {
+    let asked = Date(timeIntervalSince1970: 1_000)
+    let block = SessionMarkdown.followUpBlock(question: "What next?", answer: "Ship it.", asked: asked)
+    let parsed = SavedCard.card(from: try inner(block), id: "x")
+    #expect(parsed.kind == "question")
+    #expect(parsed.body == "Ship it.")
+    #expect(parsed.footnote?.hasPrefix("Asked ") == true)
+    #expect(SessionMarkdown.cardBlock(parsed) == block)
+}
+
+@Test func cardBlockKeepsAMultilineTriggerQuoteOnOneFooterLine() throws {
+    // #100: a footer is one line by contract; a newline in the quote must not
+    // break out of the blockquote.
+    let card = makeCard(created: Date(timeIntervalSince1970: 1_000), kind: "context", triggerQuote: "first line\nsecond line")
+    let block = SessionMarkdown.cardBlock(card)
+    #expect(block.split(separator: "\n").allSatisfy { $0.hasPrefix(">") })
+    #expect(block.hasSuffix("> _↳ first line second line_"))
+
+    let parsed = SavedCard.card(from: try inner(block), id: "x")
+    #expect(parsed.body == "Body text.")
+    #expect(parsed.triggerQuote == "first line second line")
+}
+
+@Test func cardBlockKeepsAMultilineFootnoteOnOneFooterLine() throws {
+    let card = Card(
+        id: "q", created: Date(timeIntervalSince1970: 1_000), kind: "question", title: "T",
+        body: "A.", state: "done", footnote: "Asked 10:15\n· 2026-10-05")
+    let block = SessionMarkdown.cardBlock(card)
+    #expect(block.split(separator: "\n").allSatisfy { $0.hasPrefix(">") })
+    #expect(SavedCard.card(from: try inner(block), id: "x").footnote == "Asked 10:15 · 2026-10-05")
+}
+
+@Test func cardBlockWritesNoFooterForAWhitespaceOnlyTriggerQuote() throws {
+    let card = makeCard(created: Date(timeIntervalSince1970: 1_000), kind: "context", triggerQuote: " \n ")
+    let block = SessionMarkdown.cardBlock(card)
+    #expect(!block.contains("↳"))
+    let parsed = SavedCard.card(from: try inner(block), id: "x")
+    #expect(parsed.body == "Body text.")
+    #expect(parsed.triggerQuote == nil)
+}
+
+@Test func cardBlockFallsBackToTheTriggerQuoteWhenTheFootnoteIsBlank() throws {
+    var card = makeCard(created: Date(timeIntervalSince1970: 1_000), kind: "context", triggerQuote: "we said X")
+    card.footnote = "\n"
+    let parsed = SavedCard.card(from: try inner(SessionMarkdown.cardBlock(card)), id: "x")
+    #expect(parsed.triggerQuote == "we said X")
+    #expect(parsed.footnote == nil)
+}
