@@ -670,6 +670,15 @@ final class SidecarManager {
         send(["type": "config", "lanes": count])
     }
 
+    /// The "Include transcript text in the log" preference, mid-session. Sent
+    /// on every preference edit; the sidecar acts only on a change. Skipped,
+    /// not reported as dropped, while no sidecar runs: a new one reads
+    /// config.json at launch and at every session_start.
+    func sendLogTranscriptText(_ on: Bool) {
+        guard stdinHandle != nil else { return }
+        send(["type": "config", "logTranscriptText": on])
+    }
+
     /// Returns whether the message was accepted (sidecar up and JSON encodable).
     /// The write itself happens asynchronously on `writeQueue`; a write failure
     /// surfaces on the status line rather than in the return value.

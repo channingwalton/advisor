@@ -67,12 +67,14 @@ struct AdvisorConfig: Codable, Equatable {
     /// session notes, so the sidecar never sees this — like `sttLocale`. Resolved
     /// through `SessionArchive.directory`.
     var sessionDir = ""
-    /// App-side only: whether recognised utterance text is written to the log
-    /// file (`~/Library/Logs/Advisor`). Off by default, so the log carries only
-    /// diagnostics and the transcripts live only in the session folder (code
-    /// review 2026-10-17). A debugging aid for echo dedup and disfluency cleanup.
-    /// Applied to the recorder at once, mid-recording too. The sidecar never logs
-    /// transcript text, so it has no such key.
+    /// Whether recognised utterance text is written to the log file
+    /// (`~/Library/Logs/Advisor`), by the app and the sidecar. Off by default,
+    /// so the log carries only diagnostics and the transcripts live only in the
+    /// session folder (code review 2026-10-17). A debugging aid for echo dedup,
+    /// disfluency cleanup and what the classifier was given. Applied to the
+    /// recorder at once, mid-recording too; the sidecar reads it from
+    /// config.json at launch and at each session_start, and gets a change in a
+    /// `config` frame.
     var logTranscriptText = false
 
     init() {}

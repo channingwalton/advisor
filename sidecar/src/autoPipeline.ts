@@ -27,11 +27,20 @@ export interface AutoPipelineDeps {
   /// A research lane's card is done. Default: mark it idle. The pool uses this
   /// to shed an excess lane the moment it finishes, not at the next dispatch.
   releaseLane?(lane: Lane): void;
-  /// Research one trigger as a card on `lane`.
-  research(lane: Lane, trigger: Trigger): Promise<void>;
+  /// Research one trigger as a card on `lane`, calling `textSent` when the
+  /// card's first text goes to the app.
+  research(lane: Lane, trigger: Trigger, textSent: () => void): Promise<void>;
   /// Overrides DEBOUNCE_MS (tests).
   debounceMs?: number;
+  /// Where diagnostics go. Default: the sidecar log (tests capture them).
+  log?(line: string): void;
+  /// The clock, in ms. Default: Date.now (tests drive it by hand).
+  now?(): number;
 }
+
+/// A trigger waiting for a lane, with when the line that completed its window
+/// was heard.
+type Queued = Trigger & { heardAt: number };
 
 /// The automatic cards: classify new transcript after a pause, dedupe the
 /// triggers against recently covered subjects, and research each on a free lane.
@@ -47,16 +56,23 @@ export class AutoPipeline {
   private rerunWanted = false;
   private classifyFailStreak = 0;
   private readonly covered = new Map<string, number>();
-  private readonly queue: Trigger[] = [];
+  private readonly queue: Queued[] = [];
   /// Bumped whenever Auto cards is toggled or a session starts or ends, so a
   /// classify that began under different conditions drops its result.
   private epoch = 0;
+  /// When the newest transcript line arrived. Each line is pushed and heard in
+  /// one step, so at classify time this is when the window's last line came.
+  private lastHeardAt = 0;
 
   /// One writer of `lane.busy` on the way back: the deps' releaseLane, else idle.
   private readonly releaseLane: (lane: Lane) => void;
+  private readonly log: (line: string) => void;
+  private readonly now: () => number;
 
   constructor(private readonly deps: AutoPipelineDeps) {
     this.releaseLane = deps.releaseLane?.bind(deps) ?? ((lane) => { lane.busy = false; });
+    this.log = deps.log?.bind(deps) ?? log;
+    this.now = deps.now?.bind(deps) ?? Date.now;
   }
 
   /// A new session: nothing covered or queued.
@@ -80,10 +96,16 @@ export class AutoPipeline {
 
   /// New transcript (an utterance or note): classify once it goes quiet.
   heard(): void {
+    this.lastHeardAt = this.now();
+    this.schedule();
+  }
+
+  /// Classify once the transcript goes quiet.
+  private schedule(): void {
     if (!this.auto || !this.sessionActive) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(
-      () => void this.runClassify().catch((err) => log(`fire-and-forget classify rejected: ${err}`)),
+      () => void this.runClassify().catch((err) => this.log(`fire-and-forget classify rejected: ${err}`)),
       this.deps.debounceMs ?? DEBOUNCE_MS
     );
   }
@@ -116,14 +138,17 @@ export class AutoPipeline {
       if (!lane) return; // a lane finishing will drain again
       const t = this.queue.shift()!;
       lane.busy = true;
-      const t0 = Date.now();
-      void this.deps.research(lane, t)
+      const t0 = this.now();
+      // The card appears now: research opens it at once, pending.
+      const textSent = () =>
+        this.log(`card "${t.subject}" shown ${t0 - t.heardAt}ms, text ${this.now() - t.heardAt}ms after the last line`);
+      void this.deps.research(lane, t, textSent)
         .finally(() => {
-          log(`research "${t.subject}" ${Date.now() - t0}ms`);
+          this.log(`research "${t.subject}" ${this.now() - t0}ms`);
           this.releaseLane(lane);
           this.drain();
         })
-        .catch((err) => log(`fire-and-forget research "${t.subject}" rejected: ${err}`));
+        .catch((err) => this.log(`fire-and-forget research "${t.subject}" rejected: ${err}`));
     }
   }
 
@@ -161,16 +186,16 @@ export class AutoPipeline {
   }
 
   private coveredSubjects(): string[] {
-    const now = Date.now();
+    const now = this.now();
     for (const [k, t] of this.covered) {
       if (now - t > COVERED_TTL_MS) this.covered.delete(k);
     }
     return [...this.covered.keys()];
   }
 
-  private enqueue(item: Trigger): void {
+  private enqueue(item: Queued): void {
     for (const dropped of boundedPush(this.queue, item, MAX_RESEARCH_QUEUE)) {
-      log(`research queue full — dropped oldest: ${dropped.subject}`);
+      this.log(`research queue full — dropped oldest: ${dropped.subject}`);
       this.covered.delete(normalise(dropped.subject)); // never researched
     }
   }
@@ -185,8 +210,9 @@ export class AutoPipeline {
     try {
       const { text: window, anchorId, end } = this.classifierDelta();
       if (!window) return;
-      log(`classify start (window ${window.length} chars)`);
-      const ct0 = Date.now();
+      const heardAt = this.lastHeardAt;
+      this.log(`classify start (window ${window.length} chars)`);
+      const ct0 = this.now();
       const epoch = this.epoch;
       const result = await this.deps.classify(window, this.coveredSubjects());
       // Auto cards was toggled, or the session ended or restarted, meanwhile:
@@ -199,11 +225,11 @@ export class AutoPipeline {
         // straight failures, give up and advance past it so a persistently
         // failing classifier can't stall the pipeline or grow the window forever.
         if (++this.classifyFailStreak >= MAX_CLASSIFY_RETRIES) {
-          log(`classify failed ${this.classifyFailStreak}x — giving up on this window, advancing cursor`);
+          this.log(`classify failed ${this.classifyFailStreak}x — giving up on this window, advancing cursor`);
           this.deps.transcript.setCursor("classifier", end);
           this.classifyFailStreak = 0;
         } else {
-          log(`classify failed (${Date.now() - ct0}ms, attempt ${this.classifyFailStreak}) — re-feeding window next pass`);
+          this.log(`classify failed (${this.now() - ct0}ms, attempt ${this.classifyFailStreak}) — re-feeding window next pass`);
         }
         return;
       }
@@ -212,20 +238,23 @@ export class AutoPipeline {
       // window so its lines are judged exactly once.
       this.deps.transcript.setCursor("classifier", end);
       const { triggers } = result;
-      log(`classify ${Date.now() - ct0}ms → ${triggers.length} trigger(s)`);
+      const decidedAt = this.now();
+      this.log(
+        `classify ${decidedAt - ct0}ms → ${triggers.length} trigger(s), decided ${decidedAt - heardAt}ms after the last line`
+      );
       for (const t of triggers) {
         const key = normalise(t.subject);
         if (!key || this.covered.has(key)) continue;
-        this.covered.set(key, Date.now());
-        log(`trigger(${t.kind}): ${t.subject}`);
-        this.enqueue({ ...t, anchorId });
+        this.covered.set(key, this.now());
+        this.log(`trigger(${t.kind}): ${t.subject}`);
+        this.enqueue({ ...t, anchorId, heardAt });
       }
       this.drain();
     } finally {
       this.classifying = false;
       if (this.rerunWanted) {
         this.rerunWanted = false;
-        this.heard();
+        this.schedule();
       }
     }
   }

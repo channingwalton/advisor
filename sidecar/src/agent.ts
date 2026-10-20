@@ -469,6 +469,15 @@ export function resultOutcome(msg: SDKResultMessage, buffer: string): TaskResult
   return { text: buffer, error: detail ? `${msg.subtype}: ${detail}` : msg.subtype };
 }
 
+/// A turn's token usage for the run-done log line. Per turn, unlike the
+/// cumulative cost and API time on the same message. `out` counts thinking
+/// too, so a short answer with a large `out` was thought over first.
+function tokenUsage(msg: SDKResultMessage): string {
+  const u = msg.usage as Partial<SDKResultMessage["usage"]> | undefined;
+  if (!u) return "";
+  return ` tokens in=${u.input_tokens} out=${u.output_tokens} cache_read=${u.cache_read_input_tokens} cache_write=${u.cache_creation_input_tokens}`;
+}
+
 const ERROR_LINE_MAX = 200;
 
 function oneLine(s: string): string {
@@ -771,7 +780,7 @@ export class AgentSession implements Agent {
             const p = pending.shift();
             const outcome = resultOutcome(msg, p?.buffer ?? "");
             if (p) {
-              log(`${this.opts.name}: run done +${Date.now() - p.t0}ms (cold=${p.cold}) final: ${JSON.stringify(outcome.text.slice(0, 400))}${outcome.error ? ` error: ${outcome.error}` : ""}`);
+              log(`${this.opts.name}: run done +${Date.now() - p.t0}ms (cold=${p.cold})${tokenUsage(msg)} final: ${JSON.stringify(outcome.text.slice(0, 400))}${outcome.error ? ` error: ${outcome.error}` : ""}`);
             }
             if (p && !p.settled) {
               p.settled = true;

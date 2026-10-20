@@ -143,6 +143,23 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
     #expect(sent.last?["id"] as? String == note.id.uuidString)
 }
 
+/// Every preference edit passes the "Include transcript text in the log"
+/// value on. With no sidecar running there is no one to tell — the next one
+/// reads config.json — so nothing is sent and no dropped message is reported.
+@MainActor
+@Test func logTranscriptTextIsSentOnlyToARunningSidecar() async throws {
+    let h = Harness()
+    defer { h.close() }
+    h.manager.sendLogTranscriptText(true)
+    #expect(!h.store.status.contains("dropped"))
+    h.manager.start()
+    h.manager.sendLogTranscriptText(true)
+    h.manager.sendLogTranscriptText(false)
+    h.manager.sendSessionEnd() // a marker: once it lands, every earlier frame has
+    #expect(await waitFor { h.sent().last?["type"] as? String == "session_end" })
+    #expect(h.sent().compactMap { $0["logTranscriptText"] as? Bool } == [true, false])
+}
+
 @MainActor
 @Test func req_protocol_everySendMatchesItsExample() async throws {
     let examples = try Examples.load()
@@ -172,6 +189,7 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
     sends("query") { h.manager.sendAction("answer", text: "Cedar's rate limits", triggerId: UUID().uuidString) }
     sends("config") { h.manager.sendAuto(true) }
     sends("config") { h.manager.sendLanes(3) }
+    sends("config") { h.manager.sendLogTranscriptText(true) }
     sends("cancel") { h.manager.sendCancel("k7p2-7") }
     sends("card_reply") {
         #expect(

@@ -7,7 +7,7 @@ import {
   summaryTask,
 } from "./prompts.js";
 import { ProcessCardIDs } from "./cardIds.js";
-import { Inbound, log, logSync, send } from "./protocol.js";
+import { Inbound, log, logSync, send, utteranceLogLine } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
 import { cardLaneOptions, Lane, LanePool, QueryLanes, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
@@ -101,9 +101,10 @@ function runCard(
   kind: "answer" | "context" | "factcheck" | "query",
   title: string,
   task: string,
-  triggerId?: string
+  triggerId?: string,
+  textSent?: () => void
 ): Promise<void> {
-  return runCardWith(lane, kind, title, task, triggerId, cardDeps);
+  return runCardWith(lane, kind, title, task, triggerId, cardDeps, textSent);
 }
 
 /// Answer a follow-up typed into an existing card. Runs on a transient one-shot
@@ -265,8 +266,8 @@ const pipeline = new AutoPipeline({
   classify,
   freeLane: () => research.free(),
   releaseLane: (lane) => research.release(lane),
-  research: (lane, t) =>
-    runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId),
+  research: (lane, t, textSent) =>
+    runCard(lane, cardKind(t.kind), t.subject, researchTask(t.kind, t.subject, t.query), t.anchorId, textSent),
 });
 
 // MARK: protocol handling
@@ -295,9 +296,9 @@ function handle(msg: Inbound): void {
       break;
     case "utterance":
       transcript.push({ id: msg.id, source: msg.source, text: msg.text, ts: msg.ts });
-      // Length, not text: the log is diagnostics, the transcript lives in the
-      // user's session folder (code review 2026-10-17).
-      log(`utterance(${msg.source}): ${msg.text.length} chars`);
+      // Text only with the user's preference on: the log is diagnostics, the
+      // transcript lives in the user's session folder (code review 2026-10-17).
+      log(utteranceLogLine(msg.source, msg.text, config.logTranscriptText));
       pipeline.heard();
       break;
     case "note":
@@ -352,6 +353,11 @@ function handle(msg: Inbound): void {
         research.resize(Math.max(1, Math.min(8, Math.floor(msg.lanes))));
         log(`research lanes: ${research.size}`);
         pipeline.drain();
+      }
+      // Sent on every preference edit; only a change is worth a line.
+      if (typeof msg.logTranscriptText === "boolean" && msg.logTranscriptText !== config.logTranscriptText) {
+        config.logTranscriptText = msg.logTranscriptText;
+        log(`log transcript text: ${msg.logTranscriptText}`);
       }
       break;
     case "cancel":

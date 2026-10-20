@@ -12,6 +12,10 @@ function harness(lanes = 1, debounceMs = 0) {
   const coveredLists: string[][] = [];
   const pending: ((r: ClassifyResult) => void)[] = [];
   const researched: string[] = [];
+  /// Each card's "first text sent" hook, in dispatch order.
+  const cardTexts: (() => void)[] = [];
+  const logs: string[] = [];
+  let clock = 0;
   const pool: Lane[] = Array.from({ length: lanes }, (_, i) => ({
     name: `research${i}`, busy: false,
     session: { run: async () => ({ text: "" }), reset: () => {}, interrupt: async () => {} },
@@ -25,7 +29,12 @@ function harness(lanes = 1, debounceMs = 0) {
       return new Promise((resolve) => pending.push(resolve));
     },
     freeLane: () => pool.find((l) => !l.busy),
-    research: async (_lane, t) => { researched.push(t.subject); },
+    research: async (_lane, t, textSent) => {
+      researched.push(t.subject);
+      cardTexts.push(textSent);
+    },
+    log: (line) => logs.push(line),
+    now: () => clock,
   });
   let n = 0;
   const say = (text: string) => {
@@ -34,7 +43,8 @@ function harness(lanes = 1, debounceMs = 0) {
   };
   const answer = (...subjects: string[]) =>
     pending.shift()!({ ok: true, triggers: subjects.map((subject): Trigger => ({ kind: "question", subject, query: subject })) });
-  return { pipeline, say, answer, windows, coveredLists, researched, pool, pending, transcript };
+  const tick = (ms: number) => { clock += ms; };
+  return { pipeline, say, answer, windows, coveredLists, researched, cardTexts, pool, pending, transcript, logs, tick };
 }
 
 /// Let timers (debounce 0) and promise continuations run.
@@ -111,6 +121,64 @@ test("#auto-resume-new-speech a classify from before an off-and-on drops its res
   await settle();
   assert.match(h.windows[1], /After/);
   assert.doesNotMatch(h.windows[1], /While off/);
+});
+
+test("the classify log says how long after the last line heard the decision came", async () => {
+  const h = harness();
+  h.pipeline.start();
+  h.say("What is Cedar?"); // t=0
+  h.tick(1000);
+  h.say("Who owns it?"); // t=1000, the last line of the window
+  h.tick(1500); // the pause before classifying
+  await settle(); // classify starts at t=2500
+  h.tick(900);
+  h.answer(); // decided at t=3400
+  await settle();
+  assert.ok(
+    h.logs.includes("classify 900ms → 0 trigger(s), decided 2400ms after the last line"),
+    h.logs.join("\n"),
+  );
+});
+
+test("a line heard while a classify runs is timed from when it was heard, not from its re-run", async () => {
+  const h = harness();
+  h.pipeline.start();
+  h.say("What is Cedar?");
+  await settle(); // first classify starts at t=0
+  h.tick(1000);
+  h.say("Who owns it?"); // t=1000, waits for the first classify
+  await settle();
+  h.tick(2000);
+  h.answer(); // t=3000: the re-run classifies "Who owns it?"
+  await settle();
+  h.tick(500);
+  h.answer(); // decided at t=3500
+  await settle();
+  assert.ok(
+    h.logs.includes("classify 500ms → 0 trigger(s), decided 2500ms after the last line"),
+    h.logs.join("\n"),
+  );
+});
+
+test("a card's log line says how long after the last line it appeared and its text began", async () => {
+  const h = harness(1);
+  h.pool[0].busy = true; // the card waits for a lane
+  h.pipeline.start();
+  h.say("What is Cedar?"); // t=0
+  await settle();
+  h.tick(2000);
+  h.answer("Cedar"); // decided at t=2000, queued
+  await settle();
+  h.tick(1000);
+  h.pool[0].busy = false;
+  h.pipeline.drain(); // the card appears at t=3000
+  await settle();
+  h.tick(4000);
+  h.cardTexts[0](); // its first text, at t=7000
+  assert.deepEqual(
+    h.logs.filter((l) => l.startsWith("card ")),
+    ['card "Cedar" shown 3000ms, text 7000ms after the last line'],
+  );
 });
 
 test("a failed classify re-feeds its window; a successful one moves past it (issue #43)", async () => {

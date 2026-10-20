@@ -35,7 +35,8 @@
       {
         "type": "config",
         "auto": true,
-        "lanes": 3
+        "lanes": 3,
+        "logTranscriptText": true
       },
       {
         "type": "cancel",
@@ -96,7 +97,8 @@
       ],
       "config": [
         "auto",
-        "lanes"
+        "lanes",
+        "logTranscriptText"
       ],
       "card_reply": [
         "transcript"

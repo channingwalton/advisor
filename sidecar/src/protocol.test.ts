@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import type { Inbound, Outbound } from "./protocol.js";
+import { utteranceLogLine, type Inbound, type Outbound } from "./protocol.js";
 
 // The protocol is written down twice — `Inbound`/`Outbound` in protocol.ts and
 // string-keyed dictionaries in SidecarManager.swift — over a pipe neither side
@@ -37,7 +37,7 @@ const inbound: Fields<Inbound> = {
   utterance: { id: "string", source: "string", text: "string", ts: "number" },
   note: { id: "string", text: "string", ts: "number" },
   query: { id: "string", text: "string", action: "string?", triggerId: "string?" },
-  config: { auto: "boolean?", lanes: "number?" },
+  config: { auto: "boolean?", lanes: "number?", logTranscriptText: "boolean?" },
   cancel: { cardId: "string" },
   card_reply: {
     cardId: "string", kind: "string", title: "string", base: "string", replyText: "string",
@@ -105,4 +105,22 @@ test("#97 the app → sidecar examples are the Inbound frames, one per type", ()
 
 test("#97 the sidecar → app examples are the Outbound frames, one per type", () => {
   holdExamplesToTypes("sidecar → app", examples.sidecarToApp, outbound);
+});
+
+// The log is diagnostics; the transcript lives in the user's session folder
+// (code review 2026-10-17). An utterance's text reaches the log only with the
+// "Include transcript text in the log" preference on, as the app's own line.
+test("an utterance's log line carries its length by default", () => {
+  assert.equal(utteranceLogLine("them", "the quarterly numbers", false), "utterance(them): 21 chars");
+});
+
+test("an utterance's log line carries its text when the preference is on", () => {
+  assert.equal(utteranceLogLine("them", "the quarterly numbers", true), 'utterance(them): "the quarterly numbers"');
+});
+
+test("an utterance's text stays on its log line, quotes and newlines escaped", () => {
+  assert.equal(
+    utteranceLogLine("them", 'it said "done"\n[sidecar +1.0s] classify', true),
+    'utterance(them): "it said \\"done\\"\\n[sidecar +1.0s] classify"',
+  );
 });

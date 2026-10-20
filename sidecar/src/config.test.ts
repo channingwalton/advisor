@@ -83,3 +83,9 @@ test("effortArg returns the level, or undefined to inherit", () => {
   assert.equal(effortArg(mergeConfig({ effort: "low" })), "low");
   assert.equal(effortArg(mergeConfig({})), undefined);
 });
+
+test("mergeConfig keeps transcript text out of the log unless logTranscriptText is true", () => {
+  assert.equal(mergeConfig({}).logTranscriptText, false);
+  assert.equal(mergeConfig({ logTranscriptText: "yes" }).logTranscriptText, false);
+  assert.equal(mergeConfig({ logTranscriptText: true }).logTranscriptText, true);
+});

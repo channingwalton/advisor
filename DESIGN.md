@@ -71,7 +71,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Logging.** All app and sidecar diagnostics go through `FileLog` (`Log.swift`) to `~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so the file shows up under Console.app → Log Reports and survives a packaged run (where stderr goes nowhere). The app is the *sole* writer: its own lines arrive via `appLog.write`, the sidecar's stderr is captured by `SidecarManager` and funnelled in via `appLog.appendSidecar` (lines reassembled across chunk boundaries, each wall-clock-timestamped). One serial queue → no write contention and a single chronological timeline that interleaves app and `[sidecar +Xs]` lines. Mirrored to stderr too for dev runs. Rotates by size (5 MB), keeping one previous file (`advisor.log.1`).
 
-**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, `logTranscriptText`, saved contexts and tags never reach the sidecar). Tabs: Agent (provider, model, effort, authentication, connector actions), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
+**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, saved contexts and tags never reach the sidecar; `logTranscriptText` does, for the sidecar's utterance line). Tabs: Agent (provider, model, effort, authentication, connector actions), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
 
 ### TS sidecar
 
@@ -106,7 +106,7 @@ side to it (see *Protocol contract test*). Swift → sidecar:
 {"type":"utterance","id":"<utterance uuid>","source":"me|them","text":"...","ts":...}
 {"type":"note","id":"...","text":"<editorial note>","ts":...}
 {"type":"query","id":"q7","text":"...","action":"answer|context|factcheck","triggerId":"<utterance uuid>"}
-{"type":"config","auto":true,"lanes":3}
+{"type":"config","auto":true,"lanes":3,"logTranscriptText":true}
 {"type":"cancel","cardId":"<card or request id>"}
 {"type":"card_reply","cardId":"...","kind":"answer","title":"...","base":"<card's current body>","replyText":"...","transcript":"them: ...\nme: ..."}
 {"type":"summarise_live","cardId":"<existing summary card, on re-summarise>","transcript":"..."}
@@ -2371,7 +2371,9 @@ its size and error name, a denied tool by its path or URL only, an unparseable
 classifier reply by its length). Not covered, by choice: card bodies and the
 classifier's parsed triggers still reach the log — the agents' words about the
 conversation, kept for diagnosing cards — and a trigger's `query` restates
-what was said.
+what was said. (Superseded 2026-10-20: the sidecar's utterance line follows
+`logTranscriptText` too — see *Utterance text and decision time in the sidecar
+log*.)
 
 **Hardening batch.** Three smaller findings from the same review. *Lane
 shrink leaked subprocesses:* lowering the parallel-agents preference only
@@ -3098,6 +3100,56 @@ were both worth losing, and one popover could serve both ways in.
   holds the toolbar to the minimum, so a control that widens it fails there.
 
 No protocol change: a button note is the same `note` frame.
+
+## Utterance text and decision time in the sidecar log (2026-10-20)
+
+The sidecar logged each utterance as `utterance(them): 28 chars` even with
+**Include transcript text in the log** on: the switch covered only the app's
+`apple(...)` line, so the line the classifier actually received couldn't be
+read. The sidecar's line now follows the same switch (`utteranceLogLine`): the
+length by default, the text when on, JSON-quoted so a quote or newline in it
+can't break the line. The sidecar reads `logTranscriptText` from
+config.json at launch and at every `session_start`; a mid-session change
+arrives in a `config` frame, which the recording window sends from its
+`advisorConfigChanged` observer on every preference edit, and the sidecar acts
+(and logs) only on a change. The app keeps no copy of what it sent: the
+sidecar also reloads the value at `session_start`, so a copy would go stale
+(code review). With no sidecar running nothing is sent, and the value is not
+replayed on restart, since a new sidecar reads config.json. With no recording
+window open nothing is sent either, but there are no utterances to log until
+the next Listen, whose `session_start` reloads it. Notes are still logged as
+lengths.
+
+The classify line also gives the delay as the user experiences it:
+`classify 984ms → 0 trigger(s), decided 2486ms after the last line`. The first
+figure times the classifier call alone. The second runs from the sidecar
+receiving the window's last line to the verdict, so it includes the 1.5 s
+pause and any wait behind a classify already running. It is measured from
+receipt, not from the frame's `ts`, so speech recognition and the app's hold
+on mic lines are not counted. A re-run classify (`rerunWanted`) reschedules
+without counting as a new line heard. `AutoPipeline` takes `log` and `now`
+deps so that tests read the line against a clock they drive by hand.
+
+## Token usage and time to card in the log (2026-10-20)
+
+Classify calls ranged from 1 s to 8 s in a live session, nearly all of it
+before the first text, and the log couldn't say whether that was the model
+thinking. Each Claude run's `run done` line now carries the turn's tokens
+(`tokens in=… out=… cache_read=… cache_write=…`). The result message's `usage`
+is per turn, while its cost and API time add up over the session (checked
+against the SDK). `out` includes thinking, so `{"triggers":[]}` costing
+hundreds of output tokens means the classifier thought first. Codex runs log no
+usage yet.
+
+Each auto card also logs when it reached the user, from the same reference as
+`decided`: `card "Cedar" shown 3457ms, text 7074ms after the last line`.
+"Shown" is the dispatch to a lane, where `runCard` sends the pending card at
+once; a card queued for a lane shows later than it was decided. "Text" is the
+first frame carrying an answer (streaming or done), reported by `runCard`
+through a `textSent` hook on its frame builder, which `AutoPipeline` passes to
+its `research` dep. A card that fails before any text logs no line; the
+`research "…" Nms` line still records it. Manual cards (Ask, right-click) have
+no line to measure from and log nothing new.
 
 ## Revisit as it grows
 

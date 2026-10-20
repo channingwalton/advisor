@@ -274,6 +274,29 @@ test("passes the effort level to the SDK and logs it on each run", async () => {
   await r1p;
 });
 
+test("logs each run's token usage", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const written: string[] = [];
+  const orig = process.stderr.write;
+  process.stderr.write = ((chunk: unknown) => {
+    written.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const r1p = session.run("task1", undefined, 1000);
+    spawns[0].messages.push({
+      ...success("{\"triggers\":[]}"),
+      usage: { input_tokens: 129, output_tokens: 412, cache_read_input_tokens: 2048, cache_creation_input_tokens: 96 },
+    });
+    await r1p;
+  } finally {
+    process.stderr.write = orig;
+  }
+  const done = written.find((s) => s.includes("test: run done"));
+  assert.ok(done?.includes("tokens in=129 out=412 cache_read=2048 cache_write=96"), written.join(""));
+});
+
 test("omits the effort option when none is set", async () => {
   const { queryFn, spawns } = makeFakeQuery();
   const session = new AgentSession(opts, queryFn);

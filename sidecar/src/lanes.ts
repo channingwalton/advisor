@@ -1,6 +1,6 @@
 import { Agent, type AgentSessionOptions } from "./agent.js";
 import { AdvisorConfig, effortArg, modelArg } from "./config.js";
-import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
+import { cardUpdateFrame, guardedRun, type Frame } from "./guardedRun.js";
 import { buildResearchSystem, sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
 import { log, Outbound } from "./protocol.js";
 
@@ -101,23 +101,32 @@ export interface RunCardDeps {
 
 /// Answer one card on a pooled lane: open the card, run the task with the
 /// conversation the lane hasn't seen, and stream the answer into the card.
+/// `textSent` is called once, as the card's first text goes to the app.
 export async function runCard(
   lane: Lane,
   kind: "answer" | "context" | "factcheck" | "query",
   title: string,
   task: string,
   triggerId: string | undefined,
-  deps: RunCardDeps
+  deps: RunCardDeps,
+  textSent?: () => void
 ): Promise<void> {
   const cardId = deps.nextCardId();
   lane.currentCardId = cardId;
   deps.send({ type: "card", id: cardId, trigger: triggerId, kind, title, body: "…", state: "pending" });
+  const update = cardUpdateFrame(cardId);
+  let texted = false;
+  const frame: Frame = (body, state, activity) => {
+    if (!texted && (state === "streaming" || state === "done")) {
+      texted = true;
+      textSent?.();
+    }
+    return update(body, state, activity);
+  };
   let failed = false;
   try {
     const prompt = sessionContextPrefix(deps.sessionContext()) + deps.transcript.delta(lane.name) + task;
-    failed = await guardedRun(
-      lane.session, cardId, prompt, cardUpdateFrame(cardId), "agent error", deps
-    );
+    failed = await guardedRun(lane.session, cardId, prompt, frame, "agent error", deps);
   } finally {
     // Recycle a pooled (research/query) lane after any failure — timeout/error.
     // Unlike the transient reply/summary/document lanes (disposed every turn),

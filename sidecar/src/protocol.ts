@@ -25,7 +25,10 @@ export type Inbound =
       action?: "answer" | "context" | "factcheck";
       triggerId?: string;
     }
-  | { type: "config"; auto?: boolean; lanes?: number }
+  // logTranscriptText: the "Include transcript text in the log" preference,
+  // sent on every preference edit so a change applies mid-session (the sidecar
+  // acts only on a change); launch and session_start read it from config.json.
+  | { type: "config"; auto?: boolean; lanes?: number; logTranscriptText?: boolean }
   | { type: "cancel"; cardId: string }
   // Follow-up typed into an existing card. The sidecar holds no card state, so
   // the app sends everything needed to answer in context: the card's current
@@ -123,6 +126,14 @@ export function logSync(message: string): void {
   } catch {
     /* stderr gone — nothing to say it to */
   }
+}
+
+/// The log line for an utterance: its text only when the "Include transcript
+/// text in the log" preference allows, else its length — the log is
+/// diagnostics, the transcript lives in the user's session folder. The text is
+/// JSON-quoted, so a newline or quote in it can't break the line.
+export function utteranceLogLine(source: Source, text: string, includeText: boolean): string {
+  return includeText ? `utterance(${source}): ${JSON.stringify(text)}` : `utterance(${source}): ${text.length} chars`;
 }
 
 /// Elapsed-since-start prefix so all log lines sit on one timeline.

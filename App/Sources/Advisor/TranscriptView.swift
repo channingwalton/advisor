@@ -179,6 +179,7 @@ struct TranscriptView: View {
             savedContexts = cfg.contexts
             tagLibrary = cfg.tags
             recorder?.logTranscriptText = cfg.logTranscriptText // live, mid-recording too
+            services.sidecar.sendLogTranscriptText(cfg.logTranscriptText)
             if sessionStart == nil {
                 recordingDraft.retainKnownTags(in: cfg.tags)
             }

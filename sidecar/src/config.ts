@@ -23,6 +23,9 @@ export interface AdvisorConfig {
   /// How much the card lanes think (an SDK effort level), or "" = inherit the
   /// user's own Claude setting. Not applied to the classifier. Claude only.
   effort: EffortLevel | "";
+  /// Write utterance text to the log, not only its length (the app's
+  /// "Include transcript text in the log" preference).
+  logTranscriptText: boolean;
 }
 
 const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
@@ -34,6 +37,7 @@ const DEFAULTS: AdvisorConfig = {
   provider: "claude",
   model: "",
   effort: "",
+  logTranscriptText: false,
 };
 
 /// The model id to pass to the SDK, or undefined to use the provider's default.
@@ -73,6 +77,7 @@ export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
     // An unknown level (a typo, or one from a newer app) inherits rather than
     // reaching the SDK as an invalid option.
     effort: EFFORT_LEVELS.find((l) => l === raw.effort) ?? DEFAULTS.effort,
+    logTranscriptText: bool(raw.logTranscriptText, DEFAULTS.logTranscriptText),
   };
 }
 

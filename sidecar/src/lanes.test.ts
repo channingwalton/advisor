@@ -40,6 +40,33 @@ function deps(transcript: Transcript): RunCardDeps & { sent: Outbound[] } {
 
 const say = (t: Transcript, id: string, text: string) => t.push({ id, source: "them", text, ts: 0 });
 
+test("runCard reports a card's first text once, as it is sent", async () => {
+  const t = new Transcript();
+  const lane = scriptedLane([]);
+  lane.session.run = async (_task, progress) => {
+    progress?.onText?.("Cedar is");
+    progress?.onText?.("Cedar is the billing rewrite.");
+    return { text: "Cedar is the billing rewrite." };
+  };
+  const d = deps(t);
+  let texts = 0;
+  let sentBefore = -1;
+  await runCard(lane, "answer", "Cedar", "Answer: what is Cedar?", "u1", d, () => {
+    texts += 1;
+    sentBefore = d.sent.length;
+  });
+  assert.equal(texts, 1);
+  assert.equal(sentBefore, 1, "reported as the first text frame goes out, after the pending card");
+});
+
+test("runCard reports no text for a card that fails without any", async () => {
+  const t = new Transcript();
+  const lane = scriptedLane([{ text: "", error: "agent error" }]);
+  let texts = 0;
+  await runCard(lane, "answer", "Cedar", "Answer: what is Cedar?", "u1", deps(t), () => { texts += 1; });
+  assert.equal(texts, 0);
+});
+
 test("#context-lane-recycle a lane restarted after a failed card is sent the whole conversation again", async () => {
   const transcript = new Transcript();
   const lane = scriptedLane([{ text: "", error: "timed out" }, { text: "Priya" }]);
