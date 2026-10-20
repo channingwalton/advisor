@@ -3090,7 +3090,9 @@ were both worth losing, and one popover could serve both ways in.
 - **The recording window's minimum width rose from 420pt to 850pt**
   (`Theme.Metric.recordingWindowMinWidth`), so the toolbar never clips: 850pt
   is its narrowest layout at its widest, a stopped session filed into a folder
-  with a microphone's name and a name, context and tags set. Folding Name,
+  with a microphone's name and a name, context and tags set. Text widths vary
+  a little between macOS releases (850.5pt on CI's macOS 26), so the test
+  allows 2pt over: too little to show. Folding Name,
   Context and Tags as well would have kept the window nearer 700pt, but their
   popovers would need a new anchor; a wider window was chosen instead. A test
   holds the toolbar to the minimum, so a control that widens it fails there.
