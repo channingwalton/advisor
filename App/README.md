@@ -12,7 +12,7 @@ Sidecar build: `cd ../sidecar && npm install --include=dev && npm run build`
 
 ```sh
 cd App
-swift build
+sh xcode.sh swift build           # under the Xcode .xcode-version pins
 .build/debug/Advisor              # GUI: click Listen (or press space), speak
 ```
 

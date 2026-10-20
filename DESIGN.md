@@ -3151,6 +3151,29 @@ its `research` dep. A card that fails before any text logs no line; the
 `research "…" Nms` line still records it. Manual cards (Ask, right-click) have
 no line to measure from and log nothing new.
 
+## Xcode pinned (2026-10-20)
+
+CI built the app with the `macos-26` image's default Xcode (26.6, Swift
+6.3.3) while releases were built locally with whatever Xcode was selected
+(27.0, Swift 6.4, on macOS 27), so CI wasn't testing the toolchain that
+shipped, and nothing in the repo said which one it should be. The macOS
+versions still differ (CI has no macOS 27 image), and so can text metrics.
+
+`.xcode-version` now pins 26.6, the newest Xcode 26 on the CI image. Every
+swift step runs through `App/xcode.sh`: commit-check, `package.sh`,
+`install.sh` and CI's build and test. It finds the Xcode whose
+`CFBundleShortVersionString` equals the pin among `/Applications/Xcode*.app`,
+sets `DEVELOPER_DIR` to it for the one command, and refuses to run the command
+without it. Finding it by version, not by a fixed path, copes with both
+layouts (`Xcode_26.6.app` plus symlinks on CI, `Xcode-26.6.app` beside a newer
+`Xcode.app` locally) and leaves `xcode-select` alone for other projects. The
+selection is the check: `/usr/bin/swift` follows `DEVELOPER_DIR`, so the swift
+steps run under the pinned Xcode or not at all. A `swift` earlier on `PATH`
+(swiftly) or `TOOLCHAINS` set would bypass it; neither is the case here or on
+CI. Matching the short version can't tell a 26.6 beta from the release.
+`XcodePinTests` runs the script over fake Xcode apps. A plain `swift build`
+outside the script still uses the selected Xcode.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

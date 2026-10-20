@@ -37,11 +37,12 @@ research queries your chosen AI provider runs.
 
 ```sh
 cd sidecar && npm install --include=dev && npm run build
-cd ../App && swift build && .build/debug/Advisor
+cd ../App && sh xcode.sh swift build && .build/debug/Advisor
 ```
 
-Requires macOS 26+ on Apple Silicon, the Xcode toolchain and Node 26.11.1
-(pinned in `.tool-versions`; `mise install` fetches it).
+Requires macOS 26+ on Apple Silicon, Xcode 26.6 (pinned in `.xcode-version`;
+`App/xcode.sh` runs the build under it) and Node 26.11.1 (pinned in
+`.tool-versions`; `mise install` fetches it).
 Packaging, signing and releases are in
 [docs/development.md](docs/development.md).
 

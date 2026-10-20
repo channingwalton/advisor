@@ -39,12 +39,12 @@ flowchart LR
 # sidecar
 cd sidecar && npm install --include=dev && npm run build
 
-# app
-cd ../App && swift build
+# app, under the Xcode .xcode-version pins
+cd ../App && sh xcode.sh swift build
 .build/debug/Advisor
 ```
 
-Tests: `cd App && swift test` and `cd sidecar && npm test`. The sidecar suite
+Tests: `cd App && sh xcode.sh swift test` and `cd sidecar && npm test`. The sidecar suite
 includes the `*.sdk.test.ts` files, which check the tool sandbox, the tools the
 classifier is offered, effort, streaming and the logged-out failure shape
 against the real bundled Claude CLI (a local fake model or no credentials at
@@ -54,7 +54,9 @@ classifier on a real transcript, `sh sidecar/test/replay.sh` feeds
 `sidecar/test/fragments.txt` through the built sidecar and prints the triggers
 and cards (needs `jq` and a CLI login).
 
-Requires: macOS 26+ (Apple Silicon), Xcode toolchain, Node 26.11.1 (pinned in
+Requires: macOS 26+ (Apple Silicon), Xcode 26.6 (pinned in `.xcode-version`;
+install it from https://developer.apple.com/download/all/ alongside any other
+Xcode, as `/Applications/Xcode-26.6.app`), Node 26.11.1 (pinned in
 `.tool-versions`; `mise install` fetches it), a logged-in
 Claude Code or Codex CLI. First run prompts for Microphone and Screen & System
 Audio Recording permissions. A packaged app prompts as Advisor; a bare
@@ -82,7 +84,8 @@ required on the target Mac.
 
 **On the build machine** (Apple Silicon), you need:
 
-- the Xcode toolchain (`swift`, `codesign`);
+- Xcode 26.6, the version `.xcode-version` pins, which CI builds with;
+  `package.sh` builds under it through `xcode.sh` and refuses without it;
 - an arm64 `node` on `PATH` — its binary is copied into the bundle. It must be
   the version `.tool-versions` pins, which CI tests on; `package.sh` refuses
   any other.
@@ -93,7 +96,7 @@ required on the target Mac.
 cd App && sh package.sh        # → App/dist/Advisor.app
 ```
 
-The script runs a release `swift build`, builds the sidecar (`npm install` +
+The script runs a release `swift build` under the pinned Xcode, builds the sidecar (`npm install` +
 `tsc`), assembles the `.app`, and signs it. Re-run it any time; it rebuilds
 `dist/Advisor.app` from scratch.
 

@@ -12,7 +12,7 @@ APP=dist/Advisor.app
 INSTALLED="$DEST/Advisor.app"
 
 echo "==> clean"
-swift package clean
+sh xcode.sh swift package clean
 rm -rf dist
 
 echo "==> package"

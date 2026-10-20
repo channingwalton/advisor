@@ -37,8 +37,8 @@ decision.
 ## Build & test
 
 ```sh
-cd App && swift build                  # app
-cd App && swift test                   # app tests
+cd App && sh xcode.sh swift build      # app, under the Xcode .xcode-version pins
+cd App && sh xcode.sh swift test       # app tests
 cd sidecar && npm run build            # tsc (npm install --include=dev first)
 cd sidecar && npm test                 # tsc + node --test (incl. sandbox.sdk against the real CLI)
 mise run commit-check                  # clean build + test both sides, warnings as errors (as CI)
@@ -58,7 +58,7 @@ Resource paths resolve via `AppResources` (bundle when packaged, `repoRoot`
 in a dev checkout) — keep new runtime-resource lookups going through it.
 
 CI (`.github/workflows/ci.yml`) builds and tests both sides on push to `main`
-and on PRs (App on `macos-26`, sidecar on `ubuntu-latest`). Always build both
+and on PRs (App on `macos-26` under the pinned Xcode, sidecar on `ubuntu-latest`). Always build both
 sides locally before committing too. The commit check and CI build Swift with
 `-warnings-as-errors`; a plain `swift build` doesn't, and `devtool check` hides
 compiler output when it passes — so a warning only shows by failing the check.
@@ -71,7 +71,7 @@ tests green" is **not** done for these: observe it in the running app or report
 it unverified — never frame test-green as done for a visual/runtime ticket (this
 drove the #21 rework and #12 churn).
 
-- Screenshot the dev build: `cd App && swift build`, launch the `.build` binary,
+- Screenshot the dev build: `cd App && sh xcode.sh swift build`, launch the `.build` binary,
   capture a window with `screencapture -l <windowid>` (ids via CGWindowList).
   Full-screen `screencapture` / `osascript` clicks need Accessibility /
   Screen-Recording grants and usually fail.
@@ -87,7 +87,10 @@ drove the #21 rework and #12 churn).
 
 - Work in main, don't branch unless told to
 - Pin exact versions. Node is pinned in `.tool-versions`, which mise, CI
-  (`node-version-file`) and `package.sh` (it bundles that Node) all read. npm
+  (`node-version-file`) and `package.sh` (it bundles that Node) all read.
+  Xcode is pinned in `.xcode-version`: every swift step (commit-check,
+  `package.sh`, `install.sh`, CI) runs through `App/xcode.sh`, which selects
+  that Xcode by version and refuses to run without it. npm
   dependencies are exact in `sidecar/package.json`; `sidecar/.npmrc` sets
   `save-exact`.
 - Always keep docs up to date

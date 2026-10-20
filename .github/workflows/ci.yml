@@ -18,12 +18,14 @@ jobs:
         working-directory: App
     steps:
       - uses: actions/checkout@v4
+      # Every swift step runs under the Xcode .xcode-version pins (xcode.sh),
+      # as locally, not the image's default.
       - name: Swift version
-        run: swift --version
+        run: sh xcode.sh xcodebuild -version && sh xcode.sh swift --version
       - name: Build
-        run: swift build -Xswiftc -warnings-as-errors
+        run: sh xcode.sh swift build -Xswiftc -warnings-as-errors
       - name: Test
-        run: swift test -Xswiftc -warnings-as-errors
+        run: sh xcode.sh swift test -Xswiftc -warnings-as-errors
 
   sidecar:
     name: Sidecar (Node)

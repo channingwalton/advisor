@@ -26,7 +26,8 @@ if [ "$have" != "$want arm64" ]; then
 fi
 
 echo "==> swift build (release)"
-swift build -c release
+# Under the Xcode .xcode-version pins, the one CI tests with.
+sh xcode.sh swift build -c release
 
 echo "==> build sidecar"
 # Dev deps (typescript) are needed to compile. Capture output to a log and print
