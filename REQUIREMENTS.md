@@ -39,7 +39,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - Turning Auto cards off starts no further automatic card: a classification still running or waiting, and research waiting for a lane, are dropped (dropped subjects can come up again). `#auto-off-stops-cards`
   - Turning Auto cards back on classifies only what is said from then on. `#auto-resume-new-speech`
   - A detected subject in any script (not only Latin) produces a card, and is deduplicated as itself. `#trigger-subject-any-script`
-- F8a. Auto cards: one toolbar toggle turns automatic cards (answers, context, fact-checks) off and on mid-session without stopping listening; manual actions and the query box keep working while it's off.
+- F8a. Auto cards: one toolbar toggle turns automatic cards (answers, context, fact-checks) off and on mid-session without stopping listening; manual actions and Ask keep working while it's off.
 - F9. Surface background context for detected entities (relevant notes, tickets, docs, prior discussion).
 - F10. Fact-check claims against web/internal sources, citing the source; say "couldn't verify" rather than guess when a claim can't be confirmed.
 - F11. Search across: the web, work tools via the user's MCP connectors (e.g. Jira, Confluence, Slack), and the user's own notes and local files/repos (read-only; credential paths excluded). Advisor holds no notes location of its own: personal context, such as where notes live, comes from the user's own agent configuration (for Claude, `~/.claude/CLAUDE.md`).
@@ -52,9 +52,12 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 
 ### Interface
 - F13. Live recording window: compact; updates as the conversation flows without stealing focus; can be kept on top of other windows on request (Float).
-- F14. On-demand query: a text box to ask about the current conversation or anything else, with conversation transcript as context.
+- F14. On-demand query: Ask (a toolbar popover, ⌘K) about the current conversation or anything else, with conversation transcript as context.
 - F14a. In-situ actions: right-click selected transcript text to run an action (Answer / Context / Fact check) on it — the same kinds the auto-classifier detects, gated by the same per-kind toggles; the resulting card is anchored under the originating line.
 - F14b. Editorial notes (issue #34): right-click a transcript line to inject the user's own context as a distinct green NOTE card anchored at that line; the agents read it as part of the transcript (so it can inform or trigger research). Deletable; persisted with the session.
+  - The toolbar's Note (⇧⌘N) adds one at the current point in the conversation, or at the end of a saved transcript; right-click opens the same popover placed at its line (issue #104).
+  - A note added before Listen is kept when the session starts, opens its transcript, and reaches the agents once the session has started (issue #104).
+  - A question asked before Listen keeps its card when the session starts, and an answer still being written then finishes (issue #104).
 - F14c. Transcript corrections (issue #32): right-click a mis-transcribed word or phrase to correct that instance or replace it throughout the session, live or in a saved session; the correction is saved to the transcript in place.
 - F14d. Card follow-ups: a finished card takes a follow-up question, whose answer is appended to that card, so a card becomes a short thread.
 - F14e. Summarise (issue #30): on demand, live or on a saved session, distil the whole conversation into one Summary card kept with the note; summarising again updates it in place.
@@ -63,7 +66,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - The saved note keeps a card's last completed answer while a follow-up or re-summarise runs, and after one is cancelled. `#card-settled-note`
   - A failed re-summarise keeps the previous summary, in the window and the note. `#card-settled-summary`
   - An Ask answer or Summary for a saved note still saves if the note is filed into a folder meanwhile, and a deleted note is never recreated. `#saved-note-moved-save`
-  - An Ask or Summarise on a saved note can be stopped while it runs; nothing is saved, and a stopped question returns to the field. `#sessions-answer-cancel`
+  - An Ask or Summarise on a saved note can be stopped while it runs; nothing is saved, and a stopped question returns to the Ask popover. `#sessions-answer-cancel`
 - F16a. Ask a saved session: a question about a past session is answered from its note, and the answer is appended to that note under a Follow-ups heading.
 - F16b. Manage saved sessions: rename (a short name titles the session in the list; blank falls back to its context), export a copy of the markdown, share it, reveal it in Finder, or delete it behind a confirmation. The live session can be exported from the recording window, but not deleted.
 - F16c. Session folders (issues #25, #35): organise sessions into user-named folders in the browser; file a session by dragging it onto a folder or with Move to Folder, and start a recording straight into a folder. Deleting a folder keeps its sessions.
@@ -131,7 +134,7 @@ sys ──┘        │                                              │
         local streaming STT (Apple SpeechAnalyzer)            │
                │  + echo dedup                                ├─ Swift app
                │                                              │
-        recording window (feed + query box), Sessions         │
+        recording window (feed + Ask / Note), Sessions        │
         browser, session store (markdown)                     │
                │  ▲ cards                                    ─┘
                ▼  │                 NDJSON over stdio (local IPC)

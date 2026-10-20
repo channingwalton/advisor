@@ -138,6 +138,72 @@ export async function runCard(
   }
 }
 
+/// The user's query lane (Ask and right-click actions), one query at a time. A
+/// session start gives the session a fresh lane, but one still answering then
+/// is retired rather than aborted, so a question asked before Listen gets its
+/// answer (issue #104), while the new session's own questions run on the fresh
+/// lane meanwhile; the retired lane's session is dropped once its card is
+/// over. Names (`query<n>`) key the transcript cursors, so a fresh lane never
+/// takes a retired one's — its card's failure path forgets that cursor (#86) —
+/// and a lane is shed (its cursor forgotten) when dropped, so one minted later
+/// under its name starts afresh.
+export class QueryLanes {
+  private current: Lane;
+  private retired: Lane[] = [];
+
+  constructor(
+    private readonly make: (name: string) => Lane,
+    private readonly shed: (lane: Lane) => void = () => {}
+  ) {
+    this.current = make("query0");
+  }
+
+  /// The lane new queries run on.
+  get lane(): Lane {
+    return this.current;
+  }
+
+  /// Every query lane, retired ones still answering included — where cancel
+  /// and the exit path look.
+  get all(): readonly Lane[] {
+    return [this.current, ...this.retired];
+  }
+
+  /// A new session: a fresh lane; the old one dropped, or retired while busy.
+  /// The fresh lane is made first, so a `make` that throws changes nothing,
+  /// and a drop that throws still leaves the session its fresh lane.
+  reset(): void {
+    const old = this.current;
+    const taken = new Set([...this.retired, ...(old.busy ? [old] : [])].map((l) => l.name));
+    let n = 0;
+    while (taken.has(`query${n}`)) n++;
+    const fresh = this.make(`query${n}`);
+    if (old.busy) this.retired.push(old);
+    else this.drop(old);
+    this.current = fresh;
+  }
+
+  /// `lane`'s card is over. A retired lane's session is dropped now; the
+  /// current one stays warm for the next query.
+  release(lane: Lane): void {
+    lane.busy = false;
+    if (!this.retired.includes(lane)) return;
+    this.retired = this.retired.filter((l) => l !== lane);
+    this.drop(lane);
+  }
+
+  /// Drop `lane`'s session and shed it. A reset that throws is logged, not
+  /// passed on: the lane is gone either way.
+  private drop(lane: Lane): void {
+    try {
+      lane.session.reset();
+    } catch (err) {
+      log(`${lane.name}: reset failed: ${err}`);
+    }
+    this.shed(lane);
+  }
+}
+
 /// The research pool: persistent lanes, `research0…`, grown to a size the app
 /// can change mid-session (at a session start up front, so the first can be
 /// warmed; otherwise on demand). Shrinking used to leave the lanes

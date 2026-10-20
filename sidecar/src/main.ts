@@ -10,7 +10,7 @@ import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, logSync, send } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
-import { cardLaneOptions, Lane, LanePool, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, Lane, LanePool, QueryLanes, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
 import { AutoPipeline } from "./autoPipeline.js";
 import {
   cardKind,
@@ -84,9 +84,8 @@ const transcript = new Transcript();
 /// a lane re-created under its name is sent the whole conversation.
 const research = new LanePool(makeLane, 3, (lane) => transcript.forget(lane.name));
 
-let queryLane: Lane = makeLane("query");
+const queries = new QueryLanes(makeLane, (lane) => transcript.forget(lane.name));
 
-let busy = false; // user queries (priority lane)
 const cardIDs = new ProcessCardIDs();
 
 const cardDeps: RunCardDeps = {
@@ -117,7 +116,7 @@ function runCard(
 const MAX_CONCURRENT_REPLIES = 3;
 let activeReplies = 0;
 /// In-flight reply lanes, keyed by the card they answer, so a `cancel` can find
-/// and interrupt them — they live outside the research pool and queryLane.
+/// and interrupt them — they live outside the research pool and the query lanes.
 const replyLanes: Lane[] = [];
 
 async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Promise<void> {
@@ -284,8 +283,7 @@ function handle(msg: Inbound): void {
       configureClassifier(config);
       resetClassifier();
       research.reset();
-      queryLane.session.reset();
-      queryLane = makeLane("query");
+      queries.reset();
       // Warm the cold-spawn off the critical path: the first real question then
       // skips the SDK subprocess boot (~5-10s) on the classifier and lead
       // research lane. Best-effort, fire-and-forget; warm-up answers discarded.
@@ -310,35 +308,36 @@ function handle(msg: Inbound): void {
       log(`note: ${msg.text.length} chars`);
       pipeline.heard();
       break;
-    case "query":
-      if (busy) {
+    case "query": {
+      // One query at a time on the session's lane; a retired lane still
+      // answering a question from before Listen doesn't hold it up.
+      if (queries.lane.busy) {
         send({ type: "error", fatal: false, message: "already answering — wait for the current card" });
         return;
       }
-      busy = true;
+      const lane = queries.lane;
+      lane.busy = true;
+      const done = () => queries.release(lane);
       if (msg.action) {
         // Right-click action on selected text: route to the same kind/template
         // as the auto-pipeline, anchored under the clicked utterance.
         const kind = msg.action === "answer" ? "question" : msg.action;
         void runCard(
-          queryLane,
+          lane,
           msg.action,
           msg.text,
           researchTask(kind, msg.text, msg.text),
           msg.triggerId
         )
-          .finally(() => {
-            busy = false;
-          })
+          .finally(done)
           .catch(guard("query action"));
       } else {
-        void runCard(queryLane, "query", msg.text, `Question: ${msg.text}`)
-          .finally(() => {
-            busy = false;
-          })
+        void runCard(lane, "query", msg.text, `Question: ${msg.text}`)
+          .finally(done)
           .catch(guard("query"));
       }
       break;
+    }
     case "session_context":
       // Live edit of the session prompt; applied to the next dispatched task.
       sessionContext = msg.text;
@@ -358,7 +357,7 @@ function handle(msg: Inbound): void {
     case "cancel":
       handleCancel(msg.cardId, {
         cancelledCards,
-        cardLanes: [...research.all, queryLane, ...replyLanes, ...summaryLanes],
+        cardLanes: [...research.all, ...queries.all, ...replyLanes, ...summaryLanes],
         documentLanes,
         send,
       });
@@ -394,6 +393,14 @@ function handle(msg: Inbound): void {
       break;
     case "session_end":
       pipeline.end();
+      // Forget the conversation, in the transcript and the query lane's warm
+      // session, so a question asked before the next Listen isn't answered from
+      // this one — its card is kept into that session's note (issue #104). The
+      // classifier and research lanes keep their warm sessions, now out of step
+      // with the cleared cursors, but run nothing until session_start resets
+      // them.
+      transcript.clear();
+      queries.reset();
       log("session ended");
       break;
     default: {
@@ -450,7 +457,7 @@ rl.on("close", () => {
   logSync("stdin closed, exiting");
   for (const reset of [
     resetClassifier,
-    ...[...research.all, queryLane, ...replyLanes, ...documentLanes, ...summaryLanes].map((l) => () => l.session.reset()),
+    ...[...research.all, ...queries.all, ...replyLanes, ...documentLanes, ...summaryLanes].map((l) => () => l.session.reset()),
   ]) {
     try {
       reset();

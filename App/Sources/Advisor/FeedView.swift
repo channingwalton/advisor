@@ -8,8 +8,9 @@ struct FeedActions {
     var transcriptActions: [TranscriptAction] = []
     /// (card kind, selected text, paragraph) — a research action was chosen.
     var onAction: (String, String, FeedParagraph) -> Void = { _, _, _ in }
-    /// (note text, offset within the paragraph, paragraph) — "Add note here…".
-    var onAddNote: ((String, Int, FeedParagraph) -> Void)?
+    /// (offset within the paragraph, paragraph) — "Add note here…" was chosen;
+    /// the window opens its Note popover placed there (issue #104).
+    var onAddNote: ((Int, FeedParagraph) -> Void)?
     /// A transcription correction was confirmed (issue #32).
     var onCorrect: ((TranscriptCorrectionRequest, FeedParagraph) -> Void)?
     var onToggleCard: ((Card) -> Void)?
@@ -81,7 +82,7 @@ private struct FeedTranscriptRun: View {
                 SelectableTranscriptText(
                     text: p.text, toolTip: p.toolTip, actions: actions.transcriptActions,
                     onAction: { kind, selection in actions.onAction(kind, selection, p) },
-                    onAddNote: actions.onAddNote.map { add in { text, offset in add(text, offset, p) } },
+                    onAddNote: actions.onAddNote.map { add in { offset in add(offset, p) } },
                     onCorrect: actions.onCorrect.map { correct in { request in correct(request, p) } },
                     lines: p.lines.map(\.text))
                     .overlay(alignment: .topLeading) {

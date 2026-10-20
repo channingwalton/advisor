@@ -2,7 +2,7 @@
 
 Mic + system audio → Apple SpeechAnalyzer (on-device) → live transcript,
 with a Node sidecar (`../sidecar`, Claude Agent SDK) that auto-detects
-questions/topics/claims and produces research cards, plus an on-demand query box.
+questions/topics/claims and produces research cards, plus on-demand Ask and notes.
 Sessions are saved as markdown to `~/Library/Application Support/Advisor/sessions/`.
 
 Sidecar build: `cd ../sidecar && npm install --include=dev && npm run build`

@@ -103,15 +103,25 @@ struct AdvisorApp: App {
     }
 }
 
-/// Menu-bar commands: Cmd-N starts a recording. Lives as a `Commands` type so it
-/// can read `openWindow` from the environment (the App struct can't directly).
+/// Menu-bar commands: Cmd-N starts a recording; Cmd-K and Shift-Cmd-N open the
+/// front window's Ask and Note popovers (issue #104). Lives as a `Commands` type
+/// so it can read `openWindow` from the environment (the App struct can't
+/// directly).
 struct RecordingCommands: Commands {
     @Environment(\.openWindow) private var openWindow
+    @FocusedValue(\.composer) private var composer
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Recording") { openWindow(id: "recording") }
                 .keyboardShortcut("n", modifiers: .command)
+            Divider()
+            Button("Ask…") { composer?.ask?() }
+                .keyboardShortcut("k", modifiers: .command)
+                .disabled(composer?.ask == nil)
+            Button("Add Note…") { composer?.note?() }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(composer?.note == nil)
         }
     }
 }

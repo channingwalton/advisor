@@ -40,11 +40,11 @@ struct SelectableTranscriptText: NSViewRepresentable {
     let actions: [TranscriptAction]
     /// (card kind, selected text) — fired when an AI action is chosen.
     let onAction: (String, String) -> Void
-    /// Fired with (entered text, selection-end/click offset within this
-    /// paragraph) when the user adds an editorial note here (issue #34). Nil hides
-    /// the "Add note" menu item — e.g. the still-being-written live note in the
-    /// browser.
-    var onAddNote: ((String, Int) -> Void)? = nil
+    /// Fired with the selection-end/click offset within this paragraph when the
+    /// user chooses "Add note here…" (issue #34); the window opens its Note
+    /// popover placed there (issue #104). Nil hides the menu item — e.g. the
+    /// still-being-written live note in the browser.
+    var onAddNote: ((Int) -> Void)? = nil
     /// Fired when a correction is confirmed (issue #32). Nil hides the correction
     /// menu items — e.g. the still-being-written live note in the browser.
     var onCorrect: ((TranscriptCorrectionRequest) -> Void)? = nil
@@ -132,7 +132,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
 final class ActionTextView: IntrinsicHeightTextView {
     var menuActions: [TranscriptAction] = []
     var onAction: ((String, String) -> Void)?
-    var onAddNote: ((String, Int) -> Void)?
+    var onAddNote: ((Int) -> Void)?
     var onCorrect: ((TranscriptCorrectionRequest) -> Void)?
     /// The lines `string` shows joined by single spaces (`SelectableTranscriptText.lines`).
     var lines: [String] = []
@@ -237,28 +237,7 @@ final class ActionTextView: IntrinsicHeightTextView {
     }
 
     @objc private func addNoteHere(_ sender: NSMenuItem) {
-        guard let text = promptForNote(), !text.isEmpty else { return }
-        onAddNote?(text, noteAnchorOffset)
-    }
-
-    /// Multiline text prompt for an editorial note (issue #34). Nil on cancel.
-    private func promptForNote() -> String? {
-        let alert = NSAlert()
-        alert.messageText = "Add note"
-        alert.informativeText = "Your own context for this point — the agents will read it."
-        let field = NSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 72))
-        field.font = NSFont.systemFont(ofSize: 13)
-        field.isRichText = false
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 72))
-        scroll.documentView = field
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        alert.accessoryView = scroll
-        alert.addButton(withTitle: "Add")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        return field.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        onAddNote?(noteAnchorOffset)
     }
 
     @objc private func correctThisOccurrence(_ sender: NSMenuItem) {

@@ -59,7 +59,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **AppServices.** Launch-lifetime owner of the shared `TranscriptStore` (utterances, cards, editorial notes, volatile text, status), `SidecarManager` and `SessionWriter`, started from the Sessions scene so saved sessions can be queried with no recording open. The `Recorder` belongs to the recording window and is held weakly. Scenes (`AdvisorApp.swift`): **Sessions** (the main window, opens at launch), **Recording** (a single-instance SwiftUI `Window`, ⌘N; never auto-opens) and **Settings**. There is no menu-bar item and no `NSPanel`: the recording window's **Float** toggle raises it to `.floating` level on all Spaces.
 
-**Recording window** (`TranscriptView`, `ListeningToolbar`, `AskBar`, `RecordControl`). Toolbar: Listen / Stop / Resume with the timer (Stop is resumable), mic mute, audio source, then the folder indicator, Name, Context and Tags chips, Auto cards, Hide Transcript, Summarise, Float and Export. The Ask bar sends free-text queries. Closing the window ends the session; if cards are still researching, `WindowCloseGuard` (`SessionClose.swift`) asks whether to wait for them or stop them. ⌘Q runs the same close through `QuitSequence` (`AppServices.shutdown`, 5 s deadline, then a synchronous save, sidecar stop and `_exit`).
+**Recording window** (`TranscriptView`, `ListeningToolbar`, `ComposerForm`, `RecordControl`). Toolbar: Listen / Stop / Resume with the timer (Stop is resumable), mic mute, audio source, then Ask and Note, the folder indicator, Name, Context and Tags chips, Auto cards, Hide Transcript, Summarise, Float and Export. Ask (⌘K) sends a free-text query and Note (⇧⌘N) an editorial note, each from a popover. Closing the window ends the session; if cards are still researching, `WindowCloseGuard` (`SessionClose.swift`) asks whether to wait for them or stop them. ⌘Q runs the same close through `QuitSequence` (`AppServices.shutdown`, 5 s deadline, then a synchronous save, sidecar stop and `_exit`).
 
 **Feed** (`Feed`, `FeedView`). One model and view for both windows: transcript runs (paragraphs with their time in the margin), cards anchored under the line that triggered them, editorial NOTE cards (`FeedNoteView`) and headings, in chronological order. The live feed follows the tail unless the user scrolls up. Right-click a line for AI actions (Answer / Context / Fact check), a correction, or Add note. Cards collapse, copy, skip or delete, and take follow-ups. Each window supplies its behaviour through `FeedActions`.
 
@@ -83,7 +83,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Card lanes** (`lanes.ts`). Every card-answering session takes `cardLaneOptions`: one system prompt (`buildResearchSystem()`: persona plus fixed operating rules — lead with the answer, notes first then web, no narration, cite, say "couldn't verify", never ask), the tools `WebSearch`, `WebFetch`, `Read`, `Grep`, `Glob` plus the user's own connectors, and the effort preference. The per-task instruction comes from `researchTask` (answer / context / fact-check), `replyTask`, `summaryTask`, `documentQuestionTask` or `documentResearchTask`. Two kinds of lane:
 
-- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and one query lane. `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation.
+- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and one query lane (`QueryLanes`; a session start retires one still answering rather than aborting it — see *Ask and Note from the toolbar*). `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation.
 - *Transient, one-shot* — card follow-ups (≤3 at once), the live summary, and saved-session tasks (ask, research, follow-up, summarise; ≤2 at once). Created per request, disposed after, never holding a pool slot.
 
 **Query lane.** The Ask box (a `query` card with no anchor, so it sorts in at the time of asking) and right-click actions (the action's kind, anchored under the clicked line). One at a time — a second gets an `error` frame. Gets its conversation through its own cursor, like a research lane.
@@ -459,7 +459,8 @@ Listen pill), `AskBar` (sparkle input + ⌘↵), and `ListeningCardView` (type/v
 pill, Researching state, copy/collapse/expand + dismiss, themed Markdown body,
 trigger-quote + sources footer, follow-up input). (Superseded 2026-10-06:
 `FeedCardView` replaced `ListeningCardView` in both windows — see *One feed for
-both windows*.) The transcript is a centred
+both windows*. `AskBar` was replaced 2026-10-20 by toolbar Ask and Note popovers
+— see *Ask and Note from the toolbar*.) The transcript is a centred
 812 pt column with a day divider and flowing paragraphs that group consecutive
 utterances, breaking only on a >1 s gap or an injected card, with a blinking
 interim line.
@@ -511,7 +512,8 @@ time, duration and card count, with the selected row a white card + blue accent
 bar. Right: the selected session — title, meta line, the questions asked of it,
 and the full transcript (cards inline, as in the live feed) — plus the ask bar.
 (Starting a recording stays in the Listening window's toolbar, not duplicated
-here.)
+here. The ask bar became a toolbar Ask popover on 2026-10-20 — see *Ask and Note
+from the toolbar*.)
 
 **Scope: layout + real data only.** Everything rendered comes from the saved
 notes. The handoff's AI-derived fields (category badge, topic chips, summary,
@@ -1203,6 +1205,8 @@ live feed ▸ **Add note here…**, type the note, and it lands as a distinct
 green-bordered **NOTE** card anchored at that line. Deletable via the card's
 dismiss button; add + delete only (no edit) — like a `#32` correction, removal is
 display/persistence only and never un-sends what the agents already read.
+(Since 2026-10-20 the note is typed in the toolbar's Note popover, which can
+also add one with no line chosen — see *Ask and Note from the toolbar*.)
 
 The note is **fed to the agents as part of the transcript stream**, not a
 side-channel: the app sends a new `note` NDJSON frame (`SidecarManager.sendNote`),
@@ -2653,7 +2657,9 @@ to settle only after the new lane has been sent a delta — the cursor survives
 and the next prompt carries no replay. Not changed: the query lane is rebuilt
 the same way at session start (`queryLane = makeLane("query")`), with the same
 synchronous settle behind it and a `busy` flag rather than a name rule — the
-same hardening would apply if that ever changes.
+same hardening would apply if that ever changes. (It did, 2026-10-20: a busy
+query lane is now retired, not aborted, and lanes take `query<n>` names — see
+*Ask and Note from the toolbar*.)
 
 **The connector gate keeps its read-verb-anywhere rule (#87, 2026-10-18).**
 The residual above — a word on neither action list ahead of a read verb passes
@@ -3002,6 +3008,88 @@ open, but hold no icon tooltips. The tag picker's `+` rows were the one
 symbol icon without a tooltip; they now say "Add tag", matching the pill's
 "Remove tag". The tag colour swatches are plain circles with no tooltip, and
 stay that way.
+
+## Ask and Note from the toolbar (2026-10-20)
+
+Issue #104 ("Create notes using the text box at the bottom"). Notes could
+only be added by right-clicking the transcript, which is missing when the
+transcript is hidden and awkward while the feed scrolls under the pointer, and
+the bottom Ask bar couldn't take a note. A `/note` prefix in the bar was
+considered and dropped: the bar's space and the right-click's modal prompt
+were both worth losing, and one popover could serve both ways in.
+
+- **Both windows lose their bottom field.** Toolbar **Ask** (⌘K) and **Note**
+  (⇧⌘N) buttons open popovers (`ComposerForm`): a field that grows with the
+  text, Return to submit, ⌥↵ for a new line. Popovers, not sheets, so the feed
+  stays visible and scrollable while typing. The drafts live in the window's
+  state, so a click away that closes the popover keeps them; a dot on the
+  button says one is waiting, and reopening puts the caret at the end (focusing
+  a field selects all of it, so the first key would have replaced the draft).
+  A draft clears only once its note is added (`NoteDraft.submit`): one a saved
+  session couldn't write stays in the popover, and one whose line has gone
+  loses its placement, to go at the end. Drafts last while the window shows
+  that session: closing the recording window drops them (the single-instance
+  `Window` keeps its state otherwise), as selecting another saved session does.
+  The draft dot is a badge on the icon, so it can't widen the toolbar into its
+  compact layout and close the popover mid-typing. One popover shows at a time.
+  In the Sessions detail the streaming answer panel and the error line stay at
+  the bottom, shown only while there is one; Ask and Note grey out while the
+  note is still being recorded, as the right-click edits do.
+- **One note editor.** "Add note here…" no longer runs a modal `NSAlert`: it
+  hands its offset to the window (`FeedActions.onAddNote`), which opens the
+  Note popover with a `NotePlacement` quoting the line the note goes under (✕
+  drops it, sending the note to the end). A saved session finds the placement's
+  paragraph again by its text and margin time
+  (`SessionDetailPane.paragraph(for:in:times:)`), as a research card saved
+  while the popover was open shifts block offsets. Live, a placement whose
+  lines have all gone (echo cleanup) is dropped, leaving the draft to go at the
+  end.
+- **Where a button note goes.** Live, at the moment it's added: after every
+  line heard so far, and lines still being transcribed then started earlier,
+  so they sort above it. Saved, after the transcript's last line, below the
+  cards and notes there and above any Follow-ups (`NoteEdit.appendingNote`).
+- **Notes and Asks before Listen.** They wait in the store and open the
+  transcript. Starting a session used to clear the store's notes and cards,
+  and `session_start` clears the sidecar's transcript, so
+  `TranscriptStore.beginSession` now keeps both and returns the notes, and
+  `SidecarManager.sendSessionStart` sends each after `session_start` — they
+  can trigger research as recording starts. A note is also sent as it's
+  typed, so a question asked before Listen reads it; the classifier ignores it
+  until the session starts. `session_start` also used to abort the query lane,
+  cutting off an answer still being written; it now retires a busy one instead
+  (`QueryLanes`, as the research pool retires a lane mid-card, #86, but
+  without aborting it), drops it once its card is over, and gives the session a
+  fresh lane under a new name (`query<n>`: names key the transcript cursors).
+  The one-query-at-a-time gate is the current lane's, so the session's own
+  questions aren't held up by the retired answer. Keeping those cards needed
+  two more boundaries: `session_end` now clears the sidecar's transcript and
+  resets the query lane, so a question asked before the next Listen isn't
+  answered from the last conversation and saved into the next note; and a
+  Listen that replaces the sidecar (a login change) fails the cards the old
+  one was answering, as a crash does (#49), rather than leaving them spinning. An
+  idle window's notes are all pre-session ones: closing the window clears the
+  store, so a note isn't taken while a close is still finishing. Export waits for the session's note
+  file (`SessionWriter.hasExportContent`): before it, there was nothing to copy.
+- **Menu commands.** File ▸ Ask… (⌘K) and Add Note… (⇧⌘N) reach the front
+  window through a focused scene value (`ComposerCommands`); each window
+  publishes its own, so the shortcuts work in whichever is in front and grey
+  out where they can't apply. ⌘N stays New Recording.
+- **A More menu for a narrow window.** Ask and Note widened the recording
+  toolbar: its icon-only layout needed about 735pt before it clipped, 820pt
+  while recording. Hide transcript, Summarise, Float and Export now fold into a
+  More (…) menu before the chips lose their labels, and the icon-only layout
+  keeps the menu, so the toolbar fits about 600pt (690pt while recording) with
+  the "Default input" label and no folder; a microphone's name adds about
+  75pt, and the folder chip 50pt.
+  Folding first keeps the labels on the controls used most, and the four
+  buttons don't come back out when the labels go, so narrowing the window only
+  ever takes things away (`ListeningToolbar.Layout.narrowing`). More takes the
+  accent while the transcript is hidden or the window floats, as those buttons
+  do, so folding them doesn't hide that either is on. The window can still be
+  narrower (420pt) than the toolbar's narrowest layout. The Sessions window's
+  toolbar is the system one, which overflows into its own menu.
+
+No protocol change: a button note is the same `note` frame.
 
 ## Revisit as it grows
 

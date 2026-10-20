@@ -718,6 +718,14 @@ enum SessionArchive {
         }
     }
 
+    /// Add an editorial note to `file` on disk at the end of its transcript
+    /// (`NoteEdit.appendingNote`). Returns false — leaving the note untouched — for
+    /// blank text, or when the note can't be read or the write fails.
+    @discardableResult
+    static func appendNote(_ text: String, in file: SessionFile) -> Bool {
+        rewrite(file) { NoteEdit.appendingNote(text, in: $0) }
+    }
+
     /// Insert a finished card `block` into `file` on disk under `anchor`'s
     /// transcript line, or at the end of the transcript if it has gone
     /// (`NoteEdit.insertingBlock`). Returns false when the note can't be read or

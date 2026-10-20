@@ -6,7 +6,8 @@ import SwiftUI
 private struct AnswerRequest {
     /// The sidecar request id.
     let id: String
-    /// The question asked, to put back in the field if stopped; nil for a Summarise.
+    /// The question asked, to put back in the Ask popover if stopped; nil for a
+    /// Summarise.
     let question: String?
 }
 
@@ -34,7 +35,8 @@ private struct SavedResearch {
 
 /// The right-hand detail: a selected session rendered like the live window —
 /// header + meta, the cards it surfaced, the questions asked of it, and the full
-/// transcript — with the ask bar kept (answers append to the note on disk).
+/// transcript — with Ask and Note in its toolbar (answers and notes go into the
+/// note on disk).
 struct SessionDetailPane: View {
     let file: SessionFile
     let detail: SessionDetail
@@ -58,7 +60,9 @@ struct SessionDetailPane: View {
 
     @ObservedObject private var ctx = TranscriptWindowContext.shared
 
-    // Ask state.
+    // Ask state. The question and note drafts outlive their popovers (issue
+    // #104), so a click away doesn't lose them.
+    @State private var showAsk = false
     @State private var question = ""
     @State private var answerBody = ""
     @State private var answerState = "" // "" idle, else pending|streaming|done|failed
@@ -68,6 +72,8 @@ struct SessionDetailPane: View {
     @State private var summarising = false
     /// The Ask or Summarise in flight, so the panel's stop button can end it.
     @State private var answerRequest: AnswerRequest?
+    @State private var showNote = false
+    @State private var noteDraft = NoteDraft()
 
     /// Experiment: hide transcript paragraphs/headings so only cards show.
     @State private var hideTranscript = false
@@ -96,8 +102,8 @@ struct SessionDetailPane: View {
     private var isLive: Bool { file.url == ctx.liveFileURL }
 
     var body: some View {
-        // A centred reading column; the ask field floats over the bottom of it,
-        // with the content scrolling underneath.
+        // A centred reading column; a streaming answer or an error floats over
+        // the bottom of it, with the content scrolling underneath.
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 header
@@ -110,13 +116,33 @@ struct SessionDetailPane: View {
             .padding(.bottom, 28)
             .frame(maxWidth: .infinity)
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isAsking || !answerBody.isEmpty || !askNote.isEmpty { bottomBar }
+        }
+        // One popover at a time: ⌘K, ⇧⌘N and "Add note here…" open theirs
+        // whichever is showing.
+        .onChange(of: showAsk) { _, open in if open { showNote = false } }
+        .onChange(of: showNote) { _, open in
+            if open {
+                showAsk = false
+            } else if askNote == Self.noteLineGone {
+                askNote = "" // said while the popover was open; it has gone with it
+            }
+        }
+        // ⌘K / ⇧⌘N open this session's popovers while the window is in front.
+        .focusedSceneValue(
+            \.composer,
+            ComposerCommands(
+                ask: canOpenAsk ? { showAsk = true } : nil,
+                note: isLive ? nil : { showNote = true }))
         .toolbar {
             // The detail's items otherwise sit at its leading edge, beside the
             // sidebar, where they're easy to miss; a flexible spacer pushes them
             // to the trailing edge, where the recording window keeps its controls.
             ToolbarSpacer(.flexible)
             ToolbarItemGroup {
+                askButton
+                noteButton
                 hideTranscriptButton
                 summariseButton
                 tagsButton
@@ -170,6 +196,71 @@ struct SessionDetailPane: View {
         }
     }
 
+    /// Ask about this session, in a popover (issue #104). Off while the session
+    /// is still being written or an answer is streaming.
+    private var askButton: some View {
+        Button { showAsk.toggle() } label: {
+            Label("Ask", systemImage: "sparkle")
+        }
+        .focusEffectDisabled()
+        .disabled(!canOpenAsk)
+        .help(isLive ? "Ask once Advisor has fully saved this session" : "Ask about this session (⌘K)")
+        .popover(isPresented: $showAsk, arrowEdge: .bottom) {
+            ComposerForm(
+                title: "Ask", prompt: "About this session. The answer is added to its note.",
+                placeholder: "Ask about this session…", submitTitle: "Ask", tint: .ask,
+                text: $question, onSubmit: submitQuestion)
+        }
+    }
+
+    private var canOpenAsk: Bool { !isLive && !isAsking }
+
+    /// Add an editorial note, in a popover (issue #104): at the end of the
+    /// transcript, or under the line "Add note here…" was chosen on. Off while
+    /// the session is still being written, as the right-click item is.
+    private var noteButton: some View {
+        Button { showNote.toggle() } label: {
+            Label("Note", systemImage: "note.text")
+        }
+        .focusEffectDisabled()
+        .disabled(isLive)
+        .help(isLive ? "Add a note once Advisor has fully saved this session" : "Add a note (⇧⌘N)")
+        .popover(isPresented: $showNote, arrowEdge: .bottom) {
+            ComposerForm(
+                title: "Note",
+                prompt: noteDraft.placement == nil
+                    ? "Your own context, added at the end of the transcript."
+                    : "Your own context, added under this line.",
+                placeholder: "Add a note…", submitTitle: "Add note", tint: .note,
+                text: $noteDraft.text, quote: noteDraft.placement?.line,
+                onClearQuote: { noteDraft.placement = nil }, onSubmit: submitNote)
+        }
+    }
+
+    /// Add the Note popover's draft to the note on disk: under the line "Add note
+    /// here…" was chosen on, found again by its text if edits made meanwhile have
+    /// moved it, or at the end of the transcript. A note that can't be saved
+    /// stays in the popover; one whose line has gone loses its placement, so it
+    /// shows it will go at the end, and a retry can.
+    private func submitNote() {
+        guard !isLive, !noteDraft.isBlank else { return }
+        if let placement = noteDraft.placement,
+            Self.paragraph(for: placement, in: detail.blocks, times: detail.blockTimes) == nil
+        {
+            noteDraft.placement = nil
+            askNote = Self.noteLineGone
+            return
+        }
+        let added = noteDraft.submit { text, placement in
+            guard let placement else { return Self.appendNote(text, to: file) }
+            guard let paragraph = Self.paragraph(for: placement, in: detail.blocks, times: detail.blockTimes)
+            else { return false }
+            return Self.addNote(text, atCharacter: placement.offset, in: paragraph, of: detail.blocks, to: file)
+        }
+        if added { showNote = false }
+        finishEdit(added)
+    }
+
     /// Toggle the transcript off so the detail shows only cards (experiment).
     private var hideTranscriptButton: some View {
         Button { hideTranscript.toggle() } label: {
@@ -219,7 +310,7 @@ struct SessionDetailPane: View {
 
     /// Add or update this session's Summary card (issue #30). Disabled while the
     /// note is still being recorded (its writer would clobber the upsert) or while
-    /// an ask/summary is already streaming — mirrors the ask bar's gating.
+    /// an ask/summary is already streaming — mirrors Ask's gating.
     private var summariseButton: some View {
         Button(action: submitSummarise) {
             Label("Summarise", systemImage: "list.bullet.rectangle")
@@ -276,7 +367,7 @@ struct SessionDetailPane: View {
 
     /// Stop the Ask or Summarise in flight: the sidecar request is dropped (its
     /// handler too, so nothing late can save it), the panel closes, and an Ask's
-    /// question goes back in the field (it is disabled while asking, so empty).
+    /// question goes back in the Ask popover (its draft was cleared on sending).
     /// Nothing reaches the note.
     private func cancelAnswer() {
         guard let request = answerRequest else { return }
@@ -397,8 +488,9 @@ struct SessionDetailPane: View {
             onAction: { kind, selection, paragraph in startResearch(kind, on: selection, in: paragraph) },
             onAddNote: isLive
                 ? nil
-                : { text, offset, paragraph in
-                    finishEdit(Self.addNote(text, atCharacter: offset, in: paragraph, of: detail.blocks, to: file))
+                : { offset, paragraph in
+                    noteDraft.placement = NotePlacement(offset: offset, paragraph: paragraph)
+                    showNote = true
                 },
             onCorrect: isLive
                 ? nil
@@ -445,6 +537,32 @@ struct SessionDetailPane: View {
             SessionArchive.insertNote(
                 text, inParagraphAt: block, expecting: blocks[block], atCharacter: offset, in: file)
         }
+    }
+
+    /// The paragraph a right-clicked note's `placement` names now: the one with
+    /// its text nearest where it was, as edits made while the Note popover was
+    /// open (a research card saved above it) shift block offsets. Copies of the
+    /// text are told apart by the margin time, `times` parallel to `blocks`
+    /// (`SessionDetail.blockTimes`). Nil once it has gone.
+    static func paragraph(
+        for placement: NotePlacement, in blocks: [TranscriptBlock], times: [String?] = []
+    ) -> FeedParagraph? {
+        let was = Int(placement.paragraph.id) ?? 0
+        let target = TranscriptBlock.paragraph(placement.paragraph.text)
+        let matches = blocks.indices.filter { blocks[$0] == target }
+        let timed = matches.filter { times.indices.contains($0) && times[$0] == placement.paragraph.time }
+        guard let offset = (timed.isEmpty ? matches : timed).min(by: { abs($0 - was) < abs($1 - was) })
+        else { return nil }
+        let p = placement.paragraph
+        return FeedParagraph(id: "\(offset)", lines: p.lines, time: p.time, toolTip: p.toolTip)
+    }
+
+    /// The Note button: add `text` to `file` after the transcript's last line,
+    /// following the note if it has been moved meanwhile (`SessionArchive.save`).
+    /// False — the edit-failed path, which reloads — when the note on disk can't
+    /// be read or written.
+    static func appendNote(_ text: String, to file: SessionFile, archive: URL = SessionArchive.directory) -> Bool {
+        SessionArchive.save(to: file, in: archive) { SessionArchive.appendNote(text, in: $0) }
     }
 
     /// Delete: remove the card or note at block `offset` from `file`, following
@@ -572,13 +690,15 @@ struct SessionDetailPane: View {
     private func finishEdit(_ applied: Bool) {
         if !applied {
             askNote = Self.editFailed
-        } else if askNote == Self.editFailed {
+        } else if askNote == Self.editFailed || askNote == Self.noteLineGone {
             askNote = ""
         }
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
     private static let editFailed = "Couldn't update the note — it may have changed on disk, so it has been reloaded."
+    private static let noteLineGone =
+        "That line has changed, so the note will go at the end of the transcript — or right-click to pick another."
 
     /// "Correct transcription…": apply `request` to `file`, following the note if
     /// it has been moved meanwhile (`SessionArchive.save`). False — the edit-failed
@@ -605,14 +725,13 @@ struct SessionDetailPane: View {
 
     // MARK: ask
 
-    /// The streaming answer (or summary) card, the ask field, and any error,
-    /// floating over the bottom of the reading column. The page fades out under
-    /// it so scrolled text doesn't collide with the field.
+    /// The streaming answer (or summary) card and any error, floating over the
+    /// bottom of the reading column. The page fades out under it so scrolled text
+    /// doesn't collide with it.
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             // While running, even before any text, so Stop is always there.
             if isAsking || !answerBody.isEmpty { liveAnswer }
-            askField
             if !askNote.isEmpty {
                 Text(askNote).font(.system(size: 11.5)).foregroundStyle(Theme.factRed)
                     .padding(.leading, 18)
@@ -644,41 +763,6 @@ struct SessionDetailPane: View {
             isRunning: isAsking,
             stop: answerRequest == nil ? nil : cancelAnswer,
             stopHelp: summarising ? "Stop summarising" : "Stop answering")
-    }
-
-    private var canAsk: Bool {
-        !isLive && !isAsking && !question.trimmingCharacters(in: .whitespaces).isEmpty
-    }
-
-    /// One rounded glass field with an inline send arrow that takes the accent
-    /// once there's a question to send.
-    private var askField: some View {
-        HStack(spacing: 8) {
-            TextField(
-                isLive
-                    ? "Advisor is still writing this session — ask once it has fully saved"
-                    : "Ask about this session",
-                text: $question)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13.5))
-                .onSubmit(submitQuestion)
-                .disabled(isLive || isAsking)
-            Button(action: submitQuestion) {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(canAsk ? Theme.onAccent : Theme.textTertiary)
-                    .frame(width: 28, height: 28)
-                    .background(canAsk ? Theme.accent : Theme.fieldFill, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .focusEffectDisabled()
-            .disabled(!canAsk)
-            .help("Ask (↩)")
-        }
-        .padding(.leading, 18)
-        .padding(.trailing, 7)
-        .frame(height: 42)
-        .glassEffect(.regular, in: Capsule())
     }
 
     private func submitQuestion() {
@@ -721,5 +805,6 @@ struct SessionDetailPane: View {
         }
         answerRequest = AnswerRequest(id: sent, question: q)
         question = ""
+        showAsk = false
     }
 }

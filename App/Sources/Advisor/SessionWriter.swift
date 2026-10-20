@@ -131,13 +131,16 @@ final class SessionWriter {
         sessionActive = false
     }
 
-    /// True when there is something worth exporting — any transcript line, or a
-    /// card the note would hold (`Card.persisted`). Drives the toolbar's Export
-    /// button enabled state.
+    /// True when there is something worth exporting — any transcript line, note,
+    /// or card the note would hold (`Card.persisted`) — and a note file to export.
+    /// Drives the toolbar's Export button enabled state.
     var hasExportContent: Bool {
-        !store.utterances.isEmpty
+        // Notes typed before Listen are content, but there's no file until the
+        // session starts (issue #104).
+        fileURL != nil
+            && (!store.utterances.isEmpty
             || !store.notes.isEmpty
-            || store.cards.contains { $0.persisted != nil }
+            || store.cards.contains { $0.persisted != nil })
     }
 
     /// Suggested save filename for an export: the on-disk note's name (the

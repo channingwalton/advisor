@@ -128,7 +128,24 @@ private let followUp = SessionMarkdown.replyBody(base: "Our migration.", questio
     var card = doneCard(kind: "query", body: "Our migration.")
     card.apply(body: followUp, state: "streaming")
     store.cards = [card]
-    let writer = SessionWriter(store: store, resolveDirectory: { FileManager.default.temporaryDirectory })
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("advisor-export-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let writer = SessionWriter(store: store, resolveDirectory: { dir })
+    writer.start()
+    #expect(writer.hasExportContent)
+}
+
+/// A note typed before Listen is content, but there's no note file to export
+/// until the session starts (issue #104), so Export stays off until then.
+@MainActor
+@Test func notesBeforeListenAreNotExportableUntilTheSessionStarts() {
+    let store = TranscriptStore()
+    store.addNote("Bob is the CFO", at: Date())
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("advisor-export-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let writer = SessionWriter(store: store, resolveDirectory: { dir })
+    #expect(!writer.hasExportContent)
+    writer.start()
     #expect(writer.hasExportContent)
 }
 

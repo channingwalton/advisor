@@ -1,11 +1,13 @@
 import SwiftUI
 
 /// The Listening view's control strip (60 pt). Left: record cluster (waveform +
-/// timer + mic mute + stop) and audio-source button. Right: Focus chip, Auto-cards
-/// toggle, Float, Sessions. Idle collapses the cluster to a single Listen pill; a
+/// timer + mic mute + stop) and audio-source button. Right: Ask and Note, the
+/// target folder, Name, Context and Tags chips, Auto-cards toggle, then Hide
+/// transcript, Summarise, Float and Export. Idle collapses the cluster to a single Listen pill; a
 /// stopped-but-resumable session shows a frozen-timer Resume cluster (issue #6).
-/// When the window is too narrow to fit the labelled chips, the secondary controls
-/// collapse to icon-only (ViewThatFits) rather than letting their text wrap/squash.
+/// When the window is too narrow to fit them all, the less-used buttons fold into
+/// a More menu, then the chips collapse to icon-only (ViewThatFits), rather than
+/// letting their text wrap/squash.
 struct ListeningToolbar: View {
     @ObservedObject var store: TranscriptStore
     let recordingState: RecordControl.State
@@ -45,6 +47,16 @@ struct ListeningToolbar: View {
     /// (no transcript yet, or a summary already in flight).
     let canSummarise: Bool
     let onSummarise: () -> Void
+    /// The Ask popover's question (issue #104), kept while it's closed, and
+    /// whether it's open — the window opens it for ⌘K too.
+    @Binding var askText: String
+    @Binding var showAsk: Bool
+    let onAsk: () -> Void
+    /// The Note popover's draft and whether it's open — the window opens it for
+    /// ⇧⌘N and "Add note here…" too.
+    @Binding var noteDraft: NoteDraft
+    @Binding var showNote: Bool
+    let onNote: () -> Void
 
     @State private var showFocus = false
     @State private var showName = false
@@ -61,13 +73,12 @@ struct ListeningToolbar: View {
             }
             audioSourceButton
             Spacer(minLength: 8)
-            // Drop the chip labels (icon-only) when the toolbar is too narrow to
-            // fit them, rather than letting the text wrap/squash. ViewThatFits picks
-            // the labelled layout when it fits the leftover width, else the compact
-            // one — adapting to the (variable-length) audio-source name.
+            // When the toolbar is too narrow, fold the less-used buttons into More,
+            // then drop the chip labels (icon-only), rather than letting the text
+            // wrap/squash. ViewThatFits picks the first layout that fits the
+            // leftover width — adapting to the (variable-length) audio-source name.
             ViewThatFits(in: .horizontal) {
-                secondaryControls(compact: false)
-                secondaryControls(compact: true)
+                ForEach(Layout.narrowing, id: \.self, content: secondaryControls)
             }
         }
         .padding(.horizontal, 14)
@@ -78,19 +89,43 @@ struct ListeningToolbar: View {
         .focusEffectDisabled()
     }
 
-    /// The right-hand control group. `compact` hides the chip text labels (keeping
-    /// the icons and indicators) so the strip degrades gracefully when narrow.
-    private func secondaryControls(compact: Bool) -> some View {
-        HStack(spacing: 12) {
+    /// A way to lay out the right-hand control group. `folded` moves Hide
+    /// transcript, Summarise, Float and Export into a More menu; `compact` hides
+    /// the chip text labels (keeping the icons and indicators) so the strip
+    /// degrades gracefully when narrow.
+    struct Layout: Hashable {
+        let compact: Bool
+        let folded: Bool
+
+        /// Widest first, as ViewThatFits tries them: the less-used buttons fold
+        /// into More before the labels go, and a narrower layout only ever takes
+        /// things away.
+        static let narrowing = [
+            Layout(compact: false, folded: false),
+            Layout(compact: false, folded: true),
+            Layout(compact: true, folded: true),
+        ]
+    }
+
+    /// The right-hand control group, laid out as `layout` says.
+    private func secondaryControls(_ layout: Layout) -> some View {
+        let compact = layout.compact
+        return HStack(spacing: 12) {
+            askButton(compact: compact)
+            noteButton(compact: compact)
             folderIndicator(compact: compact)
             nameChip(compact: compact)
             focusChip(compact: compact)
             TagsChip(tags: sessionTags, library: tagLibrary, compact: compact) { sessionTags = $0 }
             autoCardsToggle(compact: compact)
-            hideTranscriptButton
-            summariseButton
-            floatButton
-            exportButton
+            if layout.folded {
+                moreMenu
+            } else {
+                hideTranscriptButton
+                summariseButton
+                floatButton
+                exportButton
+            }
         }
     }
 
@@ -234,6 +269,72 @@ struct ListeningToolbar: View {
         .fixedSize()
         .disabled(store.listening)
         .help("Audio source")
+    }
+
+    // MARK: ask / note
+
+    /// Ask a question of the conversation, in a popover (issue #104).
+    private func askButton(compact: Bool) -> some View {
+        Button { showAsk.toggle() } label: {
+            composerLabel(
+                "Ask", system: "sparkle", tint: Theme.accent, compact: compact,
+                hasDraft: !askText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showAsk, arrowEdge: .bottom) {
+            ComposerForm(
+                title: "Ask", prompt: "Anything about this conversation — or beyond it.",
+                placeholder: "Ask anything…", submitTitle: "Ask", tint: .ask,
+                text: $askText, onSubmit: onAsk)
+        }
+        .help("Ask (⌘K)")
+    }
+
+    /// Add an editorial note, in a popover (issue #104): at this point in the
+    /// conversation, or under the line "Add note here…" was chosen on.
+    private func noteButton(compact: Bool) -> some View {
+        Button { showNote.toggle() } label: {
+            composerLabel(
+                "Note", system: "note.text", tint: Theme.factGreen, compact: compact,
+                hasDraft: !noteDraft.isBlank)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showNote, arrowEdge: .bottom) {
+            ComposerForm(
+                title: "Note",
+                prompt: noteDraft.placement == nil
+                    ? "Your own context, added at this point in the conversation. The agents read it."
+                    : "Your own context, added under this line. The agents read it.",
+                placeholder: "Add a note…", submitTitle: "Add note", tint: .note,
+                text: $noteDraft.text, quote: noteDraft.placement?.line,
+                onClearQuote: { noteDraft.placement = nil }, onSubmit: onNote)
+        }
+        .help("Add a note (⇧⌘N)")
+    }
+
+    /// An Ask or Note chip: its icon, the label unless compact, and a dot on the
+    /// icon while a draft waits in the closed popover. The dot takes no width: a
+    /// wider chip could tip the toolbar into its compact layout as the first key
+    /// is typed, closing the popover with its button.
+    private func composerLabel(_ title: String, system: String, tint: Color, compact: Bool, hasDraft: Bool)
+        -> some View
+    {
+        HStack(spacing: 6) {
+            Image(systemName: system).font(.system(size: 12)).foregroundStyle(tint)
+                .overlay(alignment: .topTrailing) {
+                    if hasDraft {
+                        Circle().fill(tint).frame(width: 5, height: 5).offset(x: 4, y: -3)
+                    }
+                }
+            if !compact {
+                Text(title).font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.textBody)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 34)
+        .controlChrome()
     }
 
     // MARK: folder indicator
@@ -471,6 +572,36 @@ struct ListeningToolbar: View {
         .buttonStyle(.plain)
         .disabled(!canExport)
         .help("Export session to Markdown…")
+    }
+
+    /// Hide transcript, Summarise, Float and Export as one menu, for a window too
+    /// narrow for their buttons. It takes the accent while the transcript is
+    /// hidden or the window floats, as their buttons do, so folding them doesn't
+    /// hide that either is on.
+    private var moreMenu: some View {
+        let on = hideTranscript || pinned
+        return Menu {
+            Toggle("Hide Transcript", isOn: $hideTranscript)
+            Button("Summarise", action: onSummarise).disabled(!canSummarise)
+            Toggle("Float on Top", isOn: $pinned)
+            Button("Export…", action: onExport).disabled(!canExport)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13))
+                .foregroundStyle(on ? Theme.accent : Theme.textSecondary)
+                .frame(width: 34, height: 34)
+                .background(
+                    on ? Theme.accentTint : Theme.surfaceControl,
+                    in: RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
+                        .stroke(Theme.hairline, lineWidth: 0.5))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Hide transcript, summarise, float or export")
     }
 }
 

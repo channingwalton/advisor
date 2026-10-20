@@ -52,15 +52,18 @@ surfaces a card inline, anchored to the moment it relates to:
 
 ## Ask anything
 
-- **Query box** — ask a question at any time, about the current conversation or
-  anything else; the live transcript is used as context.
+- **Ask** — a toolbar button (⌘K) opens a box to ask a question at any time,
+  before Listen too, about the current conversation or anything else; the live
+  transcript is used as context.
 - **Right-click transcript actions** — select any transcript text and run
   **Answer / Context / Fact check** on it directly — the same actions the
   assistant triggers automatically — with the card anchored under that line.
   The menu also fixes a misheard word (**Correct** that instance or **Replace
   all** in the session) and copies the selected text.
-- **Editorial notes** — right-click a transcript line ▸ *Add note here…* to
-  inject your own note as a distinct NOTE card anchored at that line. The
+- **Editorial notes** — the toolbar's **Note** (⇧⌘N) adds your own note as a
+  distinct NOTE card at this point in the conversation — before Listen too —
+  and right-click a transcript line ▸ *Add note here…* anchors one at that
+  line. The
   assistant treats it as authoritative context — it can itself trigger
   research — and it round-trips through the saved markdown. Deletable.
 - **Card follow-ups** — once a card is done, ask a follow-up on it and the
@@ -103,7 +106,7 @@ The app opens on a master/detail browser of your past sessions:
   in and is appended to that session's note under a **Follow-ups** heading, so
   the saved transcript grows with the questions you ask of it. Stop an Ask or
   Summarise while it runs and nothing is saved; a stopped question returns to
-  the field.
+  the Ask box.
 - **Rename, export, share, reveal & delete** — give a session a short name for
   an easier-to-scan list, export a copy of its markdown, **Share…** it through
   the macOS share sheet, reveal its markdown file in Finder, or delete it

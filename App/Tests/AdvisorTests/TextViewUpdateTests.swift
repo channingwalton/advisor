@@ -39,7 +39,7 @@ import Testing
     SelectableTranscriptText(text: "Same.", toolTip: "10:00", actions: [], onAction: { _, _ in }).apply(to: tv)
     let skipped = SelectableTranscriptText(
         text: "Same.", toolTip: "10:01", actions: [TranscriptAction(title: "Answer", kind: "answer")],
-        onAction: { _, _ in }, onAddNote: { _, _ in }, onCorrect: { corrected = $0.replacement }
+        onAction: { _, _ in }, onAddNote: { _ in }, onCorrect: { corrected = $0.replacement }
     ).apply(to: tv)
 
     #expect(skipped == false)

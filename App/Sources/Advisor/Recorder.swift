@@ -96,6 +96,26 @@ final class TranscriptStore: ObservableObject {
         return note
     }
 
+    /// The text and time of the utterances `ids` name, in that order, skipping
+    /// any removed since (echo cleanup) — the lines a note placed in a live
+    /// paragraph maps its offset over.
+    func lines(_ ids: [UUID]) -> [(text: String, time: Date)] {
+        ids.compactMap { id in utterances.first { $0.id == id }.map { (text: $0.text, time: $0.time) } }
+    }
+
+    /// Start a session's feed afresh under a new STT generation — except for the
+    /// notes typed and questions asked before Listen (issue #104), which it
+    /// keeps. It returns the notes so they can be sent to the agents once
+    /// `session_start` has cleared the sidecar's transcript; an answer still
+    /// coming carries on (the sidecar lets its query lane finish). An idle
+    /// window's notes and cards are all pre-session ones: closing the window
+    /// clears the store.
+    func beginSession() -> [EditorialNote] {
+        sessionGeneration += 1
+        utterances = []
+        return notes
+    }
+
     /// Remove an editorial note (issue #34). The note already consumed by the
     /// agents stays in their context — like a transcript correction, removal is
     /// display/persistence only, never re-sent to the sidecar.

@@ -220,6 +220,30 @@ private func paragraphOffset(_ text: String, in markdown: String) throws -> Int 
     #expect(NoteEdit.insertingNote("x", inParagraphAt: cardAt, expecting: blocks(paragraphNote)[cardAt], atCharacter: 0, in: paragraphNote) == nil)
 }
 
+/// A note from the Note button goes at the end of the transcript (issue #104):
+/// under its last line, below the note and card already there, and above any
+/// Follow-ups.
+@Test func appendingANoteEndsTheTranscript() throws {
+    let followedUp = SessionArchive.appendingFollowUp(to: note, question: "Q?", answer: "A.", asked: t0)
+    let edited = try #require(NoteEdit.appendingNote("Tail note", in: followedUp))
+
+    let after = blocks(edited)
+    let last = try #require(after.lastIndex { if case .paragraph = $0 { true } else { false } })
+    #expect(after[last] == .paragraph("Later line."))
+    #expect(after[last + 1] == .note("My note"))
+    if case .card(let m) = after[last + 2] { #expect(m.hasPrefix("**CONTEXT · Beta**")) } else {
+        Issue.record("expected the card under the last line")
+    }
+    #expect(after[last + 3] == .note("Tail note"))
+    #expect(after[last + 4] == .heading("Follow-ups"))
+    #expect(SessionArchive.frontmatter(edited) == SessionArchive.frontmatter(followedUp))
+    #expect(!edited.contains("\n\n\n"))
+}
+
+@Test func appendingABlankNoteIsRefused() {
+    #expect(NoteEdit.appendingNote(" \n ", in: note) == nil)
+}
+
 // MARK: correcting
 
 @Test func correctingAnOccurrenceRewritesTheExpectedParagraph() throws {

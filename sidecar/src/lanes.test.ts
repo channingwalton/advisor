@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TaskResult } from "./agent.js";
 import type { Outbound } from "./protocol.js";
-import { cardLaneOptions, LanePool, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, LanePool, QueryLanes, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
 import { mergeConfig } from "./config.js";
 
 /// A session that records each prompt and answers from a script; `reset()` is
@@ -277,4 +277,111 @@ test("#lane-pool reset drops every session and rebuilds to size", () => {
   assert.deepEqual(shed.sort(), ["research0", "research1"]);
   assert.deepEqual(made, ["research0", "research1", "research0", "research1"]);
   assert.equal(p.all.length, 2);
+});
+
+/// QueryLanes over scripted lanes, named as QueryLanes names them, recording
+/// the lanes it sheds.
+function queryLanes(): { queries: QueryLanes; made: ReturnType<typeof scriptedLane>[]; shed: string[] } {
+  const made: ReturnType<typeof scriptedLane>[] = [];
+  const shed: string[] = [];
+  const queries = new QueryLanes((name) => {
+    const lane = scriptedLane([]);
+    lane.name = name;
+    made.push(lane);
+    return lane;
+  }, (lane) => shed.push(lane.name));
+  return { queries, made, shed };
+}
+
+test("#query-lane a session start retires a query lane mid-answer, which finishes and is dropped after", async () => {
+  // An Ask typed before Listen is still being answered when the session starts
+  // (issue #104): its answer must arrive, not be cut off by the reset.
+  const transcript = new Transcript();
+  const d = deps(transcript);
+  const { queries, made } = queryLanes();
+  const old = queries.lane;
+  let settle!: (r: TaskResult) => void;
+  old.session.run = () => new Promise<TaskResult>((resolve) => { settle = resolve; });
+  old.busy = true;
+  const asked = runCard(old, "query", "Q", "Question: Q", undefined, d);
+
+  transcript.clear();
+  queries.reset();
+
+  assert.equal(made[0]!.resets, 0, "the answer in flight isn't aborted");
+  assert.notEqual(queries.lane, old, "the session gets a fresh lane");
+  assert.equal(queries.lane.busy, false, "free for the session's own questions at once");
+  assert.notEqual(queries.lane.name, old.name, "its own transcript cursor, which the old card's failure path can't forget");
+  assert.deepEqual(queries.all, [queries.lane, old], "the retired lane stays where cancel and exit look");
+  settle({ text: "The answer." });
+  await asked;
+  assert.deepEqual(d.sent.at(-1), { type: "card_update", id: "c1", body: "The answer.", state: "done" });
+  queries.release(old);
+  assert.equal(made[0]!.resets, 1, "its session is dropped once the card is over");
+  assert.deepEqual(queries.all, [queries.lane]);
+});
+
+test("#query-lane a session start drops an idle query lane at once", () => {
+  const { queries, made } = queryLanes();
+  queries.reset();
+  assert.equal(made[0]!.resets, 1);
+  assert.deepEqual(queries.all, [made[1]]);
+  // Releasing the current lane after a card only frees it; its session stays warm.
+  made[1]!.busy = true;
+  queries.release(made[1]!);
+  assert.equal(made[1]!.busy, false);
+  assert.equal(made[1]!.resets, 0);
+});
+
+test("#query-lane a retired lane's name is free again once its card is over", () => {
+  const { queries } = queryLanes();
+  const first = queries.lane;
+  first.busy = true;
+  queries.reset();
+  const second = queries.lane;
+  assert.deepEqual([first.name, second.name], ["query0", "query1"]);
+  queries.release(first);
+  queries.reset();
+  assert.equal(queries.lane.name, "query0", "the lowest name not in use");
+});
+
+test("#query-lane a reset that throws still gives the session a fresh lane", () => {
+  const { queries, made } = queryLanes();
+  made[0]!.session.reset = () => { throw new Error("stream torn down"); };
+  queries.reset();
+  assert.notEqual(queries.lane, made[0]);
+  assert.deepEqual(queries.all, [made[1]]);
+});
+
+test("#query-lane a dropped lane is shed, so a lane minted under its name starts with no cursor", () => {
+  const { queries, made, shed } = queryLanes();
+  queries.reset();
+  assert.deepEqual(shed, ["query0"], "an idle lane, at the reset");
+  made[1]!.busy = true;
+  queries.reset();
+  assert.deepEqual(shed, ["query0"], "a retired lane isn't shed while its card runs");
+  queries.release(made[1]!);
+  assert.deepEqual(shed, ["query0", made[1]!.name], "but once its card is over");
+});
+
+test("#query-lane a retired lane whose reset throws is still released", () => {
+  const { queries, made } = queryLanes();
+  made[0]!.busy = true;
+  queries.reset();
+  made[0]!.session.reset = () => { throw new Error("stream torn down"); };
+  assert.doesNotThrow(() => queries.release(made[0]!));
+  assert.deepEqual(queries.all, [made[1]]);
+});
+
+test("#query-lane a fresh lane that can't be made leaves the lanes as they were", () => {
+  const lane = scriptedLane([]);
+  lane.name = "query0";
+  const queries = new QueryLanes((name) => {
+    if (name !== "query0") throw new Error("no agent");
+    return lane;
+  });
+  lane.busy = true;
+  assert.throws(() => queries.reset());
+  assert.deepEqual(queries.all, [lane], "not retired as well as current");
+  assert.equal(lane.resets, 0);
 });

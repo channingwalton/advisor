@@ -338,14 +338,19 @@ final class SidecarManager {
         // any still-researching card can never receive its terminal card_update and
         // would spin forever (issue #49). Fail them now — on every crash path
         // (restart and exhausted-attempts alike), before the restart backoff below.
-        for idx in store.cards.indices where store.cards[idx].isResearching {
-            store.cards[idx].apply(body: nil, state: "failed")
-        }
+        failResearchingCards()
         // A crash after a healthy run is a fresh failure, not part of a loop.
         if let lastSpawn, Date().timeIntervalSince(lastSpawn) > healthyRunSeconds {
             restartAttempts = 0
         }
         scheduleRestart(reason: "sidecar crashed (\(code))")
+    }
+
+    /// Fail every card still researching: the sidecar answering them has gone.
+    private func failResearchingCards() {
+        for idx in store.cards.indices where store.cards[idx].isResearching {
+            store.cards[idx].apply(body: nil, state: "failed")
+        }
     }
 
     /// A spawn that threw before the process ever ran (issue #63): no
@@ -445,11 +450,17 @@ final class SidecarManager {
 
     // MARK: outbound
 
-    func sendSessionStart(_ id: String, context: String = "") {
+    /// Start a session on the sidecar, which clears its transcript, then send
+    /// `notes` — the ones typed before Listen (issue #104) — so the agents read
+    /// them.
+    func sendSessionStart(_ id: String, context: String = "", notes: [EditorialNote] = []) {
         lastSessionId = id
         lastSessionContext = context // replayed verbatim if the sidecar restarts
         let auth = apiKeyEnv()
         if process == nil || spawnedAuth != auth {
+            // A replaced sidecar can't finish the cards it was answering — a
+            // question asked before Listen keeps its card (issue #104).
+            if process != nil { failResearchingCards() }
             discardProcess()
             documentHandlers.failAll(reason: "authentication changed — request cancelled")
             restartAttempts = 0
@@ -459,6 +470,7 @@ final class SidecarManager {
             if let lastAuto { sendAuto(lastAuto) }
         }
         sendSessionStartFrame(id, context: context)
+        notes.forEach(sendNote)
     }
 
     private func sendSessionStartFrame(_ id: String, context: String) {

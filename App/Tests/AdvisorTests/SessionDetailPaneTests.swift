@@ -81,6 +81,46 @@ func addNoteOnAParagraphOutsideTheBlocksIsNotApplied(id: String) throws {
     #expect(try String(contentsOf: file.url, encoding: .utf8) == expected)
 }
 
+/// A note from the Note button lands after the transcript's last line (issue
+/// #104), following the note if it has been moved meanwhile.
+@MainActor
+@Test func appendNoteEndsTheTranscriptOfAMovedNote() throws {
+    let (file, _, dir) = try savedNote()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let moved = try moveIntoFolder(file, in: dir)
+
+    let applied = SessionDetailPane.appendNote("Check the figures", to: file, archive: dir)
+
+    let expected = try #require(NoteEdit.appendingNote("Check the figures", in: markdown))
+    #expect(applied)
+    #expect(try String(contentsOf: moved, encoding: .utf8) == expected)
+    #expect(expected.hasSuffix("- 17:00:05 More discussion follows.\n\n> **NOTE**\n>\n> Check the figures"))
+}
+
+/// A right-clicked note's paragraph is found again by its text, nearest where it
+/// was, when an edit made while the Note popover was open — a research card
+/// saved above it — has shifted the offsets; nil once it has gone.
+@Test func aNotePlacementFollowsItsParagraph() {
+    let p = FeedParagraph(id: "1", lines: [FeedLine(id: "1", text: "Second.")], time: nil)
+    let placement = NotePlacement(offset: 3, paragraph: p)
+    let shifted: [TranscriptBlock] = [
+        .paragraph("First."), .card("> **CONTEXT · X**"), .paragraph("Second."), .paragraph("Second."),
+    ]
+
+    #expect(SessionDetailPane.paragraph(for: placement, in: shifted)?.id == "2")
+    #expect(SessionDetailPane.paragraph(for: placement, in: [.paragraph("First.")]) == nil)
+}
+
+/// Copies of the paragraph's text equally near where it was are told apart by
+/// its margin time, so a short line like "Okay." isn't swapped for another.
+@Test func aNotePlacementTellsCopiesOfItsParagraphApartByTime() {
+    let p = FeedParagraph(id: "2", lines: [FeedLine(id: "2", text: "Okay.")], time: "10:05")
+    let placement = NotePlacement(offset: 0, paragraph: p)
+    let blocks: [TranscriptBlock] = [.heading("Transcript"), .paragraph("Okay."), .card("> **CONTEXT · X**"), .paragraph("Okay.")]
+
+    #expect(SessionDetailPane.paragraph(for: placement, in: blocks, times: [nil, "10:01", nil, "10:05"])?.id == "3")
+}
+
 /// "Correct transcription…" on a paragraph whose id doesn't name one of this
 /// detail's paragraphs — the heading, past the end, negative, or not a number —
 /// isn't applied, for either scope, so the pane takes its edit-failed reload path

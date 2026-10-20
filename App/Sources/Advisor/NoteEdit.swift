@@ -144,20 +144,41 @@ enum NoteEdit {
     /// transcript line, ending the transcript, rather than being lost.
     static func insertingBlock(_ block: String, after anchor: Anchor, in markdown: String) -> String {
         let (prefix, body) = TranscriptDoc.splitFrontmatter(markdown)
-        var lines = body.components(separatedBy: "\n")
+        let lines = body.components(separatedBy: "\n")
         func nearest(_ candidates: [Int]) -> Int? {
             candidates.min { abs($0 - anchor.index) < abs($1 - anchor.index) }
         }
         let stamp = stampPrefix(anchor.line)
-        // The transcript's end is its last paragraph line, wherever the headings
-        // fall — a user's own heading can sit inside it, and a summary after it.
-        let lastTranscriptLine = TranscriptDoc.timedBlocks(from: body).last {
-            if case .paragraph = $0.block { true } else { false }
-        }?.lines.last
         let line = nearest(lines.indices.filter { lines[$0] == anchor.line })
             ?? stamp.flatMap { stamp in nearest(lines.indices.filter { stampPrefix(lines[$0]) == stamp }) }
-            ?? lastTranscriptLine
+            ?? lastTranscriptLine(in: body)
+        return prefix + inserting(block, under: line, in: lines)
+    }
 
+    /// `markdown` with an editorial note added at the end of the transcript — the
+    /// Note button's note (issue #104), as a live one lands at the tail: under the
+    /// last transcript line, below any cards or notes already there. Nil for blank
+    /// text.
+    static func appendingNote(_ text: String, in markdown: String) -> String? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let (prefix, body) = TranscriptDoc.splitFrontmatter(markdown)
+        return prefix + inserting(
+            SessionMarkdown.noteBlock(text), under: lastTranscriptLine(in: body),
+            in: body.components(separatedBy: "\n"))
+    }
+
+    /// The transcript's end: its last paragraph line, wherever the headings fall —
+    /// a user's own heading can sit inside it, and a summary after it.
+    private static func lastTranscriptLine(in body: String) -> Int? {
+        TranscriptDoc.timedBlocks(from: body).last {
+            if case .paragraph = $0.block { true } else { false }
+        }?.lines.last
+    }
+
+    /// `lines` joined, with `block` under body line `line`, below any cards or
+    /// notes already there; with no line, at the end of the note.
+    private static func inserting(_ block: String, under line: Int?, in lines: [String]) -> String {
+        var lines = lines
         var at: Int
         if let line {
             at = line + 1
@@ -174,7 +195,7 @@ enum NoteEdit {
         var insert = (at > 0 ? [""] : []) + block.components(separatedBy: "\n")
         if at < lines.count, !isBlank(lines[at]) { insert.append("") }
         lines.insert(contentsOf: insert, at: at)
-        return prefix + lines.joined(separator: "\n")
+        return lines.joined(separator: "\n")
     }
 
     /// The id (`Feed.savedIds`) of the card whose body contains `body` — a card

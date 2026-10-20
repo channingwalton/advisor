@@ -14,8 +14,8 @@ window exists at a time, so doing it again just brings it forward.
 
 In the recording window, click **Listen**. Words appear live in grey as they're
 spoken, replaced by finalised sentences; cards appear inline when the assistant
-decides something is worth answering, checking, or explaining — or when you ask
-via the query box. If microphone permission or speech startup fails, fix the
+decides something is worth answering, checking, or explaining — or when you
+**Ask**. If microphone permission or speech startup fails, fix the
 reported problem and press **Resume**; failed speech recovery also leaves Resume
 available and keeps the existing transcript.
 
@@ -26,17 +26,30 @@ inline on a faint fill, so a past session reads just as it did live.
 ### Toolbar
 
 The toolbar keeps only in-session controls: the record cluster (waveform,
-timer, mic mute, stop) and audio source on the left; on the right the target
-folder (when recording into one), **Name**, **Context**, **Tags**, **Auto
-cards**, **Hide transcript**, **Summarise**, **Float** and **Export**. Idle
+timer, mic mute, stop) and audio source on the left; on the right **Ask**,
+**Note**, the target folder (when recording into one), **Name**, **Context**,
+**Tags**, **Auto cards**, **Hide transcript**, **Summarise**, **Float** and
+**Export**. Idle
 collapses the cluster to a single **Listen** pill. Hover an icon for its
-tooltip; tooltips show even while another app is in front.
+tooltip; tooltips show even while another app is in front. In a narrow
+window, **Hide transcript**, **Summarise**, **Float** and **Export** move into
+a **More** (…) menu, then the other controls drop their labels.
 
 - **Stop** is resumable — it pauses capture but keeps the session live, and the
   cluster offers **Resume** to pick it back up with full context. The session is
   finalised when the recording window closes. If cards are still researching,
   closing asks whether to **Wait** for them or **Stop and Close**. Closing — and
   quitting with ⌘Q — lets the last speech reach the note before it's saved.
+- **Ask** (⌘K) opens a box for a question about the conversation, or anything
+  else; the answer arrives as a card. **Return** sends it, **⌥↵** starts a new
+  line.
+- **Note** (⇧⌘N) opens a box for your own context — a name the audio misheard,
+  what "the migration" refers to. It lands as a green **Note** card at this
+  point in the conversation, and the assistant reads it as part of the
+  conversation (so it can inform, or trigger, research). Notes and Ask work
+  before **Listen** too: they open the transcript, notes reach the assistant
+  when the session starts, and an answer still being written carries on. Both boxes keep what you typed if you click away; a dot on
+  the button says a draft is waiting.
 - **Auto cards** turns the automatic answer/context/fact-check cards on and
   off. Off takes effect at once — nothing waiting to be researched starts —
   though cards already researching finish. Turned back on, it picks up from
@@ -54,7 +67,8 @@ tooltip; tooltips show even while another app is in front.
 - **Tags** (before or during a session) applies tags from your library (pick
   from the list; create them in Preferences).
 - **Hide transcript** (eye icon) shows only the cards; click again to bring the
-  transcript back.
+  transcript back. In the **More** menu it's ticked while hidden, and **More**
+  takes the accent colour while the transcript is hidden or the window floats.
 - **Summarise** adds a Summary card recapping the conversation so far, or
   updates the existing one.
 - **Float** keeps the window on top.
@@ -66,7 +80,8 @@ tooltip; tooltips show even while another app is in front.
 - **⌘N** — New Recording (or bring the recording window forward).
 - **Space** — Listen, Stop or Resume (not while typing in a field).
 - **Esc** — Stop.
-- **⌘↵** — Ask, from the query box (Return works too).
+- **⌘K** — Ask.
+- **⇧⌘N** — Add Note.
 - **⌘,** — Preferences.
 
 ### The transcript
@@ -82,10 +97,11 @@ sentence) to:
   saved to the transcript in place. A paragraph is several transcript lines
   shown together, and a selection that runs from one line into the next can't be
   corrected as one: the menu says so instead, so select within a line;
-- **Add note here…** when the audio missed context — your note lands as a green
-  **Note** card at that point and the assistant reads it as part of the
-  conversation (so it can inform, or trigger, research); delete it with the ✕
-  that shows when you hover it;
+- **Add note here…** when the audio missed context — the **Note** box opens,
+  showing the line the note goes under (✕ there sends it to the end instead);
+  your note lands as a green **Note** card at that line and the assistant reads
+  it as part of the conversation. Delete a note with the ✕ that shows when you
+  hover it;
 - copy the text.
 
 ### Cards
@@ -173,6 +189,7 @@ the recording window's controls too, and edits are saved into the note:
   streams in under that paragraph and is saved when it finishes; a failed or
   skipped one isn't), **Add note here…** (a green Note card at that line), and
   **Correct "…"** / **Replace all "…"**.
+- **Note** in the toolbar (⇧⌘N) adds a note at the end of the transcript.
 
 If the note has changed on disk since it was shown, a delete, note or
 correction that no longer fits it is not made: the pane says so and reloads, and
@@ -198,12 +215,12 @@ The same actions are also on each list row's **right-click** menu.
 
 ### Asking a past session
 
-Ask a question about the selected session in the field at the bottom: the
-answer streams in and, once finished, is appended to that session's note under a
-`# Follow-ups` heading, so the saved transcript grows with the questions you ask
-of it. (The session currently being recorded is read-only here until it has
+**Ask** in the toolbar (⌘K) takes a question about the selected session: the
+answer streams in at the bottom and, once finished, is appended to that
+session's note under a `# Follow-ups` heading, so the saved transcript grows
+with the questions you ask of it. (The session currently being recorded is read-only here until it has
 fully saved.) While an answer or a Summarise is running, the ✕ on its panel stops
-it: nothing is saved, and a stopped question goes back in the field to edit or
+it: nothing is saved, and a stopped question goes back in the Ask box to edit or
 send again.
 
 ## Preferences

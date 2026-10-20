@@ -126,6 +126,23 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
 
 // MARK: app → sidecar
 
+/// Notes typed before Listen follow `session_start`, which clears the
+/// sidecar's transcript, so the agents read them (issue #104).
+@MainActor
+@Test func sessionStartSendsTheNotesTypedBeforeIt() async throws {
+    let h = Harness()
+    defer { h.close() }
+    h.manager.start()
+    let note = EditorialNote(id: UUID(), time: Date(), text: "Bob is the CFO")
+
+    h.manager.sendSessionStart("0F3B5C2A-7D1E-4F8A-9B6C-2E4D8A1F3C5B", notes: [note])
+
+    #expect(await waitFor { h.sent().count == 2 })
+    let sent = h.sent()
+    #expect(sent.map { $0["type"] as? String } == ["session_start", "note"])
+    #expect(sent.last?["id"] as? String == note.id.uuidString)
+}
+
 @MainActor
 @Test func req_protocol_everySendMatchesItsExample() async throws {
     let examples = try Examples.load()

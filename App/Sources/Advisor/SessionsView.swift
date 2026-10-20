@@ -14,7 +14,7 @@ struct LoadedSession: Identifiable, Equatable {
 /// The Sessions browser: a master/detail window over saved session notes. Left:
 /// search + filters + a date-grouped list. Right: the selected session rendered
 /// like the live window (header, cards surfaced, questions asked, transcript)
-/// with the ask bar kept. Replaces the old picker + per-session windows.
+/// with Ask and Note kept. Replaces the old picker + per-session windows.
 ///
 /// Scope is "layout + real data": everything here comes from the saved notes.
 /// The handoff's AI-derived bits (category badge, topic chips, summary, people,
@@ -614,8 +614,8 @@ struct SessionsView: View {
 
     @ViewBuilder private var detail: some View {
         // Resolve against the *filtered* list: a session hidden by search/filter
-        // must not stay open in the detail (the Ask bar would append to a
-        // transcript no longer in the sidebar).
+        // must not stay open in the detail (Ask would append to a transcript no
+        // longer in the sidebar).
         if let selected = filtered.first(where: { $0.id == selection }) {
             SessionDetailPane(
                 file: selected.file, detail: selected.detail, library: tagLibrary, triggers: triggers)

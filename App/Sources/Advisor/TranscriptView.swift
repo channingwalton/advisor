@@ -11,7 +11,12 @@ struct TranscriptView: View {
     @State private var devices: [InputDevice] = []
     @State private var selectedDevice: InputDevice?
     @AppStorage("captureSystem") private var captureSystem = true
+    /// The Ask popover's question and the Note popover's draft (issue #104), kept
+    /// while their popovers are closed, and whether each is open.
     @State private var queryText = ""
+    @State private var showAsk = false
+    @State private var noteDraft = NoteDraft()
+    @State private var showNote = false
     /// True from the instant Summarise is tapped until the summary card reaches a
     /// terminal state. Guards the gap before the card returns, so a fast
     /// double-click can't spawn a second summary card (issue #30).
@@ -73,13 +78,13 @@ struct TranscriptView: View {
     @State private var recordingFolder: String?
 
     var body: some View {
-        ZStack {
+        composerWiring(ZStack {
             // The live feed UI. Disabled behind the finishing overlay while a
             // "Wait"-to-close drains the session's in-flight agents (issue #7).
             content
                 .disabled(finishing || services.isClosingRecording)
             if finishing { finishingOverlay }
-        }
+        })
         .background(Theme.surfaceWindow)
         // Guard the window's close: if agent tasks are still running, prompt to
         // wait for them or stop them before closing (issue #7).
@@ -115,6 +120,11 @@ struct TranscriptView: View {
                 cancelRecorderStart()
                 recorder?.stop()
             }
+            // Drafts belong to this session; the next one starts blank.
+            queryText = ""
+            noteDraft = NoteDraft()
+            showAsk = false
+            showNote = false
             // Drop any folder target so reopening the window with the global record
             // button (or ⌘N) starts un-foldered (issue #35).
             winCtx.pendingFolder = nil
@@ -205,6 +215,20 @@ struct TranscriptView: View {
         }
     }
 
+    /// ⌘K / ⇧⌘N open this window's popovers while it's in front (issue #104),
+    /// and one popover shows at a time: ⌘K, ⇧⌘N and "Add note here…" open theirs
+    /// whichever is showing.
+    private func composerWiring(_ view: some View) -> some View {
+        view
+            .focusedSceneValue(
+                \.composer,
+                finishing || services.isClosingRecording
+                    ? ComposerCommands()
+                    : ComposerCommands(ask: { showAsk = true }, note: { showNote = true }))
+            .onChange(of: showAsk) { _, open in if open { showNote = false } }
+            .onChange(of: showNote) { _, open in if open { showAsk = false } }
+    }
+
     /// The folder this recording is (or will be) filed into (issue #35): the
     /// pending target before Listen, the captured folder once recording. Nil =
     /// un-foldered. Shown read-only in the toolbar — the folder is fixed at start
@@ -213,7 +237,7 @@ struct TranscriptView: View {
         sessionStart != nil ? recordingFolder : winCtx.pendingFolder
     }
 
-    /// The live feed UI — toolbar, status line, transcript, ask bar.
+    /// The live feed UI — toolbar, status line, transcript.
     private var content: some View {
         VStack(spacing: 0) {
             ListeningToolbar(
@@ -241,14 +265,16 @@ struct TranscriptView: View {
                 canExport: services.writer.hasExportContent,
                 onExport: exportSession,
                 canSummarise: !store.utterances.isEmpty && !summarisingLive && !summaryResearching,
-                onSummarise: submitSummarise
+                onSummarise: submitSummarise,
+                askText: $queryText,
+                showAsk: $showAsk,
+                onAsk: submitQuery,
+                noteDraft: $noteDraft,
+                showNote: $showNote,
+                onNote: submitNote
             )
             statusLine
             transcriptArea
-            AskBar(
-                text: $queryText,
-                onSubmit: submitQuery
-            )
         }
     }
 
@@ -323,8 +349,9 @@ struct TranscriptView: View {
                 guard let anchor = paragraph.lines.last?.id else { return }
                 services.sidecar.sendAction(kind, text: selection, triggerId: anchor)
             },
-            onAddNote: { text, offset, paragraph in
-                addNote(text, atOffset: offset, in: Self.utteranceIds(paragraph))
+            onAddNote: { offset, paragraph in
+                noteDraft.placement = NotePlacement(offset: offset, paragraph: paragraph)
+                showNote = true
             },
             onCorrect: { request, paragraph in
                 switch request.scope {
@@ -363,7 +390,7 @@ struct TranscriptView: View {
     }
 
     /// True when an editable text field holds focus in the key window. A focused
-    /// `NSTextField` (Ask box) edits through a field-editor `NSTextView`; the
+    /// `NSTextField` (the Ask or Note popover's) edits through a field-editor `NSTextView`; the
     /// selectable transcript is a non-editable `NSTextView`, so `isEditable`
     /// distinguishes them — same test the space monitor uses (issue #37).
     private var isEditingTextField: Bool {
@@ -413,7 +440,7 @@ struct TranscriptView: View {
             }
             .onChange(of: scrollKey) { _, _ in
                 // Don't auto-scroll while the user is typing in an editable text
-                // field (the Ask box, a card reply, a NOTE editor). Scrolling the
+                // field (the Ask or Note popover, a card reply). Scrolling the
                 // transcript yanks focus away mid-keystroke, and a stray space then
                 // toggles recording (issue #37). The non-editable selectable
                 // transcript NSTextView is fine to scroll past.
@@ -535,7 +562,7 @@ struct TranscriptView: View {
             guard event.keyCode == 49, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
             else { return event }
             // Don't steal space from a focused *editable* text field (the Ask
-            // box). The selectable transcript is a non-editable NSTextView and
+            // or Note popover's). The selectable transcript is a non-editable NSTextView and
             // must still toggle recording when it holds focus.
             if let tv = event.window?.firstResponder as? NSTextView, tv.isEditable { return event }
             switch recordingControl.state {
@@ -595,26 +622,52 @@ struct TranscriptView: View {
     }
 
     private func submitQuery() {
-        let text = queryText.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
+        let text = queryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !services.isClosingRecording else { return }
         services.sidecar.sendQuery(text)
         queryText = ""
+        showAsk = false
     }
 
-    /// Inject an editorial note the user typed via the transcript right-click menu
-    /// (issue #34). `offset` is the selection end / click point within the clicked
-    /// paragraph, mapped back to the line it falls in so the note anchors at the
-    /// selected text — above any card or transcript below it. Forwards it to the
-    /// sidecar as transcript context the agents read, and triggers a rewrite so it
-    /// persists.
-    private func addNote(_ text: String, atOffset offset: Int, in utteranceIds: [UUID]) {
-        let lines = utteranceIds.compactMap { id in
-            store.utterances.first { $0.id == id }.map { (text: $0.text, time: $0.time) }
+    /// Add the Note popover's draft (issue #104): under the line "Add note here…"
+    /// was chosen on, or — opened from the toolbar or ⇧⌘N — at this point in the
+    /// conversation, after every line heard so far.
+    /// Refused while the last window's close is still finishing: it clears the
+    /// store's notes when it does. A placement whose lines have all gone (echo
+    /// cleanup) is dropped instead, so the popover shows the note going here.
+    private func submitNote() {
+        guard !services.isClosingRecording else { return }
+        if let placement = noteDraft.placement, store.lines(Self.utteranceIds(placement.paragraph)).isEmpty {
+            noteDraft.placement = nil
+            return
         }
-        let anchorTime = NoteAnchor.time(forOffset: offset, in: lines) ?? Date()
-        guard let note = store.addNote(text, at: anchorTime) else { return }
+        let added = noteDraft.submit { text, placement in
+            if let placement {
+                addNote(text, atOffset: placement.offset, in: Self.utteranceIds(placement.paragraph))
+            } else {
+                addNote(text, at: Date())
+            }
+            return true
+        }
+        if added { showNote = false }
+    }
+
+    /// Inject an editorial note at a line of the transcript (issue #34). `offset`
+    /// is the selection end / click point within the clicked paragraph, mapped
+    /// back to the line it falls in so the note anchors at the selected text —
+    /// above any card or transcript below it.
+    private func addNote(_ text: String, atOffset offset: Int, in utteranceIds: [UUID]) {
+        addNote(text, at: NoteAnchor.time(forOffset: offset, in: store.lines(utteranceIds)) ?? Date())
+    }
+
+    /// Inject an editorial note at `time`, sent to the sidecar as transcript
+    /// context the agents read. In a session it triggers a rewrite so it
+    /// persists. Before Listen (issue #104) a question asked then reads it too,
+    /// and Listen sends it again, after `session_start` clears the transcript.
+    private func addNote(_ text: String, at time: Date) {
+        guard let note = store.addNote(text, at: time) else { return }
         services.sidecar.sendNote(note)
-        services.writer.noteChanged()
+        if sessionStart != nil { services.writer.noteChanged() }
     }
 
     /// Summarise the whole live session into its single Summary card (issue #30).
@@ -733,10 +786,9 @@ struct TranscriptView: View {
         // Open a new STT session generation before clearing/starting, on the
         // main actor with no `await` in between, so a previous session's
         // in-flight finals are already stale by the time they try to write.
-        store.sessionGeneration += 1
-        store.utterances = []
-        store.cards = []
-        store.notes = []
+        // Notes typed before Listen are kept, and sent after `session_start`,
+        // which clears the sidecar's transcript (issue #104).
+        let pendingNotes = store.beginSession()
         let ctx = recordingDraft.context.trimmingCharacters(in: .whitespacesAndNewlines)
         let nm = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
         // Consume the pending folder target: this session files into it, and it's
@@ -744,7 +796,7 @@ struct TranscriptView: View {
         let folder = winCtx.pendingFolder
         recordingFolder = folder
         winCtx.pendingFolder = nil
-        services.sidecar.sendSessionStart(UUID().uuidString, context: ctx)
+        services.sidecar.sendSessionStart(UUID().uuidString, context: ctx, notes: pendingNotes)
         services.writer.start(
             context: ctx, name: nm, tags: recordingDraft.tags, folder: folder)
         // A transcript window opened on this note must disable asking until

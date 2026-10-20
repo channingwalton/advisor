@@ -240,3 +240,16 @@ private func inner(_ block: String) throws -> String {
     #expect(parsed.triggerQuote == "we said X")
     #expect(parsed.footnote == nil)
 }
+
+/// A note typed before Listen (issue #104) is older than every line, so the note
+/// opens the transcript and reads back as a note, not as part of a paragraph.
+@Test func aNoteFromBeforeListenOpensTheTranscript() {
+    let t = Date(timeIntervalSince1970: 1_000)
+    let note = EditorialNote(id: UUID(), time: t.addingTimeInterval(-30), text: "Bob is the CFO")
+    let u = Utterance(time: t, source: .them, text: "Shall we start?", latencyMs: 0)
+
+    let md = SessionMarkdown.inline(utterances: [u], cards: [], notes: [note], started: t, ended: nil)
+
+    let blocks = TranscriptDoc.blocks(from: SessionArchive.strippingFrontmatter(md))
+    #expect(blocks == [.heading("Transcript"), .note("Bob is the CFO"), .paragraph("Shall we start?")])
+}

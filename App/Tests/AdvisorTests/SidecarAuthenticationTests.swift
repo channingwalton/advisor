@@ -309,6 +309,34 @@ private func waitFor(seconds: Double = 0.5, _ predicate: () -> Bool) async -> Bo
     #expect(child.terminationReason == .uncaughtSignal)
 }
 
+/// A question asked before Listen keeps its card into the session (issue #104).
+/// Listen on the same login lets the sidecar finish it; Listen after a login
+/// change replaces the sidecar, which can never finish it, so it fails rather
+/// than spinning.
+@MainActor
+@Test func req_sidecar_auth_refresh_failsCardsTheReplacedSidecarWasAnswering() async throws {
+    let h = try AuthHarness()
+    defer { h.close() }
+    h.manager.start()
+    h.store.cards = [Card(id: "c1", created: Date(), kind: "query", title: "Q", body: "…", state: "streaming")]
+
+    h.manager.sendSessionStart("same-login")
+    #expect(h.children.count == 1)
+    #expect(h.store.cards[0].state == "streaming", "the running sidecar finishes it")
+
+    h.config.authMode = "apiKey"
+    h.keys[.anthropic] = "placeholder-anthropic"
+    h.manager.sendSessionEnd()
+    let note = EditorialNote(id: UUID(), time: Date(), text: "Bob is the CFO")
+    h.manager.sendSessionStart("changed-login", notes: [note])
+    try #require(h.children.count == 2)
+    #expect(h.store.cards[0].state == "failed")
+    // The replacement is told the notes typed before Listen, after the start
+    // that clears its transcript.
+    #expect(await waitFor { h.messageTypes(1).last == "note" })
+    #expect(h.messageTypes(1).suffix(2) == ["session_start", "note"], "\(h.messageTypes(1))")
+}
+
 // Crash recovery (DESIGN.md: SidecarManager), pinned at the manager level —
 // before, only Card.apply and the backoff-replaced-by-a-new-session case were
 // covered (code review 2026-10-17).
