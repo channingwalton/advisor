@@ -88,7 +88,7 @@ struct AdvisorApp: App {
         // re-opening just brings the existing one forward. Never auto-opens.
         Window("Recording", id: "recording") {
             TranscriptView(services: services)
-                .frame(minWidth: 420, minHeight: 480)
+                .frame(minWidth: Theme.Metric.recordingWindowMinWidth, minHeight: 480)
                 .showsToolTipsWhenInactive()
         }
         .defaultLaunchBehavior(.suppressed)

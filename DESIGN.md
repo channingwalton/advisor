@@ -3085,9 +3085,15 @@ were both worth losing, and one popover could serve both ways in.
   buttons don't come back out when the labels go, so narrowing the window only
   ever takes things away (`ListeningToolbar.Layout.narrowing`). More takes the
   accent while the transcript is hidden or the window floats, as those buttons
-  do, so folding them doesn't hide that either is on. The window can still be
-  narrower (420pt) than the toolbar's narrowest layout. The Sessions window's
+  do, so folding them doesn't hide that either is on. The Sessions window's
   toolbar is the system one, which overflows into its own menu.
+- **The recording window's minimum width rose from 420pt to 850pt**
+  (`Theme.Metric.recordingWindowMinWidth`), so the toolbar never clips: 850pt
+  is its narrowest layout at its widest, a stopped session filed into a folder
+  with a microphone's name and a name, context and tags set. Folding Name,
+  Context and Tags as well would have kept the window nearer 700pt, but their
+  popovers would need a new anchor; a wider window was chosen instead. A test
+  holds the toolbar to the minimum, so a control that widens it fails there.
 
 No protocol change: a button note is the same `note` frame.
 

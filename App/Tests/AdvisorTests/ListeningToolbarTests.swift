@@ -5,15 +5,23 @@ import Testing
 @testable import Advisor
 
 private struct Toolbar: View {
-    let ask: String
-    let note: String
+    var ask = ""
+    var note = ""
+    var state = RecordControl.State.idle
+    var folder: String?
+    var device: InputDevice?
+    var name = ""
+    var context = ""
+    var tags: [String] = []
     let store = TranscriptStore()
 
     var body: some View {
         ListeningToolbar(
-            store: store, recordingState: .idle, sessionStart: nil, stoppedAt: nil, targetFolder: nil,
-            selectedDevice: .constant(nil), devices: [], captureSystem: true, sessionName: .constant(""),
-            sessionContext: .constant(""), sessionTags: .constant([]), savedContexts: [], tagLibrary: [],
+            store: store, recordingState: state, sessionStart: state == .idle ? nil : Date(),
+            stoppedAt: state == .stopped ? Date() : nil, targetFolder: folder,
+            selectedDevice: .constant(device), devices: device.map { [$0] } ?? [], captureSystem: true,
+            sessionName: .constant(name), sessionContext: .constant(context), sessionTags: .constant(tags),
+            savedContexts: [], tagLibrary: [],
             onSaveContext: { _ in }, autoCards: .constant(true), hideTranscript: .constant(false),
             pinned: .constant(false), onStart: {}, onResume: {}, onMuteToggle: {}, onStop: {}, canExport: false,
             onExport: {}, canSummarise: false, onSummarise: {}, askText: .constant(ask), showAsk: .constant(false),
@@ -56,4 +64,19 @@ private struct Toolbar: View {
         #expect(!wider.compact || narrower.compact)
         #expect(!wider.folded || narrower.folded)
     }
+}
+
+/// The recording window is never narrower than its toolbar's narrowest layout,
+/// even at the toolbar's widest: a stopped session filed into a folder, with a
+/// microphone's name and a name, context and tags set.
+@MainActor
+@Test func theRecordingWindowIsWideEnoughForItsToolbar() {
+    let width = Theme.Metric.recordingWindowMinWidth
+    let toolbar = Toolbar(
+        state: .stopped, folder: "Clients",
+        device: InputDevice(id: 1, uid: nil, name: "MacBook Pro Microphone", isVirtual: false),
+        name: "Weekly sync", context: "Board review", tags: ["clients"])
+    let fitted = NSHostingController(rootView: toolbar)
+        .sizeThatFits(in: CGSize(width: width, height: Theme.Metric.toolbarHeight)).width
+    #expect(fitted <= width)
 }

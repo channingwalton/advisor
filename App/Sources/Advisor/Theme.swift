@@ -114,6 +114,10 @@ enum Theme {
     // MARK: metrics
     enum Metric {
         static let toolbarHeight: CGFloat = 60
+        /// The recording window's narrowest width: enough for its toolbar's
+        /// narrowest layout at its widest — a stopped session filed into a
+        /// folder, with a microphone's name — so it doesn't clip.
+        static let recordingWindowMinWidth: CGFloat = 850
         /// The Sessions detail's centred reading column, its side margin, and
         /// how far paragraph times hang into that margin.
         static let readingWidth: CGFloat = 680
