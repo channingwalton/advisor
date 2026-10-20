@@ -351,11 +351,13 @@ private func waitFor(seconds: Double = 0.5, _ predicate: () -> Bool) async -> Bo
     h.manager.sendSessionStart("s1", context: "the context")
     h.store.cards = [Card(id: "c1", created: Date(), kind: "answer", title: "t", body: "…", state: "streaming")]
     h.children[0].terminate() // a crash, from the manager's point of view
-    #expect(await waitFor { h.store.status.contains("restarting (1/5)") })
+    // Generous windows, as for the crash loop below: noticing the exit and
+    // respawning took over 0.5 s on a loaded CI runner.
+    #expect(await waitFor(seconds: 5) { h.store.status.contains("restarting (1/5)") })
     #expect(h.store.cards[0].state == "failed", "a card the dead sidecar can never finish")
-    #expect(await waitFor { h.children.count == 2 })
+    #expect(await waitFor(seconds: 5) { h.children.count == 2 })
     // The replacement is told what the running conversation depends on, in order.
-    #expect(await waitFor { h.messageTypes(1).contains("session_start") })
+    #expect(await waitFor(seconds: 5) { h.messageTypes(1).contains("session_start") })
     #expect(h.messageTypes(1) == ["config", "config", "session_start"], "\(h.messageTypes(1))")
     let start = h.messages(1).last { $0["type"] as? String == "session_start" }
     #expect(start?["sessionId"] as? String == "s1")
