@@ -100,6 +100,18 @@ The script runs a release `swift build` under the pinned Xcode, builds the sidec
 `tsc`), assembles the `.app`, and signs it. Re-run it any time; it rebuilds
 `dist/Advisor.app` from scratch.
 
+The bundle carries the licence texts of what it ships:
+
+- Advisor's own `LICENSE`, in `Contents/Resources/LICENSE`.
+- Node's `LICENSE`, from the folder of the Node install whose binary is
+  bundled, in `Contents/Resources/LICENSE.node`. `package.sh` stops if that
+  file is missing.
+- Each bundled npm package's licence file, in the package's own folder.
+  `App/licences.sh` copies in the texts that `sidecar/licences/` supplies for
+  packages that ship without one. Then it stops the build and names each
+  package that still has no licence file. To fix it, add the package's text
+  under `sidecar/licences/` as its `README.md` describes.
+
 To clean-build **and** install over your own copy in one step:
 
 ```sh

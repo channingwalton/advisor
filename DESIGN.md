@@ -3200,6 +3200,49 @@ The About panel was AppKit's default: the icon, the name and the version
 - **No repository link.** The repository is private, so a link would give
   anyone else a 404.
 
+## Licence texts in the bundle (2026-10-29)
+
+The app redistributes Node and about 100 npm packages, and their licences
+(MIT, Apache-2.0 and others) ask that copies carry the licence text. Release
+0.4.12 did not carry all of them. `package.sh` copied the Node binary without
+its `LICENSE`. Three packages ship with no licence file: `@openai/codex`,
+`@openai/codex-darwin-arm64` (the Codex CLI binary) and `standardwebhooks`.
+Advisor's own MIT `LICENSE` was not in the bundle either.
+
+- **In place, not one notices file.** `package.sh` copies Advisor's `LICENSE`
+  and Node's (from the Node install folder, next to `bin/`) into
+  `Contents/Resources`. Each package's licence stays in its own folder, where
+  npm puts it. A single generated `THIRD-PARTY-NOTICES.txt` would be easier to
+  read, but needs more code, and nothing in the app links to it.
+- **Supplied texts.** `sidecar/licences/<package>/` holds the upstream text
+  for each package that ships without one, unchanged and pinned to a tag or
+  commit (its `README.md` lists the sources). The two Codex packages also get
+  upstream's `NOTICE`, which Apache-2.0 §4(d) asks a redistribution to carry.
+  The Codex binary package also bundles ripgrep 15.1.0 (`codex-path/rg`) and
+  zsh 5.9 (`codex-resources/zsh/bin/zsh`) with no licence text, so it gets
+  `ripgrep.LICENSE` and `zsh.LICENSE` too. Advisor's own code runs neither.
+  Codex's shell commands can probably run `rg`, and only its experimental
+  `shell_zsh_fork` feature uses the zsh, which Advisor does not turn on (both
+  read from the strings in the binary, not from a run). Whether they run does
+  not matter: the licences apply to the copies that the app ships.
+- **The check.** `App/licences.sh`, run by `package.sh` after the prune,
+  copies the supplied texts in. Then it fails the build and names each bundled
+  package (scoped and nested ones too) that still has no `LICENSE`, `LICENCE`,
+  `COPYING` or `UNLICENSE` file. A dependency bump that adds such a package
+  therefore stops the release, not the licence. A bundled program's text is
+  named `<program>.LICENSE`, so the check does not take it for the package's
+  own licence. A supplied text that is no longer needed (the package now ships
+  its own, or is no longer bundled) only warns, because it changes no text
+  that ships. A file that the package ships is never overwritten, and a
+  program's text is still copied when the package has its own licence. `BundledLicencesTests` runs the script over fake
+  `node_modules` folders, and holds `sidecar/licences/` to the packages that
+  the lock file locks.
+- **Residual.** The check looks for one licence file per package folder, so it
+  cannot see another program that a package bundles, as with `rg` and `zsh`;
+  a Codex bump that adds one needs a look at `vendor/`. The Codex binary also
+  links Rust crates in, and upstream ships no licence texts for them. The
+  bundle carries what upstream distributes (`LICENSE` and `NOTICE`), no more.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

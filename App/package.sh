@@ -1,9 +1,10 @@
 #!/bin/sh
 # Assemble a self-contained Advisor.app from a release build.
 # Uses a stable local signing identity when available; otherwise ad-hoc signs.
-# Bundles: the Swift executable, the Node runtime, and the built sidecar
-# (dist + node_modules). Transcription is Apple's on-device SpeechAnalyzer,
-# so there are no model files or extra dylibs to ship.
+# Bundles: the Swift executable, the Node runtime, the built sidecar
+# (dist + node_modules), and the licence texts of all three. Transcription is
+# Apple's on-device SpeechAnalyzer, so there are no model files or extra dylibs
+# to ship.
 #
 # Output: App/dist/Advisor.app  (drag to /Applications)
 set -e
@@ -60,7 +61,8 @@ echo "==> compile app icon"
 iconutil -c icns Resources/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 
 echo "==> bundle node + sidecar"
-cp "$(node -e 'console.log(process.execPath)')" "$APP/Contents/Resources/node"
+NODE_BIN=$(node -e 'console.log(process.execPath)')
+cp "$NODE_BIN" "$APP/Contents/Resources/node"
 mkdir -p "$APP/Contents/Resources/sidecar"
 cp -R "$ROOT/sidecar/dist" "$ROOT/sidecar/node_modules" "$ROOT/sidecar/package.json" \
       "$APP/Contents/Resources/sidecar/"
@@ -73,6 +75,19 @@ if ! ( cd "$APP/Contents/Resources/sidecar" && npm prune --omit=dev ) >"$PRUNE_L
   cat "$PRUNE_LOG"
 fi
 rm -f "$PRUNE_LOG"
+
+echo "==> licences"
+# Advisor's own; Node's, from the install whose binary is bundled above; and
+# each bundled package's. licences.sh supplies the texts some packages ship
+# without, and stops the build if a package still has none.
+cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
+NODE_LICENSE=$(dirname "$(dirname "$NODE_BIN")")/LICENSE
+if [ ! -f "$NODE_LICENSE" ]; then
+    echo "error: no LICENSE beside the bundled node ($NODE_LICENSE)" >&2
+    exit 1
+fi
+cp "$NODE_LICENSE" "$APP/Contents/Resources/LICENSE.node"
+sh licences.sh "$APP/Contents/Resources/sidecar/node_modules" "$ROOT/sidecar/licences"
 
 sh sign-local.sh "$APP"
 
