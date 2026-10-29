@@ -95,7 +95,10 @@ struct AdvisorApp: App {
         .restorationBehavior(.disabled)
         // Cmd-N opens the single recording window (or brings it forward),
         // replacing the menu bar's default "New" — there's no document to create.
-        .commands { RecordingCommands() }
+        .commands {
+            RecordingCommands()
+            AboutCommands()
+        }
         Settings {
             PreferencesView()
                 .showsToolTipsWhenInactive()

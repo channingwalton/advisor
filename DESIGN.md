@@ -3174,6 +3174,32 @@ CI. Matching the short version can't tell a 26.6 beta from the release.
 `XcodePinTests` runs the script over fake Xcode apps. A plain `swift build`
 outside the script still uses the selected Xcode.
 
+## About panel (2026-10-29)
+
+The About panel was AppKit's default: the icon, the name and the version
+(issue #106). It now shows credits, with a copyright line below them.
+
+- **Credits.** `AboutCredits` (`AboutCredits.swift`) builds them: one sentence
+  on what Advisor does, then the main components with their licences. These
+  are Node.js (MIT), the Claude Agent SDK and the Codex SDK (Apache-2.0). The
+  Claude Agent SDK's package declares "SEE LICENSE IN README.md", so its line
+  shows "Anthropic terms" as a link to Anthropic's legal agreements.
+  `AboutCommands` replaces the menu's About item with one that gives the
+  credits to `orderFrontStandardAboutPanel`. Each run of text carries a system
+  colour, because text with no colour draws black on the dark panel.
+- **Three lines, not a hundred.** The app ships about 100 npm packages. A full
+  list, generated from the shipped `node_modules`, was rejected: it buried the
+  rest of the panel. The list stops at the runtime and the sidecar's direct
+  dependencies.
+- **Held to the sources.** The list is written by hand, so tests hold it to
+  `sidecar/package.json` (the list names each direct dependency) and to the
+  lock file (an open-source licence shows as the identifier that its package
+  declares). The copyright line, `NSHumanReadableCopyright` in Info.plist, is
+  held to the holder and year in LICENSE. A new dependency or a changed
+  licence fails a test.
+- **No repository link.** The repository is private, so a link would give
+  anyone else a 404.
+
 ## Revisit as it grows
 
 Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).

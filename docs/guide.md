@@ -323,6 +323,12 @@ log** under Preferences → General; it applies at once, mid-recording too, and
 the log is then session data like the transcripts themselves. Either way, it
 stays on your machine.
 
+## About
+
+**Advisor → About Advisor** shows the version, what Advisor does, the main
+components it is built on with their licences, and the copyright. Advisor is
+open source under the MIT licence.
+
 ## Known limits
 
 Overlapping simultaneous speakers on a mixed mono feed cannot be fully
