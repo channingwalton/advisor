@@ -230,6 +230,400 @@ private func weight(of font: NSFont) -> CGFloat {
     #expect(!MarkdownText.lines(from: "````\n```\n# not a heading\nx\n````").contains { $0.kind == .heading })
 }
 
+// MARK: - Fenced code blocks (issue #107)
+
+/// The code sections of the "Scala type lambdas" card (#107): a fence with no
+/// blank line in it, and two that hold blank lines.
+private let scalaCard = """
+### Scala 2 — type projection hack
+```scala
+// "Kind projector" compiler plugin syntax:
+def foo[F[_]: Monad] = ...
+foo[({ type L[A] = Either[String, A] })#L]  // anonymous type member + projection
+```
+Anonymous structural types with a type member, accessed via `#` projection.
+
+### Scala 3 — native syntax
+```scala
+// Type lambda literal:
+type EitherString = [A] =>> Either[String, A]
+
+// Inline at call site:
+foo[[A] =>> Either[String, A]]
+```
+`[A] =>> F` is a first-class type-level function.
+
+```scala
+// Monoidal structure: `pure` (unit) + `flatten` (multiplication)
+
+trait Monad[F[_]] extends Functor[F]:
+  def pure[A](a: A): F[A]          // identity / unit
+```
+"""
+
+private let code = Line.Kind.code(level: nil)
+
+@Test func aFenceIsOneCodeLineWithItsLinesIndentationAndBlankLines() {
+    let lines = MarkdownText.lines(from: scalaCard)
+    #expect(lines.map(\.kind) == [.heading, code, .text, .heading, code, .text, code])
+    #expect(lines[1].text == """
+        // "Kind projector" compiler plugin syntax:
+        def foo[F[_]: Monad] = ...
+        foo[({ type L[A] = Either[String, A] })#L]  // anonymous type member + projection
+        """)
+    #expect(lines[4].text == """
+        // Type lambda literal:
+        type EitherString = [A] =>> Either[String, A]
+
+        // Inline at call site:
+        foo[[A] =>> Either[String, A]]
+        """)
+    #expect(lines[6].text == """
+        // Monoidal structure: `pure` (unit) + `flatten` (multiplication)
+
+        trait Monad[F[_]] extends Functor[F]:
+          def pure[A](a: A): F[A]          // identity / unit
+        """)
+}
+
+@Test func markdownInAFenceStaysSource() {
+    let source = "# not a heading\n- not an item\n| a | b |\n|---|---|\n**not bold** `x`\n---"
+    #expect(MarkdownText.lines(from: "```\n\(source)\n```") == [Line(kind: code, text: source, endsBlock: true)])
+}
+
+@Test func aFenceSplitsTheParagraphAroundIt() {
+    let lines = MarkdownText.lines(from: "Run:\n```\nmake\n```\nThen test.")
+    #expect(lines.map(\.kind) == [.text, code, .text])
+    #expect(lines.map(\.text) == ["Run:", "make", "Then test."])
+    #expect(lines.map(\.endsBlock) == [true, true, true])
+}
+
+@Test func anUnclosedFenceRunsToTheEnd() {
+    #expect(MarkdownText.lines(from: "Streaming:\n~~~\nline one\n\nline two").last
+        == Line(kind: code, text: "line one\n\nline two", endsBlock: true))
+}
+
+@Test func anIndentedFenceDropsItsIndentationFromItsLines() {
+    #expect(MarkdownText.lines(from: "  ```\n  a\n    b\n  ```").map(\.text) == ["a\n  b"])
+}
+
+@Test func aCodeBlockRendersItsSourceMonospacedInOneFilledBlock() throws {
+    let s = MarkdownText.render("Before.\n\n```\nlet x = **1**\n\n  `y`\n```\nAfter.", style: .answer)
+    #expect(s.string == "Before.\nlet x = **1**\n\n  `y`\n\nAfter.")
+    let paras = paragraphs(s)
+    #expect(paras.map(\.text) == ["Before.", "let x = **1**", "", "  `y`", "", "After."])
+    let blocks = paras[1...3].map { $0.style.textBlocks.first }
+    let block = try #require(blocks[0])
+    #expect(blocks.allSatisfy { $0 === block })
+    #expect(!(block is NSTextTableBlock))
+    #expect(block.backgroundColor == MarkdownTextStyle.answer.codeBlockBackground)
+    #expect(paras[0].style.textBlocks.isEmpty && paras[5].style.textBlocks.isEmpty)
+    let font = s.attribute(.font, at: paras[1].range.location, effectiveRange: nil) as! NSFont
+    #expect(font.isFixedPitch)
+}
+
+@Test func aFenceUnderAnItemBelongsToItAndTheListGoesOn() {
+    let lines = MarkdownText.lines(from: """
+        1. Install:
+           ```bash
+           brew install jq
+           ```
+        2. Configure:
+           - nested
+             ```
+             x
+             ```
+        """)
+    #expect(lines.map(\.kind) == [
+        .item(level: 0, marker: "1."), .code(level: 0), .item(level: 0, marker: "2."),
+        .item(level: 1, marker: "◦"), .code(level: 1),
+    ])
+    #expect(lines[1].text == "brew install jq")
+}
+
+@Test func aFenceAtTheMarginEndsTheList() {
+    let lines = MarkdownText.lines(from: "- a\n```\nx\n```\n  - b")
+    #expect(lines.map(\.kind) == [.item(level: 0, marker: "•"), code, .item(level: 0, marker: "•")])
+}
+
+@Test func anIndentedFenceAfterProseIsAtTheMargin() {
+    #expect(MarkdownText.lines(from: "- a\n\nText.\n  ```\n  x\n  ```").last?.kind == code)
+}
+
+@MainActor
+private func textFrame(_ text: String, in layout: (NSLayoutManager, NSTextContainer, NSString)) -> NSRect {
+    let (lm, container, ns) = layout
+    let glyphs = lm.glyphRange(forCharacterRange: ns.range(of: text), actualCharacterRange: nil)
+    return lm.boundingRect(forGlyphRange: glyphs, in: container)
+}
+
+@MainActor
+@Test func aCodeBlockUnderAnItemLinesUpWithTheItemsText() {
+    let inset = 1 + Theme.Metric.cardCodePaddingX
+    let atMargin = laidOut("```\nmargin\n```", width: 360)
+    #expect(abs(textFrame("margin", in: atMargin).minX - inset) < 1)
+    let nested = laidOut("- Install:\n  ```\n  brew install jq\n  ```", width: 360)
+    let item = textFrame("Install", in: nested)
+    #expect(abs(textFrame("brew", in: nested).minX - (item.minX + inset)) < 1)
+    // The margin narrows the block, so its lines still end inside the card.
+    #expect(cellFrame("brew", in: nested).maxX <= 360 - inset + 1)
+    #expect(cellFrame("margin", in: atMargin).maxX <= 360 - inset + 1)
+}
+
+// MARK: - Block quotes (issue #107)
+
+@Test func aQuoteHoldsMarkdownOfItsOwn() {
+    let lines = MarkdownText.lines(from: "Before.\n\n> **Note:** quoted\n> - item\n>\n> ```\n> # code\n> ```\n\nAfter.")
+    #expect(lines.map(\.kind) == [.text, .lead, .item(level: 0, marker: "•"), code, .text])
+    #expect(lines.map(\.text) == ["Before.", "**Note:** quoted", "item", "# code", "After."])
+    #expect(lines.map(\.quotes.count) == [0, 1, 1, 1, 0])
+    #expect(Set(lines[1...3].map(\.quotes)).count == 1)
+}
+
+@Test func quotesApartAreSeparateAndAQuoteCanNest() {
+    let apart = MarkdownText.lines(from: "> a\n\n> b")
+    #expect(apart.map(\.quotes.count) == [1, 1])
+    #expect(apart[0].quotes != apart[1].quotes)
+    let nested = MarkdownText.lines(from: "> a\n>\n> > b")
+    #expect(nested.map(\.quotes.count) == [1, 2])
+    #expect(nested[1].quotes.first == nested[0].quotes.first)
+}
+
+@Test func aLineWithoutAMarkerEndsTheQuote() {
+    #expect(MarkdownText.lines(from: "> a\nb").map(\.quotes.count) == [1, 0])
+}
+
+@Test func aMarkerInAFenceOrMidLineIsNoQuote() {
+    #expect(MarkdownText.lines(from: "```\n> x\n```") == [Line(kind: code, text: "> x", endsBlock: true)])
+    #expect(MarkdownText.lines(from: "a > b").map(\.quotes.count) == [0])
+}
+
+@Test func aQuoteRendersInOneBarredBlockInTheQuoteColour() throws {
+    let style = MarkdownTextStyle.answer
+    let s = MarkdownText.render("> one\n>\n> two\n> ```\n> x\n> ```\n\nAfter.", style: style)
+    let paras = paragraphs(s)
+    let quoted = paras.filter { ["one", "two", "x"].contains($0.text) }
+    #expect(quoted.count == 3)
+    let bar = try #require(quoted[0].style.textBlocks.first)
+    #expect(quoted.allSatisfy { $0.style.textBlocks.first === bar })
+    #expect(bar.width(for: .border, edge: .minX) == Theme.Metric.cardQuoteBar)
+    #expect(bar.width(for: .border, edge: .maxX) == 0)
+    // The code block nests inside the quote.
+    #expect(quoted[2].style.textBlocks.count == 2)
+    #expect(paras.last?.text == "After." && paras.last?.style.textBlocks.isEmpty == true)
+    #expect(s.attribute(.foregroundColor, at: paras[0].range.location, effectiveRange: nil) as? NSColor == style.quote)
+}
+
+@MainActor
+@Test func quotedTextClearsTheBarAndTextAfterTheQuoteIsSpacedOffIt() {
+    let layout = laidOut("> one\n> two\n\nAfter.", width: 360)
+    let m = Theme.Metric.self
+    #expect(abs(textFrame("one", in: layout).minX - (m.cardQuoteBar + m.cardQuotePadding)) < 1)
+    #expect(cellFrame("After.", in: layout).minY - cellFrame("two", in: layout).maxY >= m.cardBlockSpacing)
+}
+
+@Test func aFenceOnAListMarkerLineIsTheItemsCode() {
+    let lines = MarkdownText.lines(from: "1. ```bash\n   brew install jq\n   ```\n2. Configure it\n\nMore prose")
+    #expect(lines.map(\.kind) == [.item(level: 0, marker: "1."), .code(level: 0), .item(level: 0, marker: "2."), .text])
+    #expect(lines.map(\.text) == ["", "brew install jq", "Configure it", "More prose"])
+}
+
+/// Unlike CommonMark, an unclosed fence in an item runs to the end, as one at
+/// the margin does, so a streaming block keeps its shape.
+@Test func anUnclosedFenceInAnItemRunsToTheEnd() {
+    let lines = MarkdownText.lines(from: "1. Install:\n   ```bash\n   brew install jq\n\n2. Configure\n\nMore prose")
+    #expect(lines.map(\.kind) == [.item(level: 0, marker: "1."), .code(level: 0)])
+    #expect(lines[1].text == "brew install jq\n\n2. Configure\n\nMore prose")
+    #expect(MarkdownText.lines(from: "1. a\n   ```\n   x\n\n   y\n   ```").last?.text == "x\n\ny")
+}
+
+@Test func aDeeplyIndentedFenceLineInAMarginFenceIsCode() {
+    let source = "- step\n      ```\n      x\n      ```"
+    #expect(MarkdownText.lines(from: "```markdown\n\(source)\n```") == [Line(kind: code, text: source, endsBlock: true)])
+}
+
+@Test func aTabPartlyInsideAFencesIndentKeepsItsOtherColumns() {
+    // The fence's code starts at column 3; the tab reaches column 4.
+    #expect(MarkdownText.lines(from: "1. ```\n\t  x\n   ```").last?.text == "   x")
+}
+
+@Test func aStreamingFenceUnderAnItemKeepsUnderIndentedCodeAsCode() {
+    let lines = MarkdownText.lines(from: "- ```python\n# setup\nimport x")
+    #expect(lines.map(\.kind) == [.item(level: 0, marker: "•"), .code(level: 0)])
+    #expect(lines[1].text == "# setup\nimport x")
+}
+
+@MainActor
+@Test func aCodeBlockUnderAnItemIsFilledFromItsBorderOnly() throws {
+    var style = MarkdownTextStyle.answer
+    style.codeBlockBackground = .red
+    let tv = IntrinsicHeightTextView(frame: NSRect(x: 0, y: 0, width: 360, height: 10))
+    _ = tv.layoutManager
+    tv.textContainer?.widthTracksTextView = true
+    tv.textContainer?.lineFragmentPadding = 0
+    tv.drawsBackground = false
+    MarkdownText(markdown: "- Install:\n  ```\n  brew install jq\n  ```", style: style).apply(to: tv)
+    let (lm, container) = (tv.layoutManager!, tv.textContainer!)
+    lm.ensureLayout(for: container)
+    tv.frame.size.height = ceil(lm.usedRect(for: container).maxY) + 20
+    let ns = tv.string as NSString
+    func frame(_ text: String) -> NSRect {
+        lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: ns.range(of: text), actualCharacterRange: nil), in: container)
+    }
+    let column = frame("Install").minX
+    let row = frame("brew").midY
+    let rep = try #require(tv.bitmapImageRepForCachingDisplay(in: tv.bounds))
+    tv.cacheDisplay(in: tv.bounds, to: rep)
+    let scale = CGFloat(rep.pixelsWide) / tv.bounds.width
+    func isFill(_ x: CGFloat) -> Bool {
+        guard let c = rep.colorAt(x: Int(x * scale), y: Int(row * scale))?.usingColorSpace(.deviceRGB) else { return false }
+        return c.alphaComponent > 0.5 && c.redComponent > 0.8 && c.greenComponent < 0.3
+    }
+    #expect(isFill(column + 4))
+    #expect(!isFill(column / 2))
+}
+
+@Test func aClosedFenceKeepsLinesIndentedLessThanItself() {
+    let lines = MarkdownText.lines(from: "- ```bash\nbrew install jq\n```\nMore text\n\n## Next")
+    #expect(lines.map(\.kind) == [.item(level: 0, marker: "•"), .code(level: 0), .text, .heading])
+    #expect(lines[1].text == "brew install jq")
+    #expect(MarkdownText.lines(from: "Text.\n  ```\nfoo\n  ```").map(\.text) == ["Text.", "foo"])
+    // A diff whose lines look like list items stays one code block.
+    let diff = MarkdownText.lines(from: "1. Change:\n   ```diff\n- old\n+ new\n   ```\n2. Next")
+    #expect(diff.map(\.kind) == [.item(level: 0, marker: "1."), .code(level: 0), .item(level: 0, marker: "2.")])
+    #expect(diff[1].text == "- old\n+ new")
+}
+
+@Test func textAfterAnItemsCodeBlockStaysInTheItem() {
+    let lines = MarkdownText.lines(from: """
+        1. Install:
+           ```
+           brew install jq
+           ```
+           then run it
+        2. Configure
+           - sub
+        """)
+    #expect(lines.map(\.kind) == [
+        .item(level: 0, marker: "1."), .code(level: 0), .continuation(level: 0),
+        .item(level: 0, marker: "2."), .item(level: 1, marker: "◦"),
+    ])
+    #expect(lines[2].text == "then run it")
+}
+
+@MainActor
+@Test func textThatContinuesAnItemHangsAtItsText() {
+    let layout = laidOut("1. Install:\n   ```\n   x\n   ```\n   then run it", width: 360)
+    #expect(abs(textFrame("then", in: layout).minX - textFrame("Install", in: layout).minX) < 1)
+}
+
+@Test func italicInAHeadingTakesTheHeadingColour() {
+    let style = MarkdownTextStyle.answer
+    let s = MarkdownText.render("## Using *Monad* here", style: style)
+    let at = (s.string as NSString).range(of: "Monad").location
+    #expect(s.attribute(.foregroundColor, at: at, effectiveRange: nil) as? NSColor == style.strong)
+}
+
+@Test func aFenceOnAMarkerLineDropsTheItemsWholeIndent() {
+    #expect(MarkdownText.lines(from: "1.  ```\n    x\n    ```").map(\.text) == ["", "x"])
+    #expect(MarkdownText.lines(from: "-\t```\n\tx\n\t```").map(\.text) == ["", "x"])
+}
+
+@Test func whitespaceAfterAQuoteMarkerIsIndentationInTheQuote() {
+    #expect(MarkdownText.lines(from: ">\t- item\n>\t- two").map(\.kind) == [
+        .item(level: 0, marker: "•"), .item(level: 0, marker: "•"),
+    ])
+    #expect(MarkdownText.lines(from: ">   ```\n>   x\n>   ```").map(\.text) == ["x"])
+}
+
+@MainActor
+@Test func aListInAQuoteLeavesTheOuterItemsColumnAlone() {
+    let layout = laidOut("1. Step\n   > - inner\n   ```\n   code\n   ```", width: 360)
+    let step = textFrame("Step", in: layout)
+    #expect(abs(textFrame("code", in: layout).minX - (step.minX + 1 + Theme.Metric.cardCodePaddingX)) < 1)
+}
+
+@Test func aStreamingFenceShowsNoBlankLineForATrailingNewline() {
+    #expect(MarkdownText.lines(from: "```\nfoo\n").last?.text == "foo")
+    #expect(MarkdownText.lines(from: "```\nfoo\n\n```").last?.text == "foo\n")
+}
+
+@Test func aTabIndentedFenceDropsItsTabAndAnEmptyFenceStillRenders() {
+    #expect(MarkdownText.lines(from: "\t```\n\tx\n\t\ty\n\t```").map(\.text) == ["x\n\ty"])
+    #expect(paragraphs(MarkdownText.render("```\n```", style: .answer)).first?.style.textBlocks.count == 1)
+}
+
+@Test func emphasisAndItemsInAQuoteKeepTheQuoteColour() {
+    let style = MarkdownTextStyle.answer
+    let s = MarkdownText.render("> This is *really* important\n> - an *item*", style: style)
+    let ns = s.string as NSString
+    for word in ["This", "really", "an", "item"] {
+        #expect(s.attribute(.foregroundColor, at: ns.range(of: word).location, effectiveRange: nil) as? NSColor == style.quote)
+    }
+}
+
+@Test func aNestedQuoteClosingInsideItsParentEndsWithoutSpacing() throws {
+    let paras = paragraphs(MarkdownText.render("> a\n>\n> > b\n>\n> c", style: .answer))
+    let b = try #require(paras.firstIndex { $0.text == "b" })
+    let outer = paras[b].style.textBlocks[0]
+    #expect(paras[b].style.textBlocks.count == 2)
+    #expect(paras[b].style.paragraphSpacing == 0)
+    // The gap after it is a spacer in the outer quote only.
+    #expect(paras[b + 1].text.isEmpty && paras[b + 1].style.textBlocks.count == 1)
+    #expect(paras[b + 1].style.textBlocks.first === outer)
+    #expect(paras[b + 2].text == "c" && paras[b + 2].style.textBlocks.first === outer)
+}
+
+@Test func aQuoteUnderAnItemBelongsToItAndTheListGoesOn() {
+    let lines = MarkdownText.lines(from: "1. Step one\n   > **Note:** back up first\n2. Step two\n   - sub")
+    #expect(lines.map(\.kind) == [
+        .item(level: 0, marker: "1."), .text, .item(level: 0, marker: "2."), .item(level: 1, marker: "◦"),
+    ])
+    #expect(lines[1].quotes.first?.level == 0)
+    #expect(MarkdownText.lines(from: "> at the margin").first?.quotes.first?.level == nil)
+}
+
+@MainActor
+@Test func aQuoteUnderAnItemLinesUpWithTheItemsText() {
+    let layout = laidOut("- Step\n  > note", width: 360)
+    let m = Theme.Metric.self
+    let step = textFrame("Step", in: layout)
+    #expect(abs(textFrame("note", in: layout).minX - (step.minX + m.cardQuoteBar + m.cardQuotePadding)) < 1)
+}
+
+@MainActor
+@Test func aQuoteUnderAnItemStaysInsideTheCard() {
+    let note = "a long note that wraps across the card more than once at this width"
+    for width in [240.0, 360] {
+        let layout = laidOut("- Step\n  > \(note)", width: width)
+        #expect(cellFrame("a long", in: layout).maxX <= width + 0.5)
+        #expect(layout.0.usedRect(for: layout.1).maxX <= width + 0.5)
+    }
+}
+
+@MainActor
+@Test func aTableInAQuoteStaysInsideTheCard() {
+    let quoted = comparison.components(separatedBy: "\n").map { "> " + $0 }.joined(separator: "\n")
+    for width in [240.0, 360, 700] {
+        let (lm, container, _) = laidOut(quoted, width: width)
+        #expect(lm.usedRect(for: container).width <= width)
+    }
+}
+
+@MainActor
+@Test func textAfterAQuoteThatEndsInCodeIsSpacedOffIt() {
+    let layout = laidOut("> ```\n> x\n> ```\n\nAfter.", width: 360)
+    #expect(cellFrame("After.", in: layout).minY - cellFrame("x", in: layout).maxY >= Theme.Metric.cardBlockSpacing)
+}
+
+@MainActor
+@Test func aCodeBlockSpansTheCardAndTextAfterItIsSpacedOffIt() {
+    let layout = laidOut("```\nshort\n```\nAfter.", width: 360)
+    let line = cellFrame("short", in: layout)
+    #expect(line.width > 300)
+    #expect(cellFrame("After.", in: layout).minY - line.maxY >= Theme.Metric.cardBlockSpacing)
+}
+
 @Test func aHashHeaderCellAboveADelimiterRowIsATable() {
     for markdown in ["# | Task\n--|--\n1 | Ship", "# | Task\n   \n--|--\n1 | Ship"] {
         let lines = MarkdownText.lines(from: markdown)

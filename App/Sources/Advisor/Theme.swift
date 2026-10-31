@@ -63,6 +63,7 @@ enum Theme {
     /// NSColor twin of `textBody`, for the AppKit-backed transcript text view.
     static let nsTextBody = NSColor.dynamic(NSColor(rgb: 0x3A3B44), NSColor(rgb: 0xDCDDE3))
     static let nsTextStrong = NSColor.dynamic(NSColor(rgb: 0x2A2B33), NSColor(rgb: 0xF2F2F6))
+    static let nsTextSecondary = NSColor.dynamic(NSColor(rgb: 0x5E5F69), NSColor(rgb: 0xA6A7B0))
     static let nsTextTertiary = NSColor.dynamic(NSColor(rgb: 0x8A8B95), NSColor(rgb: 0x8C8D97))
     /// NSColor twins for the AppKit-backed card text view (`MarkdownText`).
     /// Explicit twins (not `NSColor(Color)`) so light/dark resolves correctly.
@@ -147,6 +148,11 @@ enum Theme {
         static let cardOrdinalColumn: CGFloat = 22
         static let cardCellPaddingX: CGFloat = 8
         static let cardCellPaddingY: CGFloat = 4
+        static let cardCodePaddingX: CGFloat = 10
+        static let cardCodePaddingY: CGFloat = 8
+        static let cardCodeLineSpacing: CGFloat = 3
+        static let cardQuoteBar: CGFloat = 3
+        static let cardQuotePadding: CGFloat = 10
     }
 
     /// Card ambient shadow. Near-invisible in dark mode, where the elevated

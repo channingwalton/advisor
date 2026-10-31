@@ -2839,7 +2839,9 @@ The renderer still has no code blocks: fence tracking only decides headings,
 fenced lines still lay out as prose, as before (a fence without a blank line
 reads as one run of inline code), and a lone `#` line between blank lines
 inside a fence is still a heading, as it was. Closing hashes
-(`## Heading ##`) stay text, as before.
+(`## Heading ##`) stay text, as before. (Superseded 2026-10-31: fences render
+as code blocks and may be indented any amount; see *Card code blocks and block
+quotes*.)
 
 `MarkdownTextTests` cover a heading with text under it (rendered larger than
 the body), with a list under it, and under a paragraph and a nested list (the
@@ -3242,6 +3244,89 @@ Advisor's own MIT `LICENSE` was not in the bundle either.
   a Codex bump that adds one needs a look at `vendor/`. The Codex binary also
   links Rust crates in, and upstream ships no licence texts for them. The
   bundle carries what upstream distributes (`LICENSE` and `NOTICE`), no more.
+
+## Card code blocks and block quotes (2026-10-31)
+
+Card bodies now render fenced code blocks and block quotes (issue #107).
+Before, a fence's lines laid out as prose: line breaks and indentation were
+lost, a blank line in a fence split it into paragraphs, and the inline parser
+showed the fence markers or read the whole fence as one run of inline code.
+
+`MarkdownText.lines(from:)` first cuts the card into prose, code fences and
+block quotes (`segments`). No fence line reaches the prose rules, so
+`splittingAtHeadings` no longer tracks fences.
+
+- **Fences.** Three or more backticks or tildes, closed only by at least as
+  many of the same mark, indented at most three columns past the fence (as in
+  CommonMark), so a deeper fence line in a Markdown example stays code.
+  Indentation counts a tab to the next multiple of four columns, for list items
+  too. A fence may be indented any amount, so a fence under a
+  list item is still a fence; cards have no indented code blocks. A fence on an
+  item's own line (`1. ```bash`) is that item's code. The code keeps its line
+  breaks, its indentation (less the fence's own) and its blank lines, and is
+  not parsed. A fence ends only at its closing line, so a line indented less
+  than the fence stays code; model output often indents code less than its
+  fence. A fence that is not closed runs to the end of the card, so a code block
+  that is still streaming in shows as code and keeps its shape when the closing
+  line arrives; a trailing newline in it is not yet a blank line. Unlike
+  CommonMark, an unclosed fence in a list item does not end with the item. Rules
+  that ended it there were tried and dropped: each one broke a commoner case, a
+  closed fence with under-indented diff or YAML lines, or a streaming fence with
+  an under-indented `# comment`. An unclosed fence in a finished reply is rare,
+  and GitHub renders it the same way.
+- **Code block layout.** One paragraph per line, all in one `NSTextBlock`: the
+  monospaced font in the body colour, the table's hairline border and the
+  `nsSurfaceCardSubtle` fill, across the card. Long lines wrap. The corners are
+  square, because TextKit 1 has no rounded blocks. An indented fence belongs to
+  the deepest open list item it is indented past. Its block starts at that
+  item's text column, and the list goes on after it. TextKit fills a block's
+  margin too, so the indent is the padding of an unfilled outer block.
+- **Block quotes.** A run of lines that start with `>`. The content is laid out
+  as a card body of its own, so it can hold lists, code and nested quotes.
+  Unlike CommonMark, a line without `>` ends the quote (no lazy continuation).
+  Each quote is an `NSTextBlock` with a 3 pt left bar in the table border
+  colour, and its text is `nsTextSecondary`. A quote indented under a list
+  item belongs to that item, as a fence does.
+- **Item continuations.** A paragraph indented under an open list item, after
+  the item's code block, its quote or a blank line, continues that item: it
+  hangs at the item's text, and the list goes on after it. Before, such a
+  paragraph rendered at the margin and closed the list.
+- **Italic colour.** An italic run now takes the colour of the text around it
+  (a quote's, or a heading's) unless the style sets an emphasis colour, as the
+  saved-card style does.
+- **Spacing.** TextKit ignores text block margins, so a spacer line one block
+  spacing tall follows a code block or a quote, as it follows a table. A
+  quote's last paragraph loses its paragraph spacing, which would lengthen the
+  bar; a nested quote that closes inside its parent gets a spacer inside the
+  parent.
+
+A trial of the Textual library (0.5.0) in place of `MarkdownText` was
+rejected; the evidence is in a comment on #107. Textual broke tables with an
+empty first header cell, laid out about four times slower, and added a 7.1 MB
+math-font bundle that `package.sh` does not package. Its parser, Foundation's,
+also does not nest the two-space sub-lists that model output uses.
+
+Not supported: strikethrough has no style, a task list item shows `[ ]` as
+text, and images do not render. A character that the monospaced font lacks,
+such as `∘`, shows as a blank in inline code (issue #108).
+
+`MarkdownTextTests` cover the "Scala type lambdas" card from #107; Markdown in
+a fence staying source; a fence splitting a paragraph; an unclosed, a
+streaming, an indented and a tab-indented fence; an empty fence; fences under
+items and on an item's line, and one at the margin closing a list; an
+unclosed fence in an item running to the end, and a closed or a streaming one
+keeping lines indented less than itself, a diff among them; a fence line
+indented deeper than its fence's closing limit; a tab partly inside a fence's
+indent; text after
+an item's code block staying in the item; a code block under an item filled
+from its border only (drawn and sampled); a code
+block's single filled block, its width and its indent under an item; quotes
+holding Markdown, quotes apart and nested, a line without `>` ending a quote,
+and `>` in a fence or mid-line; the quote bar, colour and spacing, a nested
+quote closing inside its parent, a quote under an item lining up with it and
+staying inside the card, a list in a quote
+leaving the outer item's column alone, a table in a quote staying inside the
+card, and italic taking a heading's colour.
 
 ## Revisit as it grows
 

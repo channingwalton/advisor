@@ -19,6 +19,10 @@ struct MarkdownTextStyle: Hashable {
     /// Table grid lines and header-row fill.
     var tableBorder: NSColor = Theme.nsHairlineStrong
     var tableHeader: NSColor = Theme.nsSurfaceCardSubtle
+    /// Fenced code block fill; its border is `tableBorder`.
+    var codeBlockBackground: NSColor = Theme.nsSurfaceCardSubtle
+    /// Text in a block quote; the quote's bar is `tableBorder`.
+    var quote: NSColor = Theme.nsTextSecondary
 
     /// Answer / fact-check cards — accent code + links.
     static let answer = MarkdownTextStyle(
@@ -38,7 +42,8 @@ struct MarkdownTextStyle: Hashable {
 /// the native pointing-hand cursor — SwiftUI `Text`/MarkdownUI never change the
 /// cursor over links (issue #26). Inline bold/italic/code/links, laid out by
 /// `lines(from:)` into paragraphs, lead lines, hanging (nested) list items,
-/// headings, rules and pipe tables — the shapes research cards take.
+/// headings, rules, pipe tables, fenced code blocks and block quotes — the
+/// shapes research cards take.
 struct MarkdownText: NSViewRepresentable {
     let markdown: String
     var style: MarkdownTextStyle
@@ -104,13 +109,39 @@ struct MarkdownText: NSViewRepresentable {
             case rule
             /// A GitHub-flavoured pipe table; `text` is empty.
             case table(Table)
+            /// A fenced code block; `text` is its source, line breaks kept.
+            /// `level` is the list level of the item it belongs to; nil at
+            /// the margin.
+            case code(level: Int?)
+            /// A paragraph indented under an open list item, after the item's
+            /// code block, its quote or a blank line: it hangs at the item's text.
+            case continuation(level: Int)
         }
         var kind: Kind
         var text: String
         var endsBlock: Bool
+        /// The block quotes the line is in, outermost first.
+        var quotes: [Quote] = []
+
+        /// A block quote around a line. `id` tells it apart from the quotes
+        /// beside it in its parent; `level` is the list level of the item it
+        /// belongs to, nil at the margin.
+        struct Quote: Hashable {
+            var id: Int
+            var level: Int?
+        }
 
         var isTable: Bool {
             if case .table = kind { true } else { false }
+        }
+
+        /// Drawn in a text block (a table or a code block), which the text
+        /// system gives no margins.
+        var isTextBlock: Bool {
+            switch kind {
+            case .table, .code: true
+            default: false
+            }
         }
     }
 
@@ -123,20 +154,155 @@ struct MarkdownText: NSViewRepresentable {
         var rows: [[String]]
     }
 
-    /// Card markdown → laid-out lines. Blocks split on blank lines and around
-    /// heading lines (`splittingAtHeadings`); a block with list lines keeps one
-    /// line per item (a following non-item line continues it, as in
-    /// CommonMark), and prose directly above an item becomes its lead.
-    /// An item's nesting level is relative to the items above it, so any
-    /// consistent indentation (two spaces, four, a tab) nests one level, and it
-    /// carries across the blank lines of a loose list.
+    /// Card markdown → laid-out lines. Each code fence becomes one code line,
+    /// and a block quote's content becomes lines of their own, marked with
+    /// the quote (`segments`). The prose between them splits into blocks on blank
+    /// lines and around heading lines (`splittingAtHeadings`); a block with
+    /// list lines keeps one line per item (a following non-item line
+    /// continues it, as in CommonMark), and prose directly above an item
+    /// becomes its lead. An item's nesting level is relative to the items
+    /// above it, so any consistent indentation (two spaces, four, a tab) nests
+    /// one level, and it carries across the blank lines of a loose list.
     static func lines(from markdown: String) -> [Line] {
         var indents: [Int] = []
-        var fence: Fence?
-        return markdown
-            .replacingOccurrences(of: "\r\n", with: "\n")
+        var quoteCount = 0
+        return segments(markdown.replacingOccurrences(of: "\r\n", with: "\n")).flatMap { segment -> [Line] in
+            switch segment {
+            case .quote(let content, let indent):
+                let quote = Line.Quote(id: quoteCount, level: owner(ofIndent: indent, in: &indents))
+                quoteCount += 1
+                return lines(from: content).map { line in
+                    var line = line
+                    line.quotes.insert(quote, at: 0)
+                    return line
+                }
+            case .code(let source, let indent):
+                return [Line(kind: .code(level: owner(ofIndent: indent, in: &indents)), text: source, endsBlock: true)]
+            case .prose(let prose):
+                return proseLines(prose, indents: &indents)
+            }
+        }
+    }
+
+    /// The list level of a block (a code fence or a quote) indented `indent`
+    /// columns: the deepest open item it is indented past. It closes any
+    /// deeper items. A block at the margin, or under no item, closes the list.
+    private static func owner(ofIndent indent: Int, in indents: inout [Int]) -> Int? {
+        let level = indent > 0 ? indents.lastIndex { $0 < indent } : nil
+        indents = level.map { Array(indents.prefix($0 + 1)) } ?? []
+        return level.map { min($0, 3) }
+    }
+
+    /// A run of card markdown: prose; the source of a fenced code block; or
+    /// the content of a block quote, its `>` markers removed. `indent` is the
+    /// indentation of the fence's or the quote's first line, in columns.
+    private enum Segment {
+        case prose(String)
+        case code(String, indent: Int)
+        case quote(String, indent: Int)
+    }
+
+    /// `markdown` cut at its code fences and block quotes, so that no line of
+    /// a fence reaches the prose rules and a blank line in a fence stays in
+    /// its block. A fence's lines lose its indentation. A fence ends only at
+    /// its closing line, at any indentation; model output often indents code
+    /// less than its fence. A fence that is not closed runs to the end, so a
+    /// block that is still streaming in shows as code and keeps its shape
+    /// when the closing line arrives. Unlike CommonMark, an unclosed fence in
+    /// a list item does not end with the item. A quote is a run of lines that
+    /// start with `>`; unlike CommonMark, a line without one ends the quote.
+    private static func segments(_ markdown: String) -> [Segment] {
+        var out: [Segment] = []
+        var prose: [String] = []
+        var quote: [String] = []
+        var quoteIndent = 0
+        var code: [String] = []
+        var open: (fence: Fence, indent: Int)?
+        func endProse() {
+            if !prose.isEmpty { out.append(.prose(prose.joined(separator: "\n"))) }
+            prose = []
+        }
+        for line in markdown.components(separatedBy: "\n") {
+            if let (fence, indent) = open {
+                // A closing line is indented at most three columns past its
+                // fence, as in CommonMark, so a deeper fence line is code.
+                if fence.isClosed(by: line) && indentColumns(line) <= indent + 3 {
+                    out.append(.code(code.joined(separator: "\n"), indent: indent))
+                    code = []
+                    open = nil
+                } else {
+                    code.append(dropping(indent, from: line))
+                }
+                continue
+            }
+            if let content = quoted(line) {
+                endProse()
+                if quote.isEmpty { quoteIndent = indentColumns(line) }
+                quote.append(content)
+                continue
+            }
+            if !quote.isEmpty { out.append(.quote(quote.joined(separator: "\n"), indent: quoteIndent)) }
+            quote = []
+            if let (indent, marker, text) = listItem(line), let fence = Fence(opening: text) {
+                // A fence on an item's own line: the item, then its code,
+                // indented to where the item's text starts.
+                prose.append(String(repeating: " ", count: indent) + marker + " ")
+                endProse()
+                open = (fence, column(after: line.dropLast(text.count)))
+            } else if let fence = Fence(opening: line) {
+                endProse()
+                open = (fence, indentColumns(line))
+            } else {
+                prose.append(line)
+            }
+        }
+        if let (_, indent) = open {
+            // While a reply streams in, trailing blank lines are not code yet.
+            while code.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { code.removeLast() }
+            out.append(.code(code.joined(separator: "\n"), indent: indent))
+        }
+        if !quote.isEmpty { out.append(.quote(quote.joined(separator: "\n"), indent: quoteIndent)) }
+        endProse()
+        return out
+    }
+
+    /// A quote line's content: the line without its `>` marker and the space
+    /// after it; nil for any other line.
+    private static func quoted(_ line: String) -> String? {
+        line.wholeMatch(of: #/[ \t]*> ?(.*)/#).map { String($0.1) }
+    }
+
+    /// A line's leading whitespace in columns, a tab moving on to the next
+    /// multiple of four.
+    private static func indentColumns(_ line: String) -> Int {
+        column(after: line.prefix { $0 == " " || $0 == "\t" })
+    }
+
+    /// The column after `prefix`, a tab moving on to the next multiple of four.
+    private static func column(after prefix: Substring) -> Int {
+        prefix.reduce(0) { $1 == "\t" ? ($0 / 4 + 1) * 4 : $0 + 1 }
+    }
+
+    /// `line` with up to `columns` of its leading whitespace removed.
+    private static func dropping(_ columns: Int, from line: String) -> String {
+        var rest = Substring(line)
+        var dropped = 0
+        while dropped < columns, let ch = rest.first, ch == " " || ch == "\t" {
+            let width = ch == "\t" ? 4 - dropped % 4 : 1
+            rest = rest.dropFirst()
+            // A tab that reaches past `columns` keeps its other columns as spaces.
+            if dropped + width > columns { return String(repeating: " ", count: dropped + width - columns) + rest }
+            dropped += width
+        }
+        return String(rest)
+    }
+
+    /// Prose between code fences → lines; see `lines(from:)`. `indents`
+    /// carries the open list levels across a fence.
+    private static func proseLines(_ prose: String, indents: inout [Int]) -> [Line] {
+        prose
             .components(separatedBy: "\n\n")
-            .flatMap { splittingAtHeadings($0, fence: &fence) }
+            .flatMap(splittingAtHeadings)
             .map { $0.trimmingCharacters(in: .newlines) }
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             .flatMap { block -> [Line] in
@@ -164,11 +330,17 @@ struct MarkdownText: NSViewRepresentable {
             return tableBlockLines(raw, header: header, indents: &indents)
         }
         guard raw.contains(where: { listItem($0) != nil }) else {
-            indents = []
             let text = raw.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+            // Indented under an open item, prose continues it; otherwise it
+            // closes the list.
+            if let level = owner(ofIndent: indentColumns(raw[0]), in: &indents) {
+                return [Line(kind: .continuation(level: level), text: text, endsBlock: false)]
+            }
             return [Line(kind: isLead(text) ? .lead : .text, text: text, endsBlock: false)]
         }
-        if listItem(raw[0]) == nil { indents = [] }
+        // Prose before the block's first item continues an open item when it
+        // is indented under it; otherwise it closes the list.
+        let continued = listItem(raw[0]) == nil ? owner(ofIndent: indentColumns(raw[0]), in: &indents) : nil
         var out: [Line] = []
         for line in raw {
             if let (indent, token, text) = listItem(line) {
@@ -181,7 +353,8 @@ struct MarkdownText: NSViewRepresentable {
                 // A wrapped item or a wrapped paragraph: join it on.
                 out[out.count - 1].text += " " + line.trimmingCharacters(in: .whitespaces)
             } else {
-                out.append(Line(kind: .text, text: line.trimmingCharacters(in: .whitespaces), endsBlock: false))
+                let kind = continued.map { Line.Kind.continuation(level: $0) } ?? .text
+                out.append(Line(kind: kind, text: line.trimmingCharacters(in: .whitespaces), endsBlock: false))
             }
         }
         for i in out.indices.dropLast() where out[i].kind == .text {
@@ -200,21 +373,17 @@ struct MarkdownText: NSViewRepresentable {
     /// `block` cut so that each heading line starting at the margin is a block
     /// of its own, as if blank lines set it apart: a heading ends the paragraph
     /// or list above it, as in CommonMark (issue #96). An indented `#` line may
-    /// belong to the item above, so it stays joined on. Nor is a line inside a
-    /// code fence cut out — `fence` carries an open one across blocks, so a
-    /// `# comment` there stays put — or a header row that starts with `#` above
-    /// its table's delimiter row. Whitespace-only lines go, as in `blockLines`.
-    private static func splittingAtHeadings(_ block: String, fence: inout Fence?) -> [String] {
+    /// belong to the item above, so it stays joined on. Nor is a header row
+    /// that starts with `#` above its table's delimiter row cut out. Code
+    /// fences never reach here (`segments`), so a `# comment` in one stays
+    /// code. Whitespace-only lines go, as in `blockLines`.
+    private static func splittingAtHeadings(_ block: String) -> [String] {
         let rows = block.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         var out: [String] = []
         var run: [String] = []
         for (i, row) in rows.enumerated() {
-            if let open = fence {
-                if open.isClosed(by: row) { fence = nil }
-            } else if let opened = Fence(opening: row) {
-                fence = opened
-            } else if row.hasPrefix("#"), headingMarker(row) != nil,
+            if row.hasPrefix("#"), headingMarker(row) != nil,
                 !(rows.indices.contains(i + 1) && isTableStart(rows, at: i))
             {
                 out += [run.joined(separator: "\n"), row]
@@ -231,10 +400,12 @@ struct MarkdownText: NSViewRepresentable {
         var mark: Character
         var length: Int
 
-        /// The fence `line` opens, indented at most three spaces; a backtick
-        /// fence's info string holds no backtick, so "```npm i``` …" is inline code.
+        /// The fence `line` opens. Any indentation is allowed, so a fence
+        /// under a list item is still a fence (cards have no indented code
+        /// blocks). A backtick fence's info string holds no backtick, so
+        /// "```npm i``` …" is inline code.
         init?(opening line: String) {
-            guard let m = line.wholeMatch(of: #/ {0,3}(`{3,}|~{3,})(.*)/#),
+            guard let m = line.wholeMatch(of: #/[ \t]*(`{3,}|~{3,})(.*)/#),
                 let mark = m.1.first, !(mark == "`" && m.2.contains("`"))
             else { return nil }
             self.mark = mark
@@ -243,7 +414,7 @@ struct MarkdownText: NSViewRepresentable {
 
         /// Closed by a line of at least as many of the same mark, and nothing else.
         func isClosed(by line: String) -> Bool {
-            guard let m = line.wholeMatch(of: #/ {0,3}(`{3,}|~{3,})[ \t]*/#) else { return false }
+            guard let m = line.wholeMatch(of: #/[ \t]*(`{3,}|~{3,})[ \t]*/#) else { return false }
             return m.1.first == mark && m.1.count >= length
         }
     }
@@ -314,11 +485,11 @@ struct MarkdownText: NSViewRepresentable {
         return cells.map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
-    /// A list line's indentation (in columns, a tab counting four), its marker
+    /// A list line's indentation (in columns, as `indentColumns`), its marker
     /// token ("-", "*", "+", "1." or "1)") and its text; nil for any other line.
     private static func listItem(_ line: String) -> (Int, String, String)? {
         guard let m = line.firstMatch(of: #/^(\s*)([-*+]|\d+[.)])\s+(.*)$/#) else { return nil }
-        let indent = m.1.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
+        let indent = column(after: m.1)
         return (indent, String(m.2), String(m.3))
     }
 
@@ -340,44 +511,124 @@ struct MarkdownText: NSViewRepresentable {
             return (marker as NSString).size(withAttributes: [.font: fonts.ordinal]).width
         }.max() ?? 0
         let ordinalColumn = max(Theme.Metric.cardOrdinalColumn, ceil(widestOrdinal) + 6)
+        // Where the text of the latest item at each list level starts, so a
+        // code block or a quote in an item lines up with it. Kept per quote
+        // path: a list in a quote is a list of its own, laid out in the
+        // quote's block.
+        var textColumns: [[Line.Quote]: [Int: CGFloat]] = [:]
+        func textColumn(_ level: Int?, in quotes: [Line.Quote]) -> CGFloat {
+            level.flatMap { textColumns[quotes]?[$0] } ?? 0
+        }
+        // The bar block of each quote, by its path of quotes.
+        var bars: [[Line.Quote]: NSTextBlock] = [:]
 
         for (i, line) in laidOut.enumerated() {
-            let para = paragraphStyle(
+            var para = paragraphStyle(
                 for: line, isFirst: i == 0, isLast: i == laidOut.count - 1, size: style.size,
                 ordinalColumn: ordinalColumn)
+            if case .continuation(let level) = line.kind {
+                let hanging = para.mutableCopy() as! NSMutableParagraphStyle
+                hanging.firstLineHeadIndent = textColumn(level, in: line.quotes)
+                hanging.headIndent = hanging.firstLineHeadIndent
+                para = hanging
+            }
             let lineAttrs: [NSAttributedString.Key: Any] = [.font: fonts.base, .paragraphStyle: para]
+            let start = out.length
+            let isLast = i == laidOut.count - 1
+            // How many of the line's quotes go on to the next line; the
+            // others close with this line.
+            let next = isLast ? [] : laidOut[i + 1].quotes
+            let kept = zip(line.quotes, next).prefix { $0.0 == $0.1 }.count
+            let closesQuote = kept < line.quotes.count
+            let colour = line.quotes.isEmpty ? nil : style.quote
+            // The line's quote bars, outermost first; an indented quote's bar
+            // lines up with its item's text.
+            let path = line.quotes.indices.map { depth -> NSTextBlock in
+                let key = Array(line.quotes.prefix(depth + 1))
+                if let bar = bars[key] { return bar }
+                let bar = quoteBar(
+                    style, indent: textColumn(line.quotes[depth].level, in: Array(line.quotes.prefix(depth))))
+                bars[key] = bar
+                return bar
+            }
             switch line.kind {
             case .rule:
                 var attrs = lineAttrs
                 attrs[.foregroundColor] = style.codeBackground
                 out.append(NSAttributedString(string: String(repeating: "\u{2500}", count: 24), attributes: attrs))
-            case .item(_, let marker):
+            case .item(let level, let marker):
+                textColumns[line.quotes, default: [:]][level] = para.headIndent
                 var attrs = lineAttrs
                 attrs[.foregroundColor] = style.marker
                 if marker.first?.isNumber == true { attrs[.font] = fonts.ordinal }
                 out.append(NSAttributedString(string: marker + "\t", attributes: attrs))
-                out.append(inline(line.text, font: fonts.base, para: para, style: style, fonts: fonts))
+                out.append(inline(line.text, font: fonts.base, para: para, style: style, fonts: fonts, colour: colour))
             case .heading:
                 out.append(inline(line.text, font: fonts.heading, para: para, style: style, fonts: fonts, colour: style.strong))
-            case .text, .lead:
-                out.append(inline(line.text, font: fonts.base, para: para, style: style, fonts: fonts))
+            case .text, .lead, .continuation:
+                out.append(inline(line.text, font: fonts.base, para: para, style: style, fonts: fonts, colour: colour))
             case .table(let table):
                 out.append(tableText(table, style: style, fonts: fonts))
+            case .code(let level):
+                out.append(codeText(line.text, indent: textColumn(level, in: line.quotes), style: style, fonts: fonts))
             }
-            if i < laidOut.count - 1 {
+            if !isLast {
                 // The newline ends the line's last paragraph, so a table's
-                // last cell keeps its cell block.
+                // last cell, or a code block's last line, keeps its block.
                 var ending = lineAttrs
-                if line.isTable {
+                if line.isTextBlock {
                     ending[.paragraphStyle] = out.attribute(.paragraphStyle, at: out.length - 1, effectiveRange: nil)
                 }
+                if case .code = line.kind { ending[.font] = fonts.mono }
                 out.append(NSAttributedString(string: "\n", attributes: ending))
-                // TextKit ignores table and cell margins, so an empty line a
-                // block's spacing tall stands in for the table's.
-                if line.isTable { out.append(NSAttributedString(string: "\n", attributes: tableSpacer(fonts))) }
+                // TextKit ignores text block margins, so an empty line a
+                // block's spacing tall stands in for them: inside the quote
+                // when the quote goes on, after it when the quote closes.
+                if line.isTextBlock && !closesQuote {
+                    out.append(NSAttributedString(string: "\n", attributes: blockSpacer(fonts)))
+                }
+            }
+            if !path.isEmpty { quote(out, from: start, in: path, closing: closesQuote) }
+            if !isLast && closesQuote {
+                // In the quotes that go on, outside the ones that close.
+                let spacer = out.length
+                out.append(NSAttributedString(string: "\n", attributes: blockSpacer(fonts)))
+                if kept > 0 { quote(out, from: spacer, in: Array(path.prefix(kept)), closing: false) }
             }
         }
         return out
+    }
+
+    /// A block quote's block, from `indent` to the card's edge: a bar down
+    /// its left edge, its text clear of it.
+    private static func quoteBar(_ style: MarkdownTextStyle, indent: CGFloat) -> NSTextBlock {
+        let m = Theme.Metric.self
+        let bar = NSTextBlock()
+        bar.setValue(100, type: .percentageValueType, for: .width)
+        bar.setWidth(indent, type: .absoluteValueType, for: .margin, edge: .minX)
+        bar.setBorderColor(style.tableBorder, for: .minX)
+        bar.setWidth(m.cardQuoteBar, type: .absoluteValueType, for: .border, edge: .minX)
+        bar.setWidth(m.cardQuotePadding, type: .absoluteValueType, for: .padding, edge: .minX)
+        return bar
+    }
+
+    /// Puts each paragraph of `out` from `start` in the quote blocks `path`
+    /// (outermost first), around any block it is already in. Closing the
+    /// quote drops its last paragraph's spacing, which would lengthen the
+    /// bar; a spacer line after the quote stands in for it.
+    private static func quote(_ out: NSMutableAttributedString, from start: Int, in path: [NSTextBlock], closing: Bool) {
+        // The live backing string, not a copy of the whole text per quoted line.
+        let ns = out.mutableString
+        var location = start
+        while location < ns.length {
+            let range = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            let current = out.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+            let p = (current ?? .default).mutableCopy() as! NSMutableParagraphStyle
+            p.textBlocks = path + p.textBlocks
+            if closing && NSMaxRange(range) == ns.length { p.paragraphSpacing = 0 }
+            out.addAttribute(.paragraphStyle, value: p, range: range)
+            location = NSMaxRange(range)
+        }
     }
 
     /// A table as one `FittedTextTable` (TextKit 1, which the view forces): a
@@ -433,7 +684,42 @@ struct MarkdownText: NSViewRepresentable {
         return out
     }
 
-    private static func tableSpacer(_ fonts: Fonts) -> [NSAttributedString.Key: Any] {
+    /// A fenced code block's source, not parsed: one paragraph per line, all
+    /// in one text block with the table's border and a fill, from `indent`
+    /// to the card's edge. Long lines wrap at the card's edge.
+    private static func codeText(
+        _ source: String, indent: CGFloat, style: MarkdownTextStyle, fonts: Fonts
+    ) -> NSAttributedString {
+        let m = Theme.Metric.self
+        let block = NSTextBlock()
+        block.setValue(100, type: .percentageValueType, for: .width)
+        block.backgroundColor = style.codeBlockBackground
+        block.setBorderColor(style.tableBorder)
+        block.setWidth(1, type: .absoluteValueType, for: .border)
+        for edge: NSRectEdge in [.minX, .maxX] {
+            block.setWidth(m.cardCodePaddingX, type: .absoluteValueType, for: .padding, edge: edge)
+        }
+        for edge: NSRectEdge in [.minY, .maxY] {
+            block.setWidth(m.cardCodePaddingY, type: .absoluteValueType, for: .padding, edge: edge)
+        }
+        let p = NSMutableParagraphStyle()
+        p.textBlocks = [block]
+        if indent > 0 {
+            // TextKit fills a block's margin too, so an indented block sits in
+            // an unfilled block whose padding holds it at `indent`.
+            let inset = NSTextBlock()
+            inset.setValue(100, type: .percentageValueType, for: .width)
+            inset.setWidth(indent, type: .absoluteValueType, for: .padding, edge: .minX)
+            p.textBlocks.insert(inset, at: 0)
+        }
+        p.lineSpacing = m.cardCodeLineSpacing
+        // An empty block still needs a character to carry its block.
+        return NSAttributedString(
+            string: source.isEmpty ? " " : source,
+            attributes: [.font: fonts.mono, .foregroundColor: style.body, .paragraphStyle: p])
+    }
+
+    private static func blockSpacer(_ fonts: Fonts) -> [NSAttributedString.Key: Any] {
         let p = NSMutableParagraphStyle()
         p.minimumLineHeight = Theme.Metric.cardBlockSpacing
         p.maximumLineHeight = Theme.Metric.cardBlockSpacing
@@ -495,7 +781,7 @@ struct MarkdownText: NSViewRepresentable {
         case .lead, .heading:
             p.paragraphSpacingBefore = isFirst ? 0 : m.cardLeadSpacingBefore
             p.paragraphSpacing = m.cardItemSpacing
-        case .text, .rule, .table:
+        case .text, .rule, .table, .code, .continuation:
             break
         }
         if isLast { p.paragraphSpacing = 0 }
@@ -532,7 +818,7 @@ struct MarkdownText: NSViewRepresentable {
             } else if intent.contains(.emphasized), header {
                 ns.addAttributes([.font: fonts.strongItalic, .foregroundColor: style.strong], range: range)
             } else if intent.contains(.emphasized) {
-                ns.addAttributes([.font: fonts.italic, .foregroundColor: style.emphasis ?? style.body], range: range)
+                ns.addAttributes([.font: fonts.italic, .foregroundColor: style.emphasis ?? colour ?? style.body], range: range)
             }
         }
         return ns
