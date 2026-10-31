@@ -1,0 +1,19 @@
+# The demo conversation: one line per utterance, as voice|pause after (seconds)|text.
+# Each trigger line has a pause of 2.5 s after it: the classifier decides after a
+# 1.5 s pause. Keep the topics public, because the research agents can read your
+# own notes and connectors. Do not mention Advisor: the classifier ignores talk
+# about the app.
+#
+# Expected cards: context on the move to OpenSearch and the Elastic licence change,
+# a fact-check on HTTP/3 over TCP (false: it runs over QUIC, on UDP), and an answer
+# on the lifetime of a Let's Encrypt certificate. A line with a topic or a question,
+# even a decision question such as "do we use X?", can give a card of its own.
+#
+# The speech recogniser does not know every product name. In the take of
+# 2026-10-31 it heard "cache" as "cash", "Redis to Valkey" as "Redis Tavaki",
+# "HTTP three" as "HTDP 3" and "a Let's Encrypt" as "a lead encrypt".
+Daniel|0.8|Right, shall we start?
+Samantha|2.5|I'd like to move our search from Elasticsearch to OpenSearch, now that the Elastic licence changed.
+Daniel|2.5|Fine by me. And the public API can go straight to HTTP three. It still runs over TCP, so the firewall rules stay the same.
+Samantha|2.5|One more thing. How long does a certificate from Let's Encrypt last now? I heard that they are getting shorter.
+Daniel|1.0|Not sure. Let's find out before Thursday.

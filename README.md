@@ -10,6 +10,11 @@ conversation on demand (live or from a saved session). Your notes, the web,
 and connected tools are its sources; nothing is recorded, only
 transcripts are kept.
 
+![Advisor transcribes a conversation as it plays and adds context, fact-check and answer cards under the lines they relate to](docs/demo/advisor.gif)
+
+*The demo plays at double speed. [docs/demo](docs/demo/README.md) has the
+script that makes it.*
+
 ## Getting started
 
 1. **Install.** Build the DMG from source (see

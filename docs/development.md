@@ -52,7 +52,8 @@ all; no network). `mise run commit-check`
 (below) runs the same clean build and tests as CI. To watch the trigger
 classifier on a real transcript, `sh sidecar/test/replay.sh` feeds
 `sidecar/test/fragments.txt` through the built sidecar and prints the triggers
-and cards (needs `jq` and a CLI login).
+and cards (needs `jq` and a CLI login). [demo/README.md](demo/README.md)
+makes the README GIF from a scripted conversation that plays as system audio.
 
 Requires: macOS 26+ (Apple Silicon), Xcode 26.6 (pinned in `.xcode-version`;
 install it from https://developer.apple.com/download/all/ alongside any other

@@ -11,4 +11,7 @@ App/dist/
 sidecar/node_modules/
 sidecar/dist/
 
+# Demo audio and takes (docs/demo/README.md)
+docs/demo/out/
+
 .DS_Store
