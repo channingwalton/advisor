@@ -30,6 +30,37 @@ enum SessionClose {
         case .cancel: return .stayOpen
         }
     }
+
+    /// The log line for a close of the recording window: whether agents were
+    /// running, and which responder had focus in each of `windows`. A hang on
+    /// close (2026-10-31) stopped in AppKit moving focus off a control that was
+    /// being disabled; this records which control that was, before the close.
+    @MainActor
+    static func logLine(agentsInFlight: Bool, windows: [NSWindow]) -> String {
+        let responders = windows.map { window in
+            let name = window.title.isEmpty ? "\(type(of: window))" : window.title
+            return "\(name)=\(responderName(window.firstResponder, in: window))"
+        }
+        return "[advisor] recording close: agents running: \(agentsInFlight); first responders: "
+            + responders.joined(separator: ", ")
+    }
+
+    /// The log line for the user's answer to the "agents still running" prompt.
+    static func logLine(choice: SessionCloseChoice) -> String {
+        "[advisor] recording close: choice \(choice)"
+    }
+
+    /// A responder's class name. A field editor is named for the text field it
+    /// edits, since every field in a window shares the one `NSTextView`.
+    @MainActor
+    private static func responderName(_ responder: NSResponder?, in window: NSWindow) -> String {
+        guard let responder else { return "none" }
+        if responder === window { return "window" }
+        if let editor = responder as? NSTextView, editor.isFieldEditor, let field = editor.delegate {
+            return "field editor of \(type(of: field))"
+        }
+        return "\(type(of: responder))"
+    }
 }
 
 /// Zero-size helper that guards the recording window's close: when agent tasks
@@ -78,6 +109,8 @@ struct WindowCloseGuard: NSViewRepresentable {
         private weak var window: NSWindow?
         /// SwiftUI's delegate, kept so every non-close message still reaches it.
         private weak var priorDelegate: NSWindowDelegate?
+        /// Where the close log lines go; tests replace it.
+        var log: (String) -> Void = { appLog.write($0) }
 
         var attached: Bool { window != nil }
 
@@ -100,8 +133,12 @@ struct WindowCloseGuard: NSViewRepresentable {
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
             if isFinishing() { return false } // already finishing — ignore further closes
-            guard agentsInFlight() else { return true }
+            let inFlight = agentsInFlight()
+            log(SessionClose.logLine(
+                agentsInFlight: inFlight, windows: NSApplication.shared.windows.filter(\.isVisible)))
+            guard inFlight else { return true }
             let choice = prompt()
+            log(SessionClose.logLine(choice: choice))
             switch SessionClose.action(agentsInFlight: true, choice: choice) {
             case .closeNow:
                 return true

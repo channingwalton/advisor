@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appLog.flush()
         _exit(0)
     })
+    private let watchdog = MainThreadWatchdog(directory: appLog.directory)
 
     override init() {
         super.init()
@@ -21,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        watchdog.start()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         applyAppearance(AdvisorConfig.load().appearance)

@@ -13,6 +13,8 @@ let appLog = FileLog()
 /// file has no contention and keeps one chronological timeline. Rotates by
 /// size, keeping one previous file (`advisor.log.1`).
 final class FileLog {
+    /// The logs folder, for other diagnostics to save beside the log.
+    let directory: URL
     private let fileURL: URL
     private let rotatedURL: URL
     private let maxBytes: Int
@@ -30,6 +32,7 @@ final class FileLog {
         let dir = directory ?? FileManager.default
             .urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs/Advisor")
+        self.directory = dir
         fileURL = dir.appendingPathComponent("advisor.log")
         rotatedURL = dir.appendingPathComponent("advisor.log.1")
         self.maxBytes = maxBytes

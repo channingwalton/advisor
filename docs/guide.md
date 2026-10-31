@@ -323,6 +323,14 @@ log** under Preferences → General; it applies at once, mid-recording too, and
 the log is then session data like the transcripts themselves. Either way, it
 stays on your machine.
 
+If the app's main thread is blocked for about 7 seconds or more once the app has
+launched, it logs the stall and saves a stack sample of itself next to the log,
+as `hang-<n>-<time>.txt`. In the background, macOS can delay this check. The
+folder keeps the newest five. If the sample fails, the log shows the error or a
+non-zero exit status, and the file can be missing or incomplete. When you close
+the recording window, the log also records which control had keyboard focus in
+each window. Attach the sample and the log to a hang report.
+
 ## About
 
 **Advisor → About Advisor** shows the version, what Advisor does, the main

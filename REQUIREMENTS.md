@@ -114,6 +114,10 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - Late termination, output and retry callbacks from a replaced sidecar cannot affect its replacement. `#sidecar-auth-generation`
 - N10. **Codex connectors:**
   - Codex can't refuse a connector call by what it does, so without "Allow connector actions" a Codex card lane is offered no connectors: none of the MCP servers or plugins in `~/.codex/config.toml`, and no ChatGPT apps. With it, it has them all, as on Claude. `#codex-connectors`
+- N11. **Hang diagnostics:**
+  - When a ping to the main thread stays unanswered for 5 s, the app logs the stall and its length and saves one stack sample of itself in the logs folder. The app pings once a second, so a stall of about 7 s or more is caught, and a delayed timer (App Nap) can make it later. The length counts from the unanswered ping, not from the start of the stall. A long stall gives one sample, and the app logs when the main thread answers again. `#stall-sample`
+  - The logs folder keeps the newest five stack samples. `#stall-sample-cap`
+  - When the user closes the recording window (close button or ⌘W), the app logs whether agent tasks were running, the first responder of each visible window and, when the prompt appears, the choice. A close while the window is already finishing is ignored and not logged. `#close-log`
 
 ## Architecture decision: MCP server vs standalone
 
