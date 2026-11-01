@@ -39,18 +39,23 @@ cd App && sh xcode.sh swift build      # app, under the Xcode .xcode-version pin
 cd App && sh xcode.sh swift test       # app tests
 cd sidecar && npm run build            # tsc (npm install --include=dev first)
 cd sidecar && npm test                 # tsc + node --test (incl. sandbox.sdk against the real CLI)
-mise run commit-check                  # clean build + test both sides, warnings as errors (as CI)
 sh sidecar/test/replay.sh              # replay fragments through the pipeline (needs jq + built dist)
 cd App && sh package.sh                # → dist/Advisor.app (self-contained; sign-local.sh: Developer ID › "Advisor Dev" › ad-hoc)
 cd App && sh install.sh                # clean build + install to ~/Applications
 cd App && sh dmg.sh                    # signed + notarised DMG (runs sign.sh; one notary round)
-mise run release                       # DMG + tag vVERSION + push + GitHub release
 ```
+
+`mise.toml` defines two more tasks. Run a task with mise (`mise run <task>`),
+or run the commands that the task lists:
+
+- `commit-check`: a clean build and test of both sides, with Swift warnings as
+  errors, as in CI.
+- `release`: the DMG, the `vVERSION` tag, a push and a GitHub release.
 
 The repo-root `VERSION` file is the single source of truth for the version:
 `package.sh` stamps it into the bundle (build number = commit count), and
-`dmg.sh` names the DMG from it. Commit the `VERSION` bump before
-`mise run release`, which refuses an uncommitted bump.
+`dmg.sh` names the DMG from it. Commit the `VERSION` bump before you run the
+`release` task, which refuses an uncommitted bump.
 
 Resolve runtime resources through `AppResources` (the bundle when packaged,
 `repoRoot` in a dev checkout).
@@ -58,9 +63,9 @@ Resolve runtime resources through `AppResources` (the bundle when packaged,
 CI (`.github/workflows/ci.yml`) builds and tests both sides on each push to
 `main` and on each PR: the app on `macos-26` under the pinned Xcode, the
 sidecar on `ubuntu-latest`. Build both sides locally before you commit. The
-commit check and CI compile Swift with `-warnings-as-errors`, but a plain
-`swift build` does not, and `devtool check` hides compiler output when it
-passes. So a warning shows only as a failed check.
+`commit-check` task and CI compile Swift with `-warnings-as-errors`, but a
+plain `swift build` does not. So a warning that a plain build accepts fails
+the commit check and CI.
 
 ## Verifying UI changes
 
@@ -85,8 +90,9 @@ rework because of this.
 ## Conventions & constraints
 
 - Commit to `main`. Make a branch only when told to.
-- Pin exact versions. Node is pinned in `.tool-versions`, which mise, CI
-  (`node-version-file`) and `package.sh` (which bundles that Node) all read.
+- Pin exact versions. Node is pinned in `.tool-versions`, which Node version
+  managers, CI (`node-version-file`) and `package.sh` (which bundles that Node)
+  all read.
   Xcode is pinned in `.xcode-version`. Every swift step (commit check,
   `package.sh`, `install.sh`, CI) runs through `App/xcode.sh`, which selects
   that Xcode by version and refuses to run without it. npm dependencies are
