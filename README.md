@@ -32,8 +32,8 @@ script that makes it.*
    configuration most people need. (No CLI login? Switch **Authentication** to
    *API key* in Preferences and paste an Anthropic or OpenAI key instead —
    billed to that key.)
-4. **Record.** Click **New Recording**, then **Listen**. The conversation transcribes
-   live and Advisor surfaces answer, context and fact-check cards as it goes.
+4. **Record.** Click the red record button at the top of the sidebar (or press
+   ⌘N), then **Listen**. The conversation transcribes live and Advisor surfaces answer, context and fact-check cards as it goes.
 
 That's it. Everything stays on your Mac — nothing is uploaded except the
 research queries your chosen AI provider runs.
