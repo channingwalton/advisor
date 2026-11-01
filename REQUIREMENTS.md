@@ -1,6 +1,7 @@
 # Advisor — Requirements
 
-**Status:** Living document — last revised 2026-10-09 (first draft 2026-06-11)
+**Status:** Living document — last revised 2026-11-01 (first draft 2026-06-11).
+Decision history is in [DESIGN.md](DESIGN.md).
 **Owner:** Channing
 
 ## Vision
@@ -90,7 +91,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - While a card researches, it shows what the agent is doing (searching the web, reading a file, thinking); the line goes once the answer is being written or the card ends. `#card-activity`
   - The trigger classifier only decides what to research: it is offered no tools, built-in or connector, so it never searches or reads itself. (On Codex, a few built-ins no setting removes are still offered — plan, ask the user, view an image and, for some models, patch and search tools — and each is inert there.) `#classifier-no-tools`
 - N2. **Platform:** macOS only (Apple Silicon).
-- N3. **Privacy:** STT runs on-device (Apple SpeechAnalyzer); only text leaves the machine. Listening must be explicitly user-initiated.
+- N3. **Privacy:** STT runs on-device (Apple SpeechAnalyzer); only text leaves the machine, and no audio is stored. Listening must be explicitly user-initiated.
 - N4. **Cost:** STT is local (free); LLM cost per listening-hour must be tolerable for daily personal use.
 - N5. **Single user:** no auth, multi-tenancy, or deployment concerns.
 - N6. **Reliability:** capture pipeline must not drop audio during long sessions (1 h+).
@@ -119,69 +120,16 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - The logs folder keeps the newest five stack samples. `#stall-sample-cap`
   - When the user closes the recording window (close button or ⌘W), the app logs whether agent tasks were running, the first responder of each visible window and, when the prompt appears, the choice. A close while the window is already finishing is ignored and not logged. `#close-log`
 
-## Architecture decision: MCP server vs standalone
+## Risks
 
-**Recommendation: standalone macOS app, with MCP used as the *client* protocol for sources.**
-
-| Option | Verdict |
-|---|---|
-| **MCP server** | Wrong shape. MCP is request/response invoked by a host (Claude/Cowork). It cannot capture audio continuously or push proactive UI updates. An "Advisor MCP server" would need something else doing the listening anyway. |
-| **Standalone app (recommended)** | Owns the audio pipeline, the always-on agent loop, and the overlay UI. Uses an agent SDK as the brain — the Claude Agent SDK, or Codex as a peer backend — which itself connects to Jira/Confluence/Slack *as an MCP client* and reads local files with its own read-only tools — so all sources come free via existing connectors. |
-| **Hybrid (later)** | The standalone app can additionally expose an MCP server ("search my past conversations") so Claude/Cowork can query Advisor's transcripts. Nice follow-on, not v1. |
-
-## Shape (proposed 2026-06-11; as built — see DESIGN.md)
-
-```
-mic ──┐
-      ├─ audio capture (mic + ScreenCaptureKit system audio) ─┐
-sys ──┘        │                                              │
-        local streaming STT (Apple SpeechAnalyzer)            │
-               │  + echo dedup                                ├─ Swift app
-               │                                              │
-        recording window (feed + Ask / Note), Sessions        │
-        browser, session store (markdown)                     │
-               │  ▲ cards                                    ─┘
-               ▼  │                 NDJSON over stdio (local IPC)
-        trigger detection (question? entity? claim?)         ─┐
-               │                                              ├─ TS sidecar
-        research / query lanes (Claude Agent SDK or Codex:    │
-               web search, read-only local files, MCP)       ─┘
-```
-
-Two-tier latency strategy: a fast classifier decides *whether* to act (<1 s); the research agent then has the remaining budget to retrieve and answer.
-
-## Risks / open issues
-
-- **Consent & legality:** recording calls may require participant consent depending on jurisdiction. App should make recording status obvious. Audio vs transcript-only resolved: transcripts only, no audio stored (see Decided (2026-06-11)). There is no terms-of-use disclaimer since F19 was withdrawn (see Changed (2026-10-18)).
-- **Echo/duplication:** own voice may appear in both mic and system audio during calls.
-- **Trigger precision:** too sensitive → noisy sidebar; too conservative → useless. Needs tuning loop.
-- **Fact-check hallucination:** must show sources and degrade to "couldn't verify" rather than guess.
-- **Notes search** (resolved 2026-06-13): no index — agents search and read the user's files on demand with read-only tools, and learn where notes live from the user's own agent configuration; Advisor itself knows nothing about any notes store (see Changed (2026-06-13)).
+- **Consent and legality:** in some jurisdictions, the recording of a call needs the consent of each participant. The app must make the recording status obvious. Advisor stores transcripts only, no audio.
+- **Echo and duplication:** the user's own voice can reach both the mic and the system audio during a call.
+- **Trigger precision:** a classifier that is too sensitive fills the feed with noise, and one that is too conservative gives no value. It needs a tuning loop.
+- **Fact-check hallucination:** a fact-check must show its sources, and say "couldn't verify" rather than guess.
 
 ## Out of scope (v1)
 
-- Meeting bots joining calls; speaking into the call; team/multi-user features; mobile; Windows/Linux.
-
-(Post-meeting summaries were originally out of scope but added in issue #30 — an
-on-demand Summarise control on the live and saved-session views; see F14e and
-DESIGN.md.)
-
-## Decided (2026-06-11)
-
-- **Stack:** native Swift/SwiftUI app (capture, local STT, overlay UI) + TypeScript sidecar running the Claude Agent SDK for search/reasoning, over local IPC.
-- **STT:** local Whisper on Apple Silicon (whisper.cpp or MLX). Latency budget must accommodate this — needs early prototyping (N1 risk).
-- **Storage:** transcripts only, no audio recordings.
-- **Output:** app-managed local markdown files; the Obsidian Vault is read-only.
-
-## Changed (2026-06-13)
-
-- **Brain:** Codex (`@openai/codex-sdk`) added as a peer backend to the Claude Agent SDK; the user picks one provider and model in Preferences, shared by every agent lane (F12a). Amends the 2026-06-11 Stack decision above.
-- **Notes (de-vaulting):** Advisor knows nothing about any particular notes store. Agents reach the user's notes through general read-only access to their files, and personal context (such as where notes live) comes from the user's own agent configuration (F11). Supersedes the vault references in the 2026-06-11 Output decision above.
-
-## Changed (2026-06-14)
-
-- **STT:** dropped whisper.cpp entirely; Apple SpeechAnalyzer is now the only engine. It needs no model download, no vendored build, and hallucinates far less on noise. Supersedes the 2026-06-11 Whisper decision above.
-
-## Changed (2026-10-18)
-
-- **Terms of use:** withdrawn. Advisor is open source under the MIT licence, so there is no terms document and no first-run acceptance sheet. F19 is gone.
+- Meeting bots that join calls, and speech into the call.
+- Team and multi-user features.
+- Mobile, Windows and Linux.
+- An MCP server over past sessions, so that a host such as Claude can query Advisor's transcripts. It is a possible later addition: see *Revisit as it grows* in DESIGN.md.

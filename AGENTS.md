@@ -1,38 +1,36 @@
 # Advisor — agent guide
 
-Personal macOS assistant that listens to live conversations, transcribes them
-on-device, and proactively surfaces answer/context/fact-check cards using
-Claude agents. It uses whatever connectors are present to search for content,
-including the web. Single user (Channing), runs locally, no server.
+A personal macOS assistant. It listens to live conversations, transcribes them
+on-device, and shows answer, context and fact-check cards that Claude or Codex
+agents research through the web and the user's connectors. Single user
+(Channing), runs locally, no server.
 
-Read [docs/guide.md](docs/guide.md) for app behaviour,
-[docs/development.md](docs/development.md) for packaging and releases,
-[DESIGN.md](DESIGN.md) for architecture and decision history,
-[REQUIREMENTS.md](REQUIREMENTS.md) for scope. DESIGN.md's dated sections
-record why things are the way they are — check them before re-litigating a
-decision.
+Read the document that matches the task:
+
+- [docs/guide.md](docs/guide.md): app behaviour, as the user sees it.
+- [DESIGN.md](DESIGN.md): architecture and decision history. Its dated
+  sections give the reason for each decision: read the matching section before
+  you change a decision.
+- [REQUIREMENTS.md](REQUIREMENTS.md): scope, and the requirement tags that the
+  tests carry.
+- [docs/development.md](docs/development.md): packaging, signing and releases.
 
 ## Layout
 
-- `App/` — Swift/SwiftUI macOS app (SwiftPM, macOS 26, Swift language mode v5).
-  Audio capture (mic + ScreenCaptureKit system audio), on-device STT via
-  Apple SpeechAnalyzer, echo dedup, chronological feed UI (selectable
-  transcript lines with a right-click action menu — AI actions, corrections,
-  and editorial NOTE cards), session markdown writer,
-  a Sessions browser (master/detail: date-grouped list + detail with cards,
-  questions and transcript; folders with per-folder context and tags, session
-  tags, search, ask-and-append, summarise), saved contexts,
-  quit/close teardown (`QuitSequence`, `SessionClose`), preferences.
-- `sidecar/` — Node 26 + TypeScript, two agent backends: Claude Agent SDK and
-  Codex SDK (`src/providers.ts`, kept in step with the app's Preferences).
-  Trigger classifier (persistent delta-fed session on the shared model) driving
-  automatic cards (`autoPipeline.ts`); pooled research and query lanes plus
-  short-lived reply, document and summary lanes (`lanes.ts`); tool sandbox.
-  NDJSON over stdio to the app (protocol in `src/protocol.ts`, both directions).
-- `protocol/examples.json` — one example frame per message type, each
-  direction: the contract both test suites load (`sidecar/src/protocol.test.ts`,
-  `App/Tests/AdvisorTests/ProtocolContractTests.swift`). Change it with the
-  protocol; a field renamed on either side fails a test.
+- `App/`: the Swift/SwiftUI macOS app (SwiftPM, macOS 26, Swift language mode
+  v5). Audio capture, on-device STT (Apple SpeechAnalyzer), echo dedup, the
+  feed, the session markdown writer, the Sessions browser and preferences.
+  Close and quit teardown are in `SessionClose` and `QuitSequence`.
+- `sidecar/`: Node 26 and TypeScript, with two agent backends, the Claude Agent
+  SDK and the Codex SDK (`src/providers.ts`, kept in step with the app's
+  Preferences). The trigger classifier, a persistent session fed only new
+  lines, drives automatic cards (`autoPipeline.ts`). `lanes.ts` holds the
+  pooled research and query lanes and the one-shot reply, document and summary
+  lanes. NDJSON over stdio to the app (`src/protocol.ts`, both directions).
+- `protocol/examples.json`: one example frame for each message type in each
+  direction. Both test suites load it (`sidecar/src/protocol.test.ts`,
+  `App/Tests/AdvisorTests/ProtocolContractTests.swift`), so a field renamed on
+  one side fails a test. Change it with the protocol.
 
 ## Build & test
 
@@ -49,91 +47,80 @@ cd App && sh dmg.sh                    # signed + notarised DMG (runs sign.sh; o
 mise run release                       # DMG + tag vVERSION + push + GitHub release
 ```
 
-Versioning: the repo-root `VERSION` file is the single source of truth —
-`package.sh` stamps it into the bundle (build number = commit count) and
-`dmg.sh` names the DMG from it. Bump and commit `VERSION` before
-`mise run release` — it refuses an uncommitted bump.
+The repo-root `VERSION` file is the single source of truth for the version:
+`package.sh` stamps it into the bundle (build number = commit count), and
+`dmg.sh` names the DMG from it. Commit the `VERSION` bump before
+`mise run release`, which refuses an uncommitted bump.
 
-Resource paths resolve via `AppResources` (bundle when packaged, `repoRoot`
-in a dev checkout) — keep new runtime-resource lookups going through it.
+Resolve runtime resources through `AppResources` (the bundle when packaged,
+`repoRoot` in a dev checkout).
 
-CI (`.github/workflows/ci.yml`) builds and tests both sides on push to `main`
-and on PRs (App on `macos-26` under the pinned Xcode, sidecar on `ubuntu-latest`). Always build both
-sides locally before committing too. The commit check and CI build Swift with
-`-warnings-as-errors`; a plain `swift build` doesn't, and `devtool check` hides
-compiler output when it passes — so a warning only shows by failing the check.
+CI (`.github/workflows/ci.yml`) builds and tests both sides on each push to
+`main` and on each PR: the app on `macos-26` under the pinned Xcode, the
+sidecar on `ubuntu-latest`. Build both sides locally before you commit. The
+commit check and CI compile Swift with `-warnings-as-errors`, but a plain
+`swift build` does not, and `devtool check` hides compiler output when it
+passes. So a warning shows only as a failed check.
 
 ## Verifying UI changes
 
-Native macOS GUI — not browser-drivable, and most visual/runtime behaviour
-(recording, STT, window lifecycle, cards) isn't unit-testable. "`swift build` +
-tests green" is **not** done for these: observe it in the running app or report
-it unverified — never frame test-green as done for a visual/runtime ticket (this
-drove the #21 rework and #12 churn).
+Advisor is a native macOS GUI: a browser cannot drive it, and unit tests cannot
+reach most visual and runtime behaviour (recording, STT, window lifecycle,
+cards). For such a change, green builds and tests are not done. Observe the
+change in the running app, or report it as unverified. Issues #21 and #12 had
+rework because of this.
 
-- Screenshot the dev build: `cd App && sh xcode.sh swift build`, launch the `.build` binary,
-  capture a window with `screencapture -l <windowid>` (ids via CGWindowList).
-  Full-screen `screencapture` / `osascript` clicks need Accessibility /
-  Screen-Recording grants and usually fail.
-- **Verify the binary the user runs.** A packaged `dist/Advisor.app` can predate
-  your edits — confirm it's rebuilt (mtime / `package.sh`) before trusting a
-  "still happening" or a colour/layout mismatch (#21 red-vs-blue, #12 stale).
-- A screenshot Read into the session is re-injected on every later turn (one
-  127KB PNG became ~50 identical attachments in #12). Capture cropped/small, and
-  prefer delegating a visual check to a subagent (it returns a text verdict; the
-  image dies with it) over Reading many screenshots into the main loop.
+- Screenshot the dev build: run `cd App && sh xcode.sh swift build`, launch the
+  `.build` binary, and capture its window with `screencapture -l <windowid>`
+  (ids from CGWindowList). A full-screen `screencapture` and `osascript` clicks
+  need Accessibility and Screen Recording grants, and usually fail.
+- **Verify the binary that the user runs.** A packaged `dist/Advisor.app` can be
+  older than your edits. Confirm that it is rebuilt (its mtime, or a
+  `package.sh` run) before you trust a report that a fault "still happens" or
+  that a colour or layout is wrong.
+- A screenshot that you Read comes back on every later turn: in #12, one 127 KB
+  PNG became about 50 attachments. Capture small, cropped images, and give a
+  visual check to a subagent, which returns a text verdict.
 
 ## Conventions & constraints
 
-- Work in main, don't branch unless told to
+- Commit to `main`. Make a branch only when told to.
 - Pin exact versions. Node is pinned in `.tool-versions`, which mise, CI
-  (`node-version-file`) and `package.sh` (it bundles that Node) all read.
-  Xcode is pinned in `.xcode-version`: every swift step (commit-check,
+  (`node-version-file`) and `package.sh` (which bundles that Node) all read.
+  Xcode is pinned in `.xcode-version`. Every swift step (commit check,
   `package.sh`, `install.sh`, CI) runs through `App/xcode.sh`, which selects
-  that Xcode by version and refuses to run without it. npm
-  dependencies are exact in `sidecar/package.json`; `sidecar/.npmrc` sets
-  `save-exact`.
-- Always keep docs up to date
-- British spelling in UI strings, prompts, and docs.
-- The app must stay generic: no personal paths (vault, etc.) in code — the
-  user's own Claude config (`~/.claude/CLAUDE.md`) carries personal context,
-  loaded via `settingSources: ["user"]`.
-- Claude agents are sandboxed in `sidecar/src/agent.ts` by one policy,
-  `toolDecision`: an allowlist of web + ToolSearch + MCP read/search +
-  non-sensitive `$HOME` reads by absolute or `~` path (symlinks resolved before the
-  denylist check; Glob patterns must stay relative); MCP tools fail closed —
-  anything not recognised as a read/search is gated by the `allowMcpActions`
-  preference. It is enforced by the `sandboxGate` PreToolUse hook, because the
-  SDK approves in-cwd reads and the user's settings allow rules before
-  `canUseTool` is ever asked; `canUseTool` repeats the check. Verify sandbox
-  changes against the real CLI (`sandbox.sdk.test.ts`), not just the predicate.
-  Do not weaken this silently. Codex (`sidecar/src/codex.ts`) has no per-call hook, so it is
-  sandboxed at the process boundary instead: `sidecar/src/codexSandbox.ts`
-  builds a Seatbelt profile from the same `deniedPaths()` list and the CLI runs
-  under `sandbox-exec` via `codexPathOverride`. Its own `sandboxMode:
-  "read-only"` is kept but not relied on — it bounds writes only, and MCP tools
-  bypass it (openai/codex#4152). Residual: Codex can read its own `~/.codex`
-  credentials, which the profile must leave readable for login; the folder is
-  writable too (sqlite state, sessions), bar the CLI's inputs — config files,
-  `hooks.json`, `.env`, `AGENTS.md`, `agents/`, `skills/`, `rules/`,
-  `prompts/`, `plugins/` (`sandboxWriteDenials`) — or a turn could re-enable
-  connectors or plant instructions for the next. Connectors
-  follow `allowMcpActions`, all or none (`codexClientOptions`): `--config`
-  overrides merge into the user's config, so servers are disabled by name, and
-  `--ignore-user-config` would drop the user's model too. Verify against the
-  real CLI (`codex.sdk.test.ts`). See DESIGN.md.
-- User preferences: `~/Library/Application Support/Advisor/config.json`
-  (mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts` —
-  change both together; keys commented "App-side only" in Preferences.swift,
-  e.g. `sttLocale`, `sessionDir`, are deliberately absent from the sidecar config).
-- Auth defaults to the user's Claude Code / Codex CLI login (subscription);
-  never make an API key *required*. An opt-in API-key fallback exists
-  (Preferences "Authentication" picker): keys live in the macOS Keychain
-  (`Keychain.swift`), injected as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` at
-  sidecar spawn (`SidecarManager.apiKeyEnv`), never in `config.json`.
-- Sessions/transcripts are user data, by default in
-  `~/Library/Application Support/Advisor/sessions` (the `sessionDir` preference
-  can move them) — read freely when debugging, never commit their contents.
-- Known limit (don't fight it): overlapping simultaneous speakers on a mono
-  feed can't be fully transcribed.
+  that Xcode by version and refuses to run without it. npm dependencies are
+  exact in `sidecar/package.json`, and `sidecar/.npmrc` sets `save-exact`.
+- Update the docs in the same change as the behaviour that they describe.
+- Use British spelling in UI strings, prompts and docs.
+- Keep the app generic: code holds no personal paths (a vault, for example).
+  Personal context comes from the user's own Claude configuration
+  (`~/.claude/CLAUDE.md`), which the agents load through
+  `settingSources: ["user"]`.
+- **The agent sandbox is a security boundary.** Before you change it, read its
+  entries in DESIGN.md (*Agent sandboxing*, *Codex runs under a Seatbelt
+  profile*, *Codex connectors follow the actions toggle*). Change it only on
+  purpose, record the change there, and verify it against the real CLI
+  (`sandbox.sdk.test.ts`, `codex.sdk.test.ts`), not only the predicate.
+  - Claude: one policy, `toolDecision` (`sidecar/src/agent.ts`). The
+    `sandboxGate` PreToolUse hook enforces it, because the SDK approves reads
+    in the working directory, and the user's allow rules, before it asks
+    `canUseTool`. MCP tools fail closed.
+  - Codex has no per-call hook, so its boundary is a Seatbelt profile
+    (`sidecar/src/codexSandbox.ts`) built from the same `deniedPaths()` list.
+    Its own `sandboxMode: "read-only"` stays, but nothing relies on it.
+- User preferences are in `~/Library/Application Support/Advisor/config.json`,
+  mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts`. Change
+  both together. Keys commented "App-side only" in Preferences.swift (such as
+  `sttLocale` and `sessionDir`) are absent from the sidecar config on purpose.
+- Authentication defaults to the user's Claude Code or Codex CLI login
+  (subscription), and an API key stays optional. API keys live in the macOS
+  Keychain (`Keychain.swift`), not in `config.json`: see *Optional API-key
+  auth* in DESIGN.md.
+- Sessions and transcripts are user data, by default in
+  `~/Library/Application Support/Advisor/sessions` (the `sessionDir`
+  preference can move them). Read them freely when you debug, and keep their
+  contents out of commits.
+- Known limit: overlapping speakers on a mono feed cannot be fully
+  transcribed. Leave it.
 - Disable the blue focus ring on buttons (`.focusEffectDisabled()`).

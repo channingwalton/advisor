@@ -161,6 +161,7 @@ The placeholder-then-stream pattern keeps the card visible early. Until 2026-10-
 
 | Decision | Alternative | Why |
 |---|---|---|
+| Standalone app; MCP only as the client protocol for sources | An Advisor MCP server | MCP is request/response from a host: it cannot capture audio continuously or push cards. The agent SDKs reach Jira, Confluence and Slack as MCP clients, so the sources come with the user's connectors |
 | stdio NDJSON | WebSocket/gRPC | Simplest; lifecycle coupling is a feature here |
 | Apple SpeechAnalyzer, on-device | whisper.cpp (removed 2026-06-14) | Streaming endpointing, no hallucination from noise, far less echo, no native build or model to ship |
 | Classifier on the shared model, persistent session fed only new lines | A dedicated Haiku call; local heuristics | One provider/model knob; ~1–1.5 s warm; quality over cost (cost tracking was removed 2026-06-14) |
@@ -2070,4 +2071,5 @@ code (issue #108). Commit: `6b56428`.
 
 - The approach to echo suppression.
 - Markdown or SQLite, when the history is large.
-- An MCP server over past sessions (the hybrid in REQUIREMENTS.md).
+- An MCP server over past sessions, so that a host such as Claude can query
+  Advisor's transcripts.

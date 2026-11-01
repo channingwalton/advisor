@@ -1,343 +1,313 @@
 # Using Advisor
 
 The everyday guide: recording, the Sessions browser, preferences, providers,
-safety and logs. For the short version see
+safety and logs. For the short version, see
 [Getting started](../README.md#getting-started).
 
 ## Recording
 
-Advisor opens on the **Sessions** browser (see [below](#sessions-browser)).
-Click the red **New Recording** button at the top of its sidebar, beside the
-window controls (or press ⌘N), to open a recording window; only one recording
-window exists at a time, so doing it again just brings it forward.
+Advisor opens on the **Sessions** browser (see [below](#sessions-browser)). To
+open the recording window, click the red **New Recording** button at the top of
+the sidebar, or press ⌘N. Only one recording window exists, so a second ⌘N
+brings it forward.
 
-In the recording window, click **Listen**. Words appear live in grey as they're
-spoken, replaced by finalised sentences; cards appear inline when the assistant
-decides something is worth answering, checking, or explaining — or when you
-**Ask**. If microphone permission or speech startup fails, fix the
-reported problem and press **Resume**; failed speech recovery also leaves Resume
-available and keeps the existing transcript.
+Click **Listen** in the recording window. Words show in grey as they are
+spoken, and finalised sentences replace them. A card appears in the
+conversation when the assistant finds something to answer, check or explain,
+or when you **Ask**. If microphone permission or speech startup fails, fix the
+problem that the window reports and press **Resume**. The transcript so far
+stays.
 
-The recording window and the Sessions detail share one feed: the conversation
-as plain text with each paragraph's time in the margin, and cards and notes
-inline on a faint fill, so a past session reads just as it did live.
+The recording window and the Sessions detail show the same feed: the
+conversation as plain text, with the time of each paragraph in the margin, and
+cards and notes in place on a faint fill. A past session reads as it did live.
 
 ### Toolbar
 
-The toolbar keeps only in-session controls: the record cluster (waveform,
-timer, mic mute, stop) and audio source on the left; on the right **Ask**,
-**Note**, the target folder (when recording into one), **Name**, **Context**,
-**Tags**, **Auto cards**, **Hide transcript**, **Summarise**, **Float** and
-**Export**. Idle
-collapses the cluster to a single **Listen** pill. Hover an icon for its
-tooltip; tooltips show even while another app is in front. In a narrow
-window, **Hide transcript**, **Summarise**, **Float** and **Export** move into
-a **More** (…) menu, then the other controls drop their labels.
+The left side holds the record cluster (waveform, timer, mic mute, stop) and
+the audio source. The right side holds **Ask**, **Note**, the target folder
+(when you record into one), **Name**, **Context**, **Tags**, **Auto cards**,
+**Hide transcript**, **Summarise**, **Float** and **Export**. When idle, the
+cluster is a single **Listen** button. Hover an icon for its tooltip, also when
+another app is in front. In a narrow window, **Hide transcript**,
+**Summarise**, **Float** and **Export** move into a **More** (…) menu, and then
+the other controls lose their labels.
 
-- **Stop** is resumable — it pauses capture but keeps the session live, and the
-  cluster offers **Resume** to pick it back up with full context. The session is
-  finalised when the recording window closes. If cards are still researching,
-  closing asks whether to **Wait** for them or **Stop and Close**. Closing — and
-  quitting with ⌘Q — lets the last speech reach the note before it's saved.
-- **Ask** (⌘K) opens a box for a question about the conversation, or anything
-  else; the answer arrives as a card. **Return** sends it, **⌥↵** starts a new
-  line.
-- **Note** (⇧⌘N) opens a box for your own context — a name the audio misheard,
-  what "the migration" refers to. It lands as a green **Note** card at this
-  point in the conversation, and the assistant reads it as part of the
-  conversation (so it can inform, or trigger, research). Notes and Ask work
-  before **Listen** too: they open the transcript, notes reach the assistant
-  when the session starts, and an answer still being written carries on. Both boxes keep what you typed if you click away; a dot on
-  the button says a draft is waiting.
-- **Auto cards** turns the automatic answer/context/fact-check cards on and
-  off. Off takes effect at once — nothing waiting to be researched starts —
-  though cards already researching finish. Turned back on, it picks up from
-  what is said next, not the stretch while it was off.
-- The **mic** button in the record cluster mutes the local microphone while the
-  session keeps running — system audio is still captured and transcribed; tap
-  again to unmute.
-- **Name** (before or during a session) is an optional short label that titles
-  the session in the browser.
-- **Context** (before or during a session) holds the **session prompt** (who's
-  present, the topic, what to focus on). Fill it before Listen or edit it live to
-  steer the agents; each edit applies to the next card. **Load** fills it from a
-  saved context; **Save…** stores the current text as one. Name, context and
-  tags clear when the recording window closes, not on Stop.
-- **Tags** (before or during a session) applies tags from your library (pick
-  from the list; create them in Preferences).
-- **Hide transcript** (eye icon) shows only the cards; click again to bring the
-  transcript back. In the **More** menu it's ticked while hidden, and **More**
-  takes the accent colour while the transcript is hidden or the window floats.
-- **Summarise** adds a Summary card recapping the conversation so far, or
-  updates the existing one.
+- **Stop** pauses capture but keeps the session live, and **Resume** continues
+  it with full context. The session ends when you close the recording window.
+  If cards are still researching, the close asks you to **Wait** for them or to
+  **Stop and Close**. A close, and a quit with ⌘Q, adds the last speech to the
+  note before the save.
+- **Ask** (⌘K) opens a box for a question about the conversation, or about
+  anything else. The answer comes as a card. **Return** sends it, and **⌥↵**
+  starts a new line.
+- **Note** (⇧⌘N) opens a box for your own context, such as a name that the
+  audio misheard, or what "the migration" means. It shows as a green **Note**
+  card at this point in the conversation, and the assistant reads it as part of
+  the conversation, so it can inform or start research.
+- Ask and Note also work before **Listen**: they open the transcript, notes
+  reach the assistant when the session starts, and an answer that is still in
+  progress continues. Both boxes keep your text if you click away, and a dot on
+  the button shows a waiting draft.
+- **Auto cards** turns the automatic answer, context and fact-check cards off
+  and on. Off applies at once: research that waits does not start, but cards
+  that already research finish. When you turn it on again, it starts from what
+  is said next, not from the time while it was off.
+- The **mic** button mutes your microphone. The session continues, and system
+  audio is still transcribed. Click again to unmute.
+- **Name** (before or during a session) is a short label that titles the
+  session in the browser.
+- **Context** (before or during a session) holds the **session prompt**: who is
+  present, the topic, and what to focus on. Edit it live to steer the agents;
+  each edit applies to the next card. **Load** fills it from a saved context,
+  and **Save…** stores the current text as one. Name, context and tags clear
+  when the recording window closes, not on Stop.
+- **Tags** (before or during a session) applies tags from your library. Create
+  tags in Preferences.
+- **Hide transcript** (eye icon) shows only the cards. Click again to show the
+  transcript. While the transcript is hidden or the window floats, **More**
+  shows in the accent colour.
+- **Summarise** adds a Summary card of the conversation so far, or updates the
+  existing one.
 - **Float** keeps the window on top.
-- **Export** (share icon) copies the current session note to a location you
+- **Export** (share icon) copies the session note to a location that you
   choose.
 
 ### Keyboard shortcuts
 
-- **⌘N** — New Recording (or bring the recording window forward).
-- **Space** — Listen, Stop or Resume (not while typing in a field).
-- **Esc** — Stop.
-- **⌘K** — Ask.
-- **⇧⌘N** — Add Note.
-- **⌘,** — Preferences.
+- **⌘N**: New Recording, or bring the recording window forward.
+- **Space**: Listen, Stop or Resume (not while you type in a field).
+- **Esc**: Stop.
+- **⌘K**: Ask.
+- **⇧⌘N**: Add Note.
+- **⌘,**: Preferences.
 
 ### The transcript
 
-Transcript text is selectable. **Right-click** a selection (or the whole
-sentence) to:
+You can select transcript text. **Right-click** a selection, or a sentence, to:
 
-- run **Answer / Context / Fact check** on it directly — the same actions the
-  assistant triggers automatically, gated by the same preference toggles, with
-  the resulting card anchored under that line;
-- fix a mis-transcribed word: **Correct "…"** (just that instance) or **Replace
-  all "…"** (every occurrence in the session); type the correction and it's
-  saved to the transcript in place. A paragraph is several transcript lines
-  shown together, and a selection that runs from one line into the next can't be
-  corrected as one: the menu says so instead, so select within a line;
-- **Add note here…** when the audio missed context — the **Note** box opens,
-  showing the line the note goes under (✕ there sends it to the end instead);
-  your note lands as a green **Note** card at that line and the assistant reads
-  it as part of the conversation. Delete a note with the ✕ that shows when you
-  hover it;
+- run **Answer**, **Context** or **Fact check** on it. These are the actions
+  that the assistant starts automatically, behind the same preference toggles.
+  The card goes under that line.
+- correct a misheard word: **Correct "…"** changes this occurrence, and
+  **Replace all "…"** changes every occurrence in the session. A paragraph
+  shows several transcript lines together, and a selection across two lines
+  cannot be corrected: the menu says so. Select within one line.
+- **Add note here…**: the **Note** box opens and shows the line that the note
+  goes under (✕ there sends it to the end). The note shows as a green **Note**
+  card at that line. To delete a note, hover it and click ✕.
 - copy the text.
 
 ### Cards
 
-Once a card has finished, a follow-up box appears on it — ask a question about
-the card and the answer is appended in place, so a card becomes a short thread.
-(Summary cards are a one-shot recap and take no follow-ups.) While a card is
-still researching it shows what the agent is doing, such as *Searching the web
-for “…”* or *Thinking…*, and the answer appears as it is written. The ✕ beside
-*Researching* (**Skip this card**) stops it; the card stays, marked cancelled.
-A card never loses an answer it has already given: while a follow-up or a
-re-summarise runs, the saved note keeps the previous answer; cancelling one puts
-it back, and a failed re-summarise keeps the old summary with a line saying it
-couldn't be updated (Summarise again to retry).
-Hover a card for its controls: **Copy** (puts the title and body on the
-clipboard), collapse/expand (a collapsed card keeps its chevron showing;
-fact-checks start collapsed) and delete (✕); deleting a card that's still
-researching cancels its lane.
+A finished card has a follow-up box. Ask a question about the card, and the
+answer is added to the card, so a card becomes a short thread. Summary cards
+take no follow-ups. While a card researches, it shows what the agent does, such
+as *Searching the web for “…”* or *Thinking…*, and the answer shows as it is
+written. The ✕ beside *Researching* (**Skip this card**) stops it, and the card
+stays, marked cancelled.
+
+A card keeps the answer that it already has. While a follow-up or a
+re-summarise runs, the saved note keeps the previous answer, and a cancel puts
+it back. A failed re-summarise keeps the old summary with a line that says so;
+click Summarise again to retry.
+
+Hover a card for its controls: **Copy** (the title and the body), collapse or
+expand (fact-checks start collapsed), and delete (✕). A delete of a card that
+still researches stops its research.
 
 ### Where sessions are saved
 
-Sessions are saved as markdown under
-`~/Library/Application Support/Advisor/sessions/` by default — Preferences lets
-you choose another folder (and offers to move existing transcripts across) — with
-cards embedded inline in the conversation just as the window shows them.
+Each session is a markdown note in
+`~/Library/Application Support/Advisor/sessions/`, with the cards in place in
+the conversation, as the window shows them. You can choose another folder in
+Preferences, which offers to move the existing notes.
 
 ## Sessions browser
 
-The **Sessions** browser is the app's main window: it opens at launch. It's a
-master/detail window over past sessions.
+The **Sessions** browser is the main window, and it opens at launch. It shows
+your past sessions, with a list on the left and the selected session on the
+right.
 
 ### The list
 
-The left sidebar lists sessions grouped by day (Today / Yesterday / Earlier this
-week / …) with a **Search** field (which also matches tags; type `#tag` to filter
-by tag specifically). The filter button at its end switches between all sessions
-and this week, and between newest and oldest first (it turns the accent colour
-while showing this week only). Each row shows the session's title (its name if
-you gave it one, else the context you typed before Listen, else the date), a
-gist, duration and card count, and a coloured dot per tag (hover for the names).
+The sidebar groups sessions by day (Today, Yesterday, Earlier this week, …).
+**Search** also matches tags, and `#tag` filters by tag only. The filter button
+at the end of the field switches between all sessions and this week, and
+between newest and oldest first. It shows in the accent colour while it shows
+this week only. Each row shows the session's title (its name, else the context
+that you typed before Listen, else the date), a gist, the duration, the card
+count and a coloured dot for each tag (hover for the names).
 
 ### Folders
 
-The sidebar's **Folders** label (hover it for a `+` to add one) lists
-collapsible folder sections above the date-grouped sessions.
+Folders show as collapsible sections above the sessions. To add one, hover the
+**Folders** label and click `+`.
 
-- **Filing.** Drag a session's row onto a folder, or use its **right-click**
-  menu → **Move to Folder** (existing folders, **No Folder** to take it back
-  out, or **New Folder…**).
-- **Renaming and deleting.** Right-click a folder header. Deleting a folder
-  moves its sessions back out and keeps them. Folders are real sub-directories
-  under the storage folder, so they show in Finder too.
-- **The live session.** The session owned by the Recording window cannot be
-  re-filed until that window closes, and its containing folder cannot be renamed
-  or deleted either, including while stopped. Closing drains the last speech
-  results before saving and releasing the note; a reopened Recording window waits
-  for that save.
-- **Recording into a folder.** Hover a folder header to show its buttons; its
-  red **record button** opens the recording window filed into that folder, so its
-  note is saved there straight away (the recording window shows the target
-  folder). The folder is fixed once you press Listen; re-file afterwards with
-  **Move to Folder**.
-- **Folder context.** The speech-bubble button beside a folder's record button
-  sets context (who's there, what it's about) that every recording started in
-  that folder inherits as its starting session context — editable per session.
-  **Load** fills it from one of your saved contexts (Preferences ▸ Contexts).
-  The bubble is filled when a folder has a context set.
-- **Folder tags.** The adjacent **tag button** sets default tags from your
-  library; every new recording started from that folder inherits them, and you
-  can adjust them before or during the session. Existing sessions and sessions
-  moved into the folder are unchanged.
+- **Filing.** Drag a session onto a folder, or right-click it and choose
+  **Move to Folder** (a folder, **No Folder**, or **New Folder…**).
+- **Rename and delete.** Right-click a folder header. A delete moves the
+  folder's sessions back out and keeps them. Folders are real folders in the
+  storage folder, so Finder shows them too.
+- **The live session.** You cannot move the session of the recording window
+  until that window closes. You also cannot rename or delete its folder, also
+  while it is stopped.
+- **Record into a folder.** Hover a folder header and click its red **record
+  button**. The recording window opens, and the note is saved in that folder
+  from the start. The folder is fixed when you press Listen; to move the
+  session later, use **Move to Folder**.
+- **Folder context.** The speech-bubble button sets a context (who is there,
+  what it is about) that each recording started in the folder takes as its
+  starting session context. You can edit it in each session. **Load** fills it
+  from a saved context. The bubble is filled when the folder has a context.
+- **Folder tags.** The tag button sets default tags from your library. Each new
+  recording started from the folder takes them, and you can change them before
+  or during the session. Existing sessions, and sessions that you move into the
+  folder, do not change.
 
 ### Session detail
 
-Selecting a session shows it on the right: title and meta, the questions you
-asked, and the transcript in the same feed as the recording window, with the
-cards Advisor surfaced inline and each paragraph's time in the margin. It has
-the recording window's controls too, and edits are saved into the note:
+The detail shows the title and details of the session, the questions that you
+asked, and the transcript in the same feed as the recording window. It has the
+recording window's controls, and each edit is saved into the note:
 
-- **Hover a card or note** to copy it, collapse/expand it (fact-checks start
-  collapsed) or delete it (✕) — straight away, as in the recording window;
-  deleting the summary or the last follow-up removes its heading too.
-- **Follow up on a finished card**: the answer is appended to the card.
-- **Right-click the transcript** for **Answer / Context / Fact check** (the card
-  streams in under that paragraph and is saved when it finishes; a failed or
-  skipped one isn't), **Add note here…** (a green Note card at that line), and
-  **Correct "…"** / **Replace all "…"**.
+- **Hover a card or note** to copy, collapse, expand or delete it (✕). A delete
+  of the summary or of the last follow-up removes its heading too.
+- **Follow up on a finished card**: the answer is added to the card.
+- **Right-click the transcript** for **Answer**, **Context** or **Fact check**
+  (the card is saved when it finishes; a failed or skipped card is not), **Add
+  note here…**, and **Correct "…"** or **Replace all "…"**.
 - **Note** in the toolbar (⇧⌘N) adds a note at the end of the transcript.
 
-If the note has changed on disk since it was shown, a delete, note or
-correction that no longer fits it is not made: the pane says so and reloads, and
-you can try again. A note moved into or out of a folder meanwhile — in Finder,
-say — is edited where it is now; the browser then reloads, and shows the first
-session until you select the moved one again.
+If the note changed on disk after the detail showed it, an edit that no longer
+fits is not made. The detail says so and reloads, and you can try again. An
+edit to a note that moved to another folder (in Finder, for example) is saved
+where the note is now.
 
-The session still being recorded can be read and collapsed here, but not edited
-until it has fully saved.
+You can read and collapse the session that is still recording, but you can
+edit it only after it is fully saved.
 
-The toolbar's right-hand end holds **Hide Transcript**, **Summarise**, **Tags**
-(applies or removes tags, picking from your library) and the `…` menu:
+The right end of the toolbar holds **Hide Transcript**, **Summarise**, **Tags**
+and the `…` menu:
 
-- **Rename** — a short label for an easier-to-scan list; leave it blank to fall
-  back to the context.
-- **Export…** — save a copy of the markdown elsewhere.
-- **Share…** — the macOS share sheet (Mail, AirDrop, Messages, etc.).
-- **Reveal in Finder** — opens the session's markdown file.
-- **Delete** — behind a confirmation; it permanently removes the note from disk.
-  The live session can't be deleted.
+- **Rename**: a short label for the list. Leave it blank to use the context.
+- **Export…**: save a copy of the markdown.
+- **Share…**: the macOS share sheet (Mail, AirDrop, Messages and others).
+- **Reveal in Finder**: show the session's markdown file.
+- **Delete**: permanently remove the note from disk, after a confirmation. You
+  cannot delete the live session.
 
-The same actions are also on each list row's **right-click** menu.
+The right-click menu of each list row has the same actions.
 
 ### Asking a past session
 
-**Ask** in the toolbar (⌘K) takes a question about the selected session: the
-answer streams in at the bottom and, once finished, is appended to that
-session's note under a `# Follow-ups` heading, so the saved transcript grows
-with the questions you ask of it. (The session currently being recorded is read-only here until it has
-fully saved.) While an answer or a Summarise is running, the ✕ on its panel stops
-it: nothing is saved, and a stopped question goes back in the Ask box to edit or
-send again.
+**Ask** in the toolbar (⌘K) takes a question about the selected session. The
+answer shows at the bottom, and when it is finished, it is added to the note
+under a `# Follow-ups` heading. While an answer or a Summarise runs, the ✕ on
+its panel stops it: nothing is saved, and a stopped question goes back into the
+Ask box.
 
 ## Preferences
 
-⌘, opens settings: parallel agent count, connector action permissions, trigger
-sensitivity (conservative/balanced/eager) and per-kind toggles, the agent
-backend (one provider + model shared by the classifier, research, and
-manual-query lanes), the card **effort** (how much Claude thinks before
-answering a card — see below), saved contexts, the **tag** library (add / rename / recolour
-/ delete, each with a preset colour; renaming updates the tag on every session
-already using it), appearance (system/light/dark), system-audio capture, the
-speech-recognition locale, the session storage folder (choose where
-transcripts are saved; changing it offers to move existing ones across), and
-whether transcript text is included in the log file (off by default; see
-*Logs*).
+⌘, opens the settings:
 
-Most settings are stored in `~/Library/Application Support/Advisor/config.json`;
-agent settings apply at the next session start, appearance straight away.
-**Parallel agents** and **Capture system audio** live in the app's own defaults
-instead: the agent count applies straight away, system audio from the next
+- **Agent:** the backend (one provider and model for the classifier, the
+  research lanes and the query lane), the card **effort**, authentication, the
+  number of parallel agents, and connector actions.
+- **Triggers:** sensitivity (conservative, balanced or eager), and a toggle for
+  each card kind.
+- **Transcription:** system-audio capture and the speech-recognition locale.
+- **Contexts** and **Tags:** your saved contexts, and the tag library (add,
+  rename, recolour, delete). A tag rename updates every session that uses it.
+- **General:** appearance (system, light or dark), the session folder, and
+  transcript text in the log (off by default; see [Logs](#logs)).
+
+Agent settings apply at the next session start, and appearance at once.
+**Parallel agents** applies at once, and **Capture system audio** at the next
 Listen or Resume.
 
-**Effort** is the main speed dial for cards. "Default" uses the effort level
-in your own Claude Code settings (`effortLevel` in `~/.claude/settings.json`),
-which may be set high for coding. Low is fastest; Max is slowest. It applies to
-every card, follow-up, Ask and Summarise, but not to the trigger classifier. A
-level the chosen model can't use is lowered to one it can (Extra high becomes
-High on Sonnet; Haiku ignores effort). Claude only. Each run's level appears
-in the log's `run start` lines, so card timings can be compared by level.
+**Effort** is the main control for card speed. **Default** uses the effort in
+your own Claude Code settings (`effortLevel` in `~/.claude/settings.json`),
+which can be high for coding. **Low** is the fastest and **Max** the slowest.
+It applies to every card, follow-up, Ask and Summarise, but not to the trigger
+classifier. A level that the model cannot use is lowered to one that it can
+(Extra high becomes High on Sonnet; Haiku ignores effort). Claude only.
 
 ## Providers and authentication
 
-Every agent lane (classifier, research, query) shares one backend — **Claude**
-(Agent SDK) by default, or **Codex** (`@openai/codex-sdk`) — picked in
-Preferences. Codex uses your Codex CLI login (`~/.codex/auth.json`), so to use
-it, have the `codex` CLI logged in.
+Every agent lane uses one backend: **Claude** (the Agent SDK) by default, or
+**Codex** (`@openai/codex-sdk`). Choose it in Preferences. Codex uses your
+Codex CLI login, so log in to the `codex` CLI first.
 
-**Authentication** defaults to the provider's subscription login (Claude Code /
-Codex CLI). On a machine with no CLI login, switch **Authentication** to *API
-key* in Preferences and paste an Anthropic or OpenAI key (whichever matches the
-selected provider). The key is stored in your macOS Keychain — never in
-`config.json` — and injected into the sidecar's environment
-(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). Authentication mode, key replacements
-and provider changes apply when the next recording session starts: Advisor
-reloads the selected key and replaces the sidecar only when its authentication
-changes. Returning to subscription removes both provider API-key overrides.
-Preferences validates the key directly against the provider's models endpoint
-when you enter it, showing inline status and an alert on rejection, so an
-invalid key surfaces immediately rather than as a mid-session research error.
-API-key usage is billed to that key, not your subscription.
+**Authentication** uses your CLI subscription login by default (Claude Code or
+Codex). On a Mac with no CLI login, set **Authentication** to *API key* and
+paste an Anthropic or OpenAI key, to match the provider. Preferences checks the
+key with the provider when you enter it. The key is kept in your macOS
+Keychain, not in `config.json`. Use of the key is billed to that key, not to
+your subscription. A change of authentication, key or provider applies at the
+next recording session.
 
-Advisor itself knows nothing about your notes: the research agents load your
-own Claude configuration (`~/.claude/CLAUDE.md`), which is where note
-locations and personal context belong.
+Advisor itself knows nothing about your notes. The research agents load your
+own Claude configuration (`~/.claude/CLAUDE.md`), which is where note locations
+and personal context belong.
 
 ## Safety
 
-On **Claude**, research agents are sandboxed by a per-call tool policy: web
-search, the user's MCP connectors (Slack, Jira, … — read/search only unless
-"Allow connector actions" is enabled), and read-only access to non-sensitive
-files in the home directory. No shell, no writes; credential paths (~/.ssh,
-~/.aws, ~/.claude, ~/.codex, keychains, …) are denied (case-insensitively, with
-both requested paths and denied roots resolved through symlinks, so symlinked
-credential directories stay denied at their targets too). Connector tools fail
-closed — anything not recognised as a read/search is treated as an action and
-gated. File search (Grep/Glob) must be scoped to a specific subdirectory — an
-unscoped home-wide search, or a subtree containing a resolved credential path,
-is refused so a recursive pattern can't reach a denied path. File tools take
-absolute or `~/…` paths, and search patterns must stay inside the folder being searched.
-Any other Claude Code tool (skills, scheduling, sub-agents, …) is refused. The
-policy is checked before Claude Code's own permission rules, so allow rules in
-your Claude settings can't widen it.
+On **Claude**, a tool policy limits each research agent call:
 
-On **Codex**, which has no per-call hook, the sandbox is at the process
-boundary: the Codex CLI runs under a macOS Seatbelt profile built from the same
-denylist, so it and every process it starts (shell commands, MCP servers) can't
-read those paths or write anywhere but Codex's own state and temp folders (and
-not Codex's own config files, hooks, `.env`, `AGENTS.md`, agents, skills, rules,
-prompts or plugins even there, so a turn can't re-enable connectors or plant
-instructions for the next). It's coarser than the Claude policy:
-read-only shell commands are allowed, and Codex can read its own `~/.codex`
-login. Codex can't let connector reads through while
-refusing actions, so with the connector-actions toggle off it gets no connectors
-at all (the MCP servers and plugins in `~/.codex/config.toml`, and ChatGPT
-apps); with it on, it gets all of them. See [DESIGN.md](../DESIGN.md).
+- Web search and fetch are allowed.
+- Your MCP connectors (Slack, Jira, …) can read and search. Other connector
+  tools, and tools that the policy does not recognise, need **Allow connector
+  actions**.
+- Files under your home folder can be read, but not changed. Credential paths
+  (`~/.ssh`, `~/.aws`, `~/.claude`, `~/.codex`, keychains, …) are denied, also
+  through symlinks and in any letter case. A file search must name a folder
+  that holds no credential path.
+- No shell, and no other Claude Code tool (skills, scheduling, sub-agents, …).
+
+The policy applies before the permission rules of Claude Code, so allow rules
+in your Claude settings cannot widen it.
+
+On **Codex**, the Codex CLI runs under a macOS Seatbelt profile, built from the
+same list of credential paths. Codex, and each process that it starts, cannot
+read those paths, and can write only to Codex's own state and temporary
+folders. Even there, it cannot change Codex's configuration, hooks or
+instructions. This is coarser than the Claude policy: read-only shell commands
+are allowed, and Codex can read its own `~/.codex` login. Codex cannot allow
+connector reads and refuse actions, so with **Allow connector actions** off it
+gets no connectors (no MCP servers or plugins from `~/.codex/config.toml`, and
+no ChatGPT apps), and with it on, it gets all of them. See
+[DESIGN.md](../DESIGN.md).
 
 ## Logs
 
-Diagnostics from both the app and the sidecar are written to
-`~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so
-it also appears in Console.app under **Log Reports**. Tail it live with
-`tail -f ~/Library/Logs/Advisor/advisor.log`. The file rotates at ~5 MB, keeping
-one previous copy (`advisor.log.1`). By default it holds no transcript text —
-each recognised line is logged as its length only, so the conversation lives
-solely in your session folder. (The agents' own output — card text and the
-classifier's triggers, whose subjects and search queries restate what was said
-— is still logged, for diagnosing cards.) To debug transcription (echo
-suppression, disfluency cleanup), turn on **Include transcript text in the
-log** under Preferences → General; it applies at once, mid-recording too, and
-the log is then session data like the transcripts themselves. Either way, it
-stays on your machine.
+The app and the sidecar write diagnostics to
+`~/Library/Logs/Advisor/advisor.log`. Console.app shows the file under **Log
+Reports**. To follow it live, run `tail -f ~/Library/Logs/Advisor/advisor.log`.
+The file rotates at about 5 MB and keeps one previous copy (`advisor.log.1`).
 
-If the app's main thread is blocked for about 7 seconds or more once the app has
-launched, it logs the stall and saves a stack sample of itself next to the log,
-as `hang-<n>-<time>.txt`. In the background, macOS can delay this check. The
-folder keeps the newest five. If the sample fails, the log shows the error or a
-non-zero exit status, and the file can be missing or incomplete. When you close
-the recording window, the log also records which control had keyboard focus in
+By default the log holds no transcript text: each line shows as its length.
+The agents' output (card text, and the classifier's triggers, which restate
+what was said) is still logged, for the diagnosis of cards. To debug
+transcription, turn on **Include transcript text in the log** under
+Preferences → General. It applies at once, also during a recording. The log is
+then session data, as the transcripts are. In both cases, the log stays on your
+Mac.
+
+If the main thread of the app stops for about 7 seconds or more, the app logs
+the stall and saves a stack sample of itself next to the log, as
+`hang-<n>-<time>.txt`. The folder keeps the newest five. When you close the
+recording window, the log also records which control had keyboard focus in
 each window. Attach the sample and the log to a hang report.
 
 ## About
 
 **Advisor → About Advisor** shows the version, what Advisor does, the main
-components it is built on with their licences, and the copyright. Advisor is
-open source under the MIT licence.
+components with their licences, and the copyright. Advisor is open source
+under the MIT licence.
 
 ## Known limits
 
-Overlapping simultaneous speakers on a mixed mono feed cannot be fully
-transcribed by any single-stream speech recogniser. The trigger classifier and
-research agents consume your provider subscription's allowance.
+No single-stream speech recogniser can fully transcribe overlapping speakers
+on a mixed mono feed. The trigger classifier and the research agents use your
+provider subscription's allowance.
