@@ -2,8 +2,11 @@
 
 **Status:** Living document. The sections down to *Trade-offs made* describe the
 system as it is (checked against the code 2026-10-18, v0.4.7). *Milestones* and
-the dated sections after it are the decision history, kept as written; where a
-later change overturned an entry, the entry carries a forward pointer.
+the dated sections after it are the decision history. Each entry gives the
+decision, the reason, the rejected alternatives and the residual risks. The
+issue or commit that an entry names holds the detail (entries compressed
+2026-11-01). Where a later change overturned an entry, the entry carries a
+forward pointer.
 
 **Input:** [REQUIREMENTS.md](REQUIREMENTS.md)
 
@@ -169,3165 +172,1902 @@ The placeholder-then-stream pattern keeps the card visible early. Until 2026-10-
 
 ## Milestones
 
-- **M0 — Spike (benchmark): ✅ 2026-06-11.** whisper.cpp + Metal on the M4 Max, 11 s speech sample, warm timings via the Swift wrapper: `small` 130 ms, `large-v3-turbo` 395 ms. Both far inside budget. Default `small` (override with `ADVISOR_WHISPER_MODEL`); `large-v3-turbo` viable if accuracy disappoints.
-- **M1: ✅ 2026-06-12 (verified live).** Mic capture → live transcript in a plain window. `App/` Swift package; headless smoke (`--smoke <wav>`) passes; live mic verified. Gotcha found: system default input was BlackHole (virtual, silent) — app now enumerates devices (CoreAudio) and defaults to the first real mic, with a picker. Speech RMS on Studio Display mic ≈ 0.01, VAD floor 0.006 — watch for clipped soft speech.
-- **M2: ✅ 2026-06-12.** System audio (ScreenCaptureKit) + me/them tagging + best-effort echo dedup (text overlap vs last 15 s of `them`; `me` delayed 1 s). Apple AEC abandoned: fails (-10875) on multichannel Studio Display output, and mutes the mic when it does initialise. Dedup imperfect but accepted — attribution is cosmetic for Advisor's purpose; duplicates are further caught by trigger-level dedup (M4).
-- **M3: ✅ 2026-06-12.** Sidecar + IPC + on-demand query (F14) end-to-end. `sidecar/` (Node 22 + Agent SDK, NDJSON over stdio, web search + Vault read-only, Claude Code auth); Swift `SidecarManager` + cards pane + query box. Verified live. Note: his npm config has `omit=dev` — install with `npm install --include=dev`.
-- **M4: ✅ 2026-06-12.** TriggerDetector + automatic cards (F8–F10). Haiku classifier in a *persistent* streaming-input Agent SDK session (~1 s/classify after first; cold spawn per call was ~10 s — the original design's 0.5 s budget was unrealistic via the SDK). Aggressive on questions (incl. musings), conservative on factcheck; named systems/acronyms trigger context. Subject dedup 10 min; research queue sequential. Remaining latency: research agent still cold-spawns per card (~10–30 s incl. tool use) — candidate for the same persistent-session treatment.
-- **M5: ✅ 2026-06-13.** Persistent research/query sessions (per-lane transcript-delta cursors; follow-up questions resolve referents from session memory). Cost reporting via per-task `total_cost_usd` deltas → ticker in toolbar. (Superseded 2026-06-14: cost tracking and the ticker were removed end to end, commit `f663cf3`.) Session markdown files in `~/Library/Application Support/Advisor/sessions/` (debounced rewrite; late cards included). "Float" toggle (floating window, all spaces; named per macOS convention) instead of a full NSPanel overlay — revisit if focus-stealing annoys. "Sessions" button opens the folder in lieu of an in-app history view. (Superseded 2026-06-18: an in-app Sessions browser replaced it — see *Sessions browser (master/detail) + ask-and-append*.)
+- **M0 — Spike (benchmark): ✅ 2026-06-11.** whisper.cpp with Metal on the M4
+  Max transcribed an 11 s sample in 130 ms (`small`) and 395 ms
+  (`large-v3-turbo`). (Superseded 2026-06-14: see *Whisper removed*.)
+- **M1: ✅ 2026-06-12.** Mic capture to a live transcript. The system default
+  input was BlackHole, a silent virtual device, so the app chooses a real mic.
+  See *Non-default mic selection*.
+- **M2: ✅ 2026-06-12.** System audio (ScreenCaptureKit), `me`/`them` tags and
+  echo dedup by text overlap. Apple's echo cancellation was rejected: it fails
+  (-10875) on the multichannel Studio Display output, and it mutes the mic when
+  it does start. The dedup is imperfect, but attribution is cosmetic here, and
+  trigger-level dedup catches the duplicates.
+- **M3: ✅ 2026-06-12.** Sidecar, NDJSON over stdio and on-demand query (F14).
+  A global npm `omit=dev` setting makes `npm install --include=dev` necessary.
+- **M4: ✅ 2026-06-12.** Trigger detection and automatic cards (F8–F10). A
+  persistent streaming-input session classifies in about 1 s after the first
+  call. A cold spawn for each call took about 10 s, so the original 0.5 s
+  budget was not possible through the SDK. Subjects dedup for 10 minutes.
+- **M5: ✅ 2026-06-13.** Persistent research and query sessions with a
+  transcript cursor for each lane, so follow-ups resolve referents from session
+  memory. Session notes as markdown on a debounced rewrite. A Float toggle on
+  an ordinary window, not an `NSPanel` overlay. Revisit that if focus stealing
+  annoys. The cost ticker went on 2026-06-14 (commit `f663cf3`). (Superseded
+  2026-06-18: the Sessions button that opened the folder; see *Sessions browser
+  (master/detail) + ask-and-append*.)
+
+Commit: `b208cfb`.
 
 ## Post-M5 tuning (2026-06-13, after first real-meeting test)
 
-- Classifier told it reads messy live STT: reassemble fragments, ignore echo near-duplicates; consecutive same-source utterances merged before classification; window 20.
-- Brief made explicitly proactive ("trigger every minute or two in substantive conversation").
-- Research parallelised: 3 persistent lanes + dedicated query lane, per-lane transcript cursors.
-- Replay harness: `sidecar/test/replay.sh` + `fragments.txt` for tuning against real transcripts.
+- The classifier prompt says that it reads messy live STT. It reassembles
+  fragments and ignores echo near-duplicates. Consecutive lines from one source
+  merge before classification.
+- The brief is explicitly proactive: "trigger every minute or two in
+  substantive conversation".
+- Research runs in 3 persistent lanes, plus one query lane.
+- `sidecar/test/replay.sh` and `fragments.txt` replay real transcripts for
+  tuning.
+
+Commit: `b208cfb`.
 
 ## STT tuning findings (2026-06-12/13)
 
-- `large-v3-turbo` default (proper nouns), beam search size 2, **temperature fallback disabled** — the default 5× re-decode on noisy segments froze the pipeline. Decode now ~300 ms per 5 s segment (≈15× realtime, M4 Max).
-- Vocabulary bias via whisper initial_prompt (~224-token cap): manual dictionary (clickable words in UI + Dictionary popover) merged with macOS spelling LocalDictionary. Vault-derived vocab deliberately NOT in the app — user-specific sources belong in the sidecar.
-- Echo dedup: pairwise distinctive-word (>3 chars) overlap ≥0.7 on min-length basis; pool-based common-word matching suppressed genuine speech.
-- Segment cap 5 s; segments older than 20 s skipped (back-pressure).
-- Known limit: overlapping simultaneous speakers on a mixed mono feed are unrecoverable by any single-stream STT — don't engineer against shouty-debate YouTube videos.
+The whisper settings (model, beam size, temperature fallback, vocabulary bias)
+went with whisper. (Superseded 2026-06-14: see *Whisper removed*.) Two findings
+still hold:
+
+- **Echo dedup** compares distinctive words (more than 3 characters) pair by
+  pair, with an overlap of at least 0.7 of the smaller set. A pooled match on
+  common words suppressed genuine speech, so it was rejected.
+- **Known limit:** no single-stream STT can recover overlapping speakers on a
+  mixed mono feed. Do not engineer against it.
+
+User-specific vocabulary from the vault was kept out of the app on purpose.
+
+Commit: `b4cb67f`.
 
 ## STT engine switch (2026-06-12)
 
-Apple SpeechAnalyzer/SpeechTranscriber (macOS 26) added as the **default** engine; whisper.cpp retained behind a picker for A/B. Apple wins decisively on real-world capture: true streaming with built-in endpointing (complete punctuated sentences, no hand-rolled VAD boundaries), no hallucination-from-noise, and the duplicate/echo problem largely vanishes. Whisper's remaining edge: vocabulary biasing via initial_prompt (Apple path has no equivalent hook in v1) and fully offline model choice. Known minor: Apple's first Listen may download model assets.
+Apple SpeechAnalyzer/SpeechTranscriber (macOS 26) became the default engine. It
+streams with built-in endpointing (complete, punctuated sentences), does not
+hallucinate from noise, and removes most of the echo problem. Whisper kept two
+advantages: vocabulary bias and a choice of offline model. Apple's first Listen
+can download model assets. Volatile results show in grey at the feed tail. The
+mic echo delay is 1.5 s (4 s for whisper), because both Apple streams finalise
+at nearly the same time. (Superseded 2026-06-14: see *Whisper removed*.)
 
-Volatile results are enabled: in-progress words render grey/italic at the feed tail and are replaced by the finalised sentence (live-captioning feel). Mic echo delay is 1.5 s on Apple (vs 4 s for whisper) since both streams finalise near-simultaneously.
-
-### Recording ownership and finalisation (2026-09-21, issues #78/#79)
-
-The writer owns its note until the Recording window closes, including while
-stopped or waiting for agent cards. Folder rename/delete commands reject any
-folder containing that note, and their menus are disabled. The command rechecks
-ownership when an open confirmation is submitted.
-
-Window disappearance starts an app-owned close task. It stops capture, awaits
-both speech-result consumers, then drains pending transcript acceptance through
-the microphone echo delay and the main-actor store writes. Only then does it
-save, release the note and advance the session generation. Reopening awaits this
-task before rebuilding the recorder; late old-generation callbacks remain gated.
-The Wait close path drains speech first and retains the writer while existing
-agent cards finish. Draining finals does not start new agent work.
-
-### Short replies and recording retries (2026-09-21, issues #80/#83)
-
-Absence of distinctive words is not evidence of echo. Short microphone replies
-are suppressed only when their token sequence exactly matches recent system
-speech; longer utterances retain the existing distinctive-word overlap rule.
-
-The recording view delegates start/stop/resume state and timer bookkeeping to
-`RecordingControl`, shared by the toolbar and Space shortcut. Failed starts
-become stopped sessions when the start operation completes; a failed automatic
-recovery observes capture stopping. Both expose Resume with the existing note,
-context and generation intact. A start in progress remains latched against
-duplicate retries, and closing cancels its completion bookkeeping.
-
-### Codex session ordering (2026-09-21, issue #81)
-
-Each Codex session queues warm-ups and real requests, selecting its SDK thread
-and first-turn instructions only when the request reaches the head. The next
-turn waits for completion, not merely `thread.started`. Execution timeouts start
-when the turn begins. Reset and explicit cancellation settle active and queued
-work without dispatching queued requests. An internal timeout advances the queue.
-Both cancellation and timeout retire the active thread so the next request receives fresh instructions.
-Late events from abandoned streams cannot replace context or update cards.
-Independent sessions still run concurrently.
+Commit: `3a637f0`.
 
 ## Agent sandboxing (2026-06-13)
 
-Sidecar agents run under a `canUseTool` policy instead of `bypassPermissions`: web tools auto-allowed; Read/Grep/Glob restricted to non-sensitive paths under `$HOME` (denylist: .ssh, .aws, .claude, .codex, keychains, …); Bash/Write/Edit/etc. denied and disallowed. Verified: `/etc/passwd` read denied, notes queries unaffected. (That check used a path outside the working directory — exactly the case that does reach `canUseTool`. Reads inside it, and the user's own settings allow rules, never did; see the PreToolUse gate below, 2026-10-06.) A hard OS boundary (OrbStack/Docker container, app spawning `docker run -i`) remains a future option — note the OAuth credentials sit inside any such boundary.
+Claude agents run under a tool policy, not `bypassPermissions`. Web tools are
+allowed. Read, Grep and Glob reach only non-sensitive paths under `$HOME`; the
+denylist holds `.ssh`, `.aws`, `.claude`, `.codex`, keychains and more. All
+other tools are refused.
 
-Two refinements after review (`sandbox.test.ts` pins them): **Grep/Glob are gated more tightly than Read** because they recurse — validating only the root path lets a recursive pattern (`Glob {path:$HOME, pattern:".ssh/**"}`, `Grep {path:$HOME, pattern:"PRIVATE KEY"}`) reach secrets in a denied descendant. So a search root may not sit *at or above* any denied path; an unscoped `$HOME` search is illegal and the agent must target a specific subtree. **Comparisons are case-folded** — macOS's default filesystem is case-insensitive, so `~/.SSH/id_rsa` reaches the same file as `~/.ssh`; a case-sensitive denylist check would let the variant through. The path-separator guard still keeps distinct siblings (e.g. `.ssh-notes`) allowed.
+- **Grep and Glob are stricter than Read**, because they recurse. A search root
+  may not be at or above a denied path, so a search over all of `$HOME` is
+  refused.
+- **Comparisons fold case**, because the default macOS volume is
+  case-insensitive: `~/.SSH` is the same folder as `~/.ssh`. The separator
+  guard keeps siblings such as `.ssh-notes` allowed.
+
+Deferred: a hard OS boundary, such as a container that the app starts with
+`docker run -i`. The OAuth credentials would be inside any such boundary. The
+first check (`/etc/passwd` refused) used a path outside the working directory,
+which is the only case that reached `canUseTool`. See *Enforced by a PreToolUse
+gate*.
+
+Commit: `658694f`.
 
 ### Symlinked credential roots (2026-09-21, issue #77)
 
-Resolving only the requested path left symlinked credential roots unprotected:
-if `~/.ssh` points to `~/dotfiles/.ssh`, neither the alias nor the target matched
-the lexical denylist. Claude's read and search policies now compare against
-both the original denied roots and their resolved targets, using the same
-deepest-existing-ancestor resolution as requested paths. Searches rooted at
-`~/dotfiles` are therefore refused too. The shared `deniedPaths()` list remains
-lexical; Codex already resolves its own policy paths. Regression tests use real
-symlinks and synthetic credentials, including credential files, symlinked
-parents, missing leaves, and ordinary permitted siblings.
+A symlinked credential root was open: when `~/.ssh` points to
+`~/dotfiles/.ssh`, neither path matched the lexical denylist. The Claude read
+and search policies now compare against each denied root and its resolved
+target, so a search rooted at `~/dotfiles` is refused too. `deniedPaths()`
+stays lexical. Codex resolves its own policy paths.
 
 ### Enforced by a PreToolUse gate (2026-10-06, code review)
 
-`canUseTool` was never the whole boundary. The SDK resolves a tool call through
-hooks → deny rules → ask rules → permission mode → allow rules → `canUseTool`,
-and the allow-rules step approves two things on its own: **reads inside the
-working directory** (the agents ran with `cwd = $HOME`, so every `$HOME` read)
-and **allow rules from the user's settings** (`settingSources: ["user"]` imports
-them — a real `~/.claude/settings.json` allowed `Read(~/.claude/**)`). Both
-reached the model without `canUseTool` being asked, so the denylist held only
-for paths outside `$HOME`. A third hole sat in the policy itself: the CLI's Glob
-searches an *absolute* pattern's own base directory instead of `path`, so
-`{path: ~/Documents, pattern: ~/.ssh/*}` passed the root check and listed the
-denied folder. All three were reproduced against the bundled CLI.
+`canUseTool` was not the whole boundary. The SDK resolves a tool call in this
+order: hooks, deny rules, ask rules, permission mode, allow rules, then
+`canUseTool`. The allow-rules step approves two things on its own:
 
-The fix keeps one policy, `toolDecision`, and enforces it in two places:
+- reads inside the working directory, which was `$HOME`;
+- allow rules from the user's settings, which `settingSources: ["user"]`
+  imports. A real `~/.claude/settings.json` allowed `Read(~/.claude/**)`.
 
-- **`sandboxGate`, a PreToolUse hook** Advisor registers itself. Hooks run before
-  every other step, and a hook deny holds in every permission mode — the docs'
-  recommended place for a check that must see every call. The gate only denies:
-  a permitted call gets no decision and carries on through the normal flow, so
-  `canUseTool` still applies the same policy as a second check. It fails closed.
-- **The policy is an allowlist.** Web, ToolSearch (how the CLI loads deferred
-  connector tools — refusing it cut agents off from MCP), the MCP resource tools,
-  `mcp__*` through `mcpPermission`, and Read/Grep/Glob. Everything else the CLI
-  advertises — Skill, Task*/Team*/Workflow, Cron*, ScheduleWakeup,
-  AskUserQuestion, worktrees — is refused, where before several ran without
-  asking.
-- **Paths must be absolute or `~`-based** (`~` expanded to home as the CLI
-  does — it expands Read's before the gate but hands Glob/Grep's `path` over
-  unexpanded). Relative paths are refused: they resolve against the CLI's cwd,
-  so the policy could judge a different file than the one opened. A search
-  must name its `path`. **Glob patterns and Grep `glob` filters must be
-  relative** — no leading `/`, no `~`, no `..`, no absolute brace alternative —
-  so the search stays in the checked root.
-- **The agents' cwd is an empty folder of Advisor's own**
-  (`~/Library/Application Support/Advisor/agent-cwd`, `agentCwd()`), so the CLI's
-  implicit in-cwd approval points at nothing. Codex keeps `$HOME`; its boundary
-  is the Seatbelt profile.
+Also, the CLI's Glob searches the base directory of an absolute pattern, not
+`path`. All three holes were reproduced against the bundled CLI.
 
-Behaviour change: reads the user's own allow rules had silently permitted
-(`~/.claude/**`, `~/dotfiles/**`) are now refused, as the denylist always
-intended. `sandbox.sdk.test.ts` pins the boundary against the real CLI: a local
-fake model endpoint scripts each tool call in a synthetic home and the test
-inspects the tool result sent back — the only place a leak shows. It runs in
-`npm test` (a couple of seconds; the lockfile pins the SDK and its platform
-CLI). The agents' folder is created on first spawn, and a failure there fails
-that turn rather than the sidecar's startup. Rejected: moving only the cwd (the
-settings allow rules still bypass), and validating the Glob pattern's effective
-root (it would copy the CLI's internal pattern split, which can change between
-versions; refusing the shapes doesn't depend on it).
+One policy, `toolDecision`, now applies in two places:
+
+- **`sandboxGate`, a PreToolUse hook.** A hook runs before every other step, and
+  a hook deny holds in every permission mode. The gate only denies, and it
+  fails closed. `canUseTool` repeats the same check.
+- **An allowlist.** Web tools, ToolSearch (the CLI loads deferred connector
+  tools through it), the MCP resource tools, `mcp__*` through `mcpPermission`,
+  and Read/Grep/Glob. Skill, Task, Team, Workflow, Cron, ScheduleWakeup,
+  AskUserQuestion, worktrees and all other tools are refused.
+- **Paths are absolute or `~`-based.** The CLI expands `~` in a Read path before
+  the gate, but passes a Glob or Grep `path` unexpanded. A relative path
+  resolves against the CLI's working directory, so the policy could judge a
+  different file. A search must name its `path`. Glob patterns and Grep `glob`
+  filters must be relative: no leading `/`, `~`, `..` or absolute brace
+  alternative.
+- **The agents' working directory is an empty folder**,
+  `~/Library/Application Support/Advisor/agent-cwd` (`agentCwd()`), so the
+  implicit approval inside it reaches nothing. Codex keeps `$HOME`; its
+  boundary is the Seatbelt profile.
+
+Reads that the user's allow rules permitted (`~/.claude/**`, `~/dotfiles/**`)
+are now refused. `sandbox.sdk.test.ts` proves the boundary against the real CLI
+with a local fake model endpoint. Rejected: a move of the working directory
+alone (the settings allow rules still bypass), and a check of the effective
+root of a Glob pattern (it copies the CLI's internal pattern split, which can
+change between versions).
+
+Commit: `a21dd2e`.
 
 ## Connector tools (2026-06-13)
 
-User-configured MCP connectors (loaded via the user's Claude settings) pass the sandbox: read/search tools always allowed; tools matching an action pattern (send/create/update/delete/…) denied unless `allowMcpActions` is enabled in preferences (default off — a prompt-injected agent must not post to Slack mid-meeting). The research prompt names connected tools as legitimate sources. Toolbar slimmed to in-session controls (Listen, mic, Auto cards, Float); engine/system-audio/agent-count moved to preferences, engine changes applying when listening stops.
+The user's MCP connectors, loaded through their Claude settings, pass the
+sandbox. Read and search tools are allowed. Action tools are refused unless the
+`allowMcpActions` preference is on, which is off by default: a prompt-injected
+agent must not post to Slack during a meeting. The research prompt names the
+connectors as valid sources. (The name rule changed 2026-10-17: see *Code
+review batch*.)
+
+Commit: `82ec06a`.
 
 ## Preferences & de-vaulting (2026-06-13)
 
-Advisor no longer knows about the vault: agents load the user's own Claude config (`settingSources: ["user"]` → `~/.claude/CLAUDE.md`), which carries personal context like note locations. Verified: a vault query answered with no vault path in Advisor. Preferences (⌘,) write `Application Support/Advisor/config.json`, re-read by the sidecar at each session_start (sessions rebuilt so prompt/model changes apply): trigger sensitivity + per-kind toggles, the shared agent backend (provider + model), STT locale. (Max-triggers-per-pass was dropped as a preference 2026-06-13: "pass" is an invisible internal cadence a user can't reason about, and it duplicated trigger sensitivity as a volume knob; it's now a hardcoded backstop `MAX_TRIGGERS_PER_PASS = 2` in `trigger.ts`.) The research system prompt is entirely fixed in code (`sidecar/src/prompts.ts` — persona plus the protected operational core: two-pass answering, no-narration, citation rules), so prompt edits can't break card latency/format. (The editable persona preference was dropped 2026-06-13: per-session steering via the session prompt below covers the real need, and an editable persona only risked the card contract.) A **session prompt** field steers a single session: filled before Listen (seeded via `session_start`) and editable mid-session (`session_context` messages). Because the persistent research/query lanes fix their system prompt at session start, the session prompt is injected **per task** (`sessionContextPrefix`, prepended to each research/query/reply dispatch and read fresh) rather than into the system prompt — so a live edit lands on the next card without rebuilding lanes. The app stores the latest text so a sidecar restart replays it; the box clears when the session stops.
+Advisor knows nothing about the vault. The agents load the user's own Claude
+configuration (`settingSources: ["user"]`, so `~/.claude/CLAUDE.md`), which
+holds personal context such as note locations. A vault query worked with no
+vault path in Advisor. The sidecar reads `config.json` again at each
+`session_start` and rebuilds its sessions, so prompt and model changes apply.
+
+The research system prompt is fixed in code (`sidecar/src/prompts.ts`): a
+persona and a protected core of two-pass answers, no narration and citation
+rules. A prompt edit therefore cannot break the latency or the format of a
+card. Rejected:
+
+- an editable persona preference: the session prompt covers the need, and a
+  persona edit put the card contract at risk;
+- a max-triggers-per-pass preference: a pass is an internal cadence that a user
+  cannot see, and the knob duplicated sensitivity. It is now
+  `MAX_TRIGGERS_PER_PASS = 2` in `trigger.ts`.
+
+The session prompt goes into each task (`sessionContextPrefix`), not into the
+system prompt. The persistent lanes fix their system prompt at session start,
+so this way a live edit reaches the next card with no lane rebuild. The app
+keeps the latest text, so a sidecar restart replays it.
+
+Commit: `5d17ad3`.
 
 ## Right-click transcript actions (2026-06-12)
 
-Selected transcript text can be acted on directly: right-click → **Answer / Context / Fact check**. These are exactly the auto-classifier's kinds (`question`→answer, `context`, `factcheck`), gated by the same `config.triggers` toggles, so the manual menu and the automatic pipeline never diverge. Preferences posts `advisorConfigChanged` on save and the transcript view reloads its trigger toggles on receipt, so toggling a kind updates the menu live rather than only after a relaunch. The prompt templates live once in `trigger.ts` (`researchTask`/`cardKind`), shared by the auto pipeline (`drainResearch`, now `AutoPipeline.drain`) and the manual path. The action rides the existing `query` lane (now carrying optional `action` + `triggerId`); `triggerId` anchors the resulting card under the clicked line, the same way auto cards anchor via the classifier's `anchorId`. The free-text Ask box still sends a bare `query` (kind `query`, no anchor) — unchanged.
+Answer, Context and Fact check on selected text are the auto-classifier's own
+kinds, behind the same `config.triggers` toggles, so the manual and automatic
+paths cannot diverge. The prompt templates live once in `trigger.ts`
+(`researchTask`, `cardKind`). An action uses the `query` lane with optional
+`action` and `triggerId`; `triggerId` anchors the card under the line.
 
-Selection capture needs the real highlighted span, which SwiftUI's `Text` + `.textSelection` hides from a `.contextMenu`; the transcript line is therefore an `NSTextView` (`SelectableTranscriptText`) whose `menu(for:)` builds the action items over `selectedRange` (falling back to the whole line). Building it via the convenience `NSTextView(frame:)` (not a hand-assembled TextKit stack) so the view owns its text storage — a manual stack leaves storage/layoutManager unretained and they deallocate, blanking the line. The space-to-pause monitor now ignores only *editable* text views, so a focused (non-editable) transcript line still toggles playback.
+SwiftUI `Text` with `.textSelection` hides the selected span from
+`.contextMenu`, so each line is an `NSTextView` (`SelectableTranscriptText`)
+whose `menu(for:)` reads `selectedRange`. Build it with `NSTextView(frame:)`. A
+hand-built TextKit stack does not retain its storage and layout manager, so they
+deallocate and the line goes blank.
 
-**Dedup considered and dropped.** A first cut had a manual action supersede the equivalent in-flight auto card (cancel by matching anchor+kind, `card_remove` to hide it; register the subject in `covered`). Reverted after testing: auto-triggers anchor to the *last* line of the classifier window and subjects are fuzzy, so anchor/subject matching missed most real duplicates while adding protocol and state surface — a dedup that only sometimes fires invites false confidence. Manual and auto now run independently; the occasional duplicate is accepted (the user waits, then asks manually if nothing appears). Reliable dedup would need semantic subject matching — out of scope.
+Rejected: a dedup of a manual action against the equivalent in-flight auto
+card. Auto cards anchor to the last line of the classifier window, and subjects
+are fuzzy, so the match missed most real duplicates and added protocol and
+state. A dedup that fires only sometimes gives false confidence. The occasional
+duplicate is accepted; a reliable dedup needs semantic matching, which is out
+of scope.
+
+Commit: `6f1fb70`.
 
 ## In-card follow-up replies (2026-06-13)
 
-A finished card grows a follow-up box; the answer is appended in place (`---` separator + `**You:**`/answer), so a card becomes a short thread rather than spawning new cards. **The sidecar stays stateless about cards** — it never retains card bodies. Instead the app's `card_reply` carries everything needed to answer in context: the card's current `body` (original answer + any prior turns), the new `replyText`, and a recent transcript slice (last ~15 lines, for resolving referents like "she"/"that"). `replyTask` in `trigger.ts` reconstructs the prompt, mirroring `researchTask` as the single source of truth.
+A finished card takes a follow-up, and the answer is appended in place after
+`---` and `**You:**`. The sidecar keeps no card state: `card_reply` carries the
+card's current body, the `replyText` and the last ~15 transcript lines (for
+referents such as "she" or "that"). `replyTask` in `trigger.ts` builds the
+prompt.
 
-The reply is answered by a **transient one-shot session** (`makeLane("reply", …)` then `reset()` in `finally`), created and disposed per follow-up. This is deliberate over reusing a research lane: the 1–8 lane pool is shared and would otherwise be drained by replies, and — because lanes are reused across unrelated triggers — a lane's session context would have drifted off-topic by the time the user replies. A fresh stateless session means clean context and no pool contention, at the cost of one SDK cold-spawn per reply (acceptable for a user-initiated action). `card_reply` has no `busy` gate and takes no pool slot, so it runs parallel to research. Streamed back as `card_update` on the same `cardId`; the sidecar reproduces the exact `base + **You:**` prefix the app shows optimistically, so the streamed body stays consistent.
+A transient one-shot session answers each follow-up, not a research lane. The
+pool is shared, so replies would drain it, and a reused lane's context drifts
+off topic. The cost is one cold spawn for each reply, which is acceptable for
+an action that the user starts. The reply takes no pool slot and no `busy`
+gate. The sidecar repeats the exact `base + **You:**` prefix that the app shows
+before the answer arrives.
 
-A card carries an app-only `replying` flag (never on the wire): while a follow-up is in flight it hides both the reply box (so one card can't take two at once) and the cancel button, cleared when a terminal `card_update` arrives. The optimistic in-card edit is applied only if the `card_reply` send succeeds — if the sidecar is down the message is dropped and the card is left untouched, rather than spinning forever with no answer coming and no cancel.
+The app-only `replying` flag hides the reply box and the cancel button while a
+follow-up runs. The app changes the card only when the `card_reply` send
+succeeds. Otherwise a dead sidecar leaves a card that spins with no answer and
+no cancel.
+
+Commit: `3b11429`.
 
 ### A completed card keeps its answer (2026-10-06, code review)
 
-The optimistic follow-up replaced the card's body and set it streaming, and a
-re-summarise reset the summary card to `…` pending. Only finished (`done`/
-`failed`) cards reach the note, so anything that wrote the store mid-run — a
-quit, a window close, Stop and Close (which marks it `cancelled`) — dropped the
-card's previous answer from the note, and a failed re-summarise replaced the
-summary with its error in the window too. `Card.settledBody` now holds the last
-completed answer (set whenever the card reaches `done`):
+Only finished cards reach the note. A quit, a close or Stop and Close during a
+follow-up or a re-summarise therefore dropped the previous answer, and a failed
+re-summarise replaced the summary with its error. `Card.settledBody` now holds
+the last completed answer:
 
-- **The note** writes a running or cancelled card from `settledBody`
-  (`Card.persisted`); the `# Summary` section falls back to it the same way.
-- **Cancelling** (from the sidecar or Stop and Close, both through
-  `Card.apply`/`cancel`) restores it and sets the card back to `done`, so the
-  follow-up box returns.
-- **A failed re-summarise** keeps the old summary in the card with a "Couldn't
-  update the summary" line, state `failed` (Summarise can run again); the note
-  keeps the summary without the line. A failed reply is left as it was — its
-  body already carries the thread. A sidecar crash fails in-flight cards through
-  `apply` too (issue #49), with no body: a re-summarise it cuts off keeps the
-  summary (with the line); a follow-up it cuts off reverts to its last answer,
-  `done`, so it can be asked again.
+- The note writes a running or cancelled card from `settledBody`
+  (`Card.persisted`). The `# Summary` section does the same.
+- A cancel, from the sidecar or from Stop and Close (`Card.apply`, `cancel`),
+  restores it and sets the card back to `done`.
+- A failed re-summarise keeps the old summary with a "Couldn't update the
+  summary" line, state `failed`. The note keeps the summary without the line.
+  A failed reply stays as it is, because its body holds the thread.
+- A sidecar crash (issue #49) fails in-flight cards with no body. A re-summarise
+  keeps its summary with the line. A follow-up goes back to its last answer,
+  `done`.
+
+Commit: `88722c4`.
 
 ## Packaging as a distributable .app (2026-06-13)
 
-The dev build is a bare SwiftPM executable that locates the sidecar by `#filePath`-derived `repoRoot`. That doesn't survive leaving the checkout. `App/package.sh` now assembles a self-contained `Advisor.app`; `AppResources` resolves resources from `Bundle.main` when packaged and falls back to `repoRoot` in a dev checkout, so one binary runs either way.
+`App/package.sh` assembles a self-contained `Advisor.app`. `AppResources`
+resolves resources from `Bundle.main` in the bundle, and from `repoRoot` (from
+`#filePath`) in a dev checkout. The bundle carries the arm64 Node runtime
+(about 127 MB) in `Contents/Resources`, so the target Mac needs no Node; the
+SDK's child processes reuse it through `process.execPath`. `package.sh` signs
+with a Developer ID, else a self-signed `Advisor Dev` identity, else ad hoc.
+The target is a few machines for one user, not the App Store. The bundle has no
+model files or native libraries. The sidecar needs the user's CLI login, or an
+API key (see *Optional API-key auth*).
 
-Decisions (single-user, few-machine distribution — not the App Store): **bundle the Node runtime** (the ~127 MB arm64 `node` binary, copied into `Contents/Resources`) so the target needs no Node install; the Agent SDK's own child processes reuse it via `process.execPath`. `package.sh` is the local build path: it uses a Developer ID or self-signed `Advisor Dev` identity when present and falls back to ad-hoc signing. First launch of that local build may still need right-click ▸ Open. STT is Apple SpeechAnalyzer, so there are no model files or native dylibs to ship — the bundle is just the executable, Node, and the built sidecar.
-
-(Originally the bundle also flattened the whisper + ggml/Metal dylibs into `Contents/Frameworks` with rpath surgery; removed with whisper — see the dated section below.) The bundled Node boots the bundled sidecar with no system Node on `PATH`. The sidecar still needs the user's Claude Code login on the target.
+Commit: `e9d1195`.
 
 ## DMG distribution (2026-06-24)
 
-The shared artefact is `App/dist/Advisor-<version>.dmg` (version from the repo-root `VERSION` file, stamped into the bundle by `package.sh`), not a raw local `.app`. `App/dmg.sh` first runs `sign.sh` so the app is Developer-ID-signed with the hardened runtime; the app gets no notary round of its own (see "Notarisation: nested entitlements + one notary round" below). It then builds the compressed DMG with an Applications link, signs the DMG, submits the DMG to Apple's notary service, staples the DMG ticket, validates the staple and runs `spctl -t open --context context:primary-signature` against the image. All of that happens under an `Advisor-<version>.partial.dmg` name that is renamed only after the last check passes, so a signed but unnotarised image never sits in `dist/` under the release name. The exit trap deletes the partial on failure; only a run killed outright (SIGKILL, power loss) can leave one behind, still clearly named. This avoids the Gatekeeper failure shown to recipients of the old local-only DMG: "Apple could not verify \"Advisor\" is free of malware that may harm your Mac or compromise your privacy."
+The shared artefact is `App/dist/Advisor-<version>.dmg`, not a raw `.app`.
+Recipients of the old local-only DMG got this Gatekeeper error: "Apple could
+not verify "Advisor" is free of malware that may harm your Mac or compromise
+your privacy." `dmg.sh` runs `sign.sh` (Developer ID, hardened runtime). Then it
+builds the DMG, signs it, notarises it, staples and validates the ticket, and
+runs `spctl -t open --context context:primary-signature`. All of this happens
+under `Advisor-<version>.partial.dmg`, which gets the release name only after
+the last check. A signed but unnotarised image therefore never carries the
+release name. The exit trap deletes the partial file; only SIGKILL or a power
+loss can leave one. The app has no notary round of its own: see *Notarisation:
+nested entitlements + one notary round*.
+
+Commit: `e02e23f`.
 
 ## Codex as an alternative provider (2026-06-13)
 
-Every lane — trigger classifier, research lanes, manual query lane — runs on **Claude** (Agent SDK) or **Codex** (`@openai/codex-sdk`), chosen in Preferences with a provider + model picker. (Originally per-component with a per-provider remembered model; collapsed to one shared `{provider, model}` later the same day — see the shared-backend note below.) The sidecar abstracts both behind an `Agent` interface (`run`/`reset`/`interrupt`); `AgentSession` is the Claude impl, `CodexAgentSession` (`codex.ts`) the Codex one. Both are long-lived, FIFO, context-retaining sessions. **Caveat (measured 2026-06-13): Codex is unfit for the research/query lanes** — ~5–7× slower than Claude and non-streaming (card stays empty until done). Keep research/query on Claude; see the latency-investigation section below.
+Every lane runs on Claude (Agent SDK) or Codex (`@openai/codex-sdk`), from one
+provider and model in Preferences. Both sit behind the `Agent` interface (`run`,
+`reset`, `interrupt`): `AgentSession` for Claude, `CodexAgentSession`
+(`codex.ts`) for Codex. Both are long-lived, FIFO sessions that keep context.
+Codex is unfit for the research and query lanes: see *Latency investigation —
+progressive answers, warming, Codex unfit for research*.
 
-**Provider registry (plug-in shape).** `providers.ts` holds a `PROVIDERS` registry mapping id → `{ label, create(opts) }`, and `createAgent(provider, opts)` resolves through it (unknown id → Claude, forward-compatible with newer configs). Adding a provider is one registry entry + one `Agent` class on the sidecar, and one `AgentProvider.all` entry (id, label, model list) in the app's `Preferences.swift` — the provider/model pickers are data-driven from that array, no per-provider branches. The two lists are mirrored across the language boundary by hand (Swift can't import the TS registry). The per-provider sandbox/tooling impl is irreducible — each SDK differs.
+- **Provider registry.** `providers.ts` holds `PROVIDERS`, and `createAgent`
+  resolves through it (an unknown id gives Claude). A new provider needs one
+  registry entry, one `Agent` class and one `AgentProvider.all` entry in
+  `Preferences.swift`. The two lists are mirrored by hand, because Swift cannot
+  import the TypeScript registry.
+- **Authentication.** Codex uses the user's CLI login (`~/.codex/auth.json`).
+  Its binary ships through `@openai/codex-sdk`, `@openai/codex` and
+  `@openai/codex-darwin-arm64`. Codex has no system-prompt parameter, so
+  Advisor puts its system prompt in the first turn of each thread.
+- **Sandbox.** At first `sandboxMode: "read-only"` and `approvalPolicy:
+  "never"`, which is coarser than Claude's policy. (Superseded 2026-08-10: see
+  *Codex runs under a Seatbelt profile*; and 2026-10-09: see *Codex connectors
+  follow the actions toggle*.)
+- **One shared backend.** Three choices for each lane became one `{provider,
+  model}`. Nobody used the split, and a separate classifier knob gave no
+  benefit. `model` `""` is the provider default, and a provider change resets
+  the model. Accepted: the classifier follows the shared model (default
+  Sonnet), not Haiku. There is no config migration: unknown keys are ignored
+  and missing keys take defaults (`mergeConfig()`, Swift `init(from:)`).
 
-Auth follows the same principle as Claude — **no API key**: the Codex SDK reuses the user's Codex CLI login (`~/.codex/auth.json`). The platform binary ships transitively via `@openai/codex-sdk` → `@openai/codex` → `@openai/codex-darwin-arm64` in `node_modules`, so packaging needs no global `codex` install. Codex has no system-prompt parameter, so Advisor's system prompt is prepended to the first turn of each thread; later turns inherit it from thread context.
+Commit: `353d590`.
 
-**Sandbox — deliberately coarser than Claude's, documented not hidden.** Claude runs under a per-call `canUseTool` policy (path denylist for reads, action-pattern gate for MCP). The Codex SDK exposes no per-call hook, so `CodexAgentSession` maps to `sandboxMode: "read-only"` + `approvalPolicy: "never"` (no writes, edits, escalation, or network-mutating commands), with web search + network enabled only when the component has a `Web*` tool (research/query yes, classifier no). Residual gaps versus Claude: a read-only Codex *shell* command can still read sensitive dotfiles (`~/.ssh` etc.) — there is no path denylist — and Codex MCP servers come from `~/.codex/config.toml`, so they are not gated by `allowMcpActions`. Accept for a single-user local tool; revisit if Codex gains per-tool callbacks. (Superseded 2026-08-10: the Codex CLI now runs under a Seatbelt profile built from the same path denylist — see *Codex runs under a Seatbelt profile*. And 2026-10-09: connectors follow `allowMcpActions`, all or none — see *Codex connectors follow the actions toggle*.)
+### Codex session ordering (2026-09-21, issue #81)
 
-**One shared backend, not per-component (2026-06-13).** The three independent lane choices (classifier, research, query) collapsed into one top-level `{provider, model}` used by every lane. Rationale: the per-component split was never used in practice — research and query already shared a model, and a separately-tuned classifier added a knob without a payoff. A scalar `model` (`""` = provider default) replaces the per-provider `models` map; switching provider now forgets the prior model (the UI resets it on change) rather than remembering one per provider. Consequence accepted: the classifier no longer defaults to Haiku — it follows the shared model (default Sonnet), trading a little classify latency/cost for a single knob. **No config migration** — still early testing, so a stale `config.json` is simply dropped (its unrecognised keys ignored, missing keys defaulted) rather than normalised. Both sides keep a tolerant decoder (sidecar `mergeConfig()`, Swift `init(from:)`) only so missing keys default instead of throwing.
+Each Codex session queues warm-ups and requests first in, first out (FIFO). A
+request selects its SDK thread and first-turn instructions only when it reaches
+the head of the queue. The next turn waits for completion, not for
+`thread.started`, and a timeout starts when its turn begins. Reset and cancel
+settle active and queued work, and dispatch nothing from the queue. An internal
+timeout advances the queue. Cancel and timeout retire the active thread, so the
+next request gets fresh instructions. Late events from abandoned streams cannot
+change the context or a card. Separate sessions still run concurrently.
 
 ## Latency investigation — progressive answers, warming, Codex unfit for research (2026-06-13)
 
-First real-use complaint: 60 s+ from a spoken question to a useful card. Instrumented the whole pre-card path (per-stage + per-text-block latency logging in `agent.ts`/`main.ts`/`protocol.ts`, kept on permanently for ongoing tuning — each `[sidecar +Xs]` line is on one timeline). Findings, in order of impact:
+The first complaint was 60 s or more from a question to a useful card. The
+latency log of each stage stays on, on one `[sidecar +Xs]` timeline. Findings:
 
-- **Codex is unfit for the research/query lanes.** Measured the same question with research on Codex vs Claude/Opus: **Codex ~170 s, Claude ~25–34 s** — a 5–7× gap — and Codex emits nothing until the turn ends, so the card sits empty then pops. Claude streams text blocks as it writes. Keep research/query on Claude; Codex remains selectable (and fine for the classifier, whose output is a single JSON blob) but should not be the research/query backend. The earlier 170 s "agent is slow" symptom was almost entirely this misconfiguration, not the SDK.
-- **Claude won't volunteer progressive output — it must be told.** Baseline (no instruction): Claude runs every tool then dumps one block; first text == final, ~24 s into the run. So the system prompt now mandates a **two-pass answer in one turn**: write a brief `From your notes:` preliminary from the local search *first*, then consult web/connectors and revise. With it, useful content reaches the card ~9 s into the run (~15 s earlier) for ~5 s more total. The prompt also **forbids narration** ("I'll check…") — the first block must be real content, or the early-content win is wasted on filler.
-- **The local/web split was prototyped and rejected.** A throwaway spike fired a parallel local-only card (Read/Grep/Glob, no web) beside the web card. Local *started* faster (first text ~5 s) but *finished* slower (~38 s) — a heavy model doing many sequential `Read`s. The instructed single agent gives the same progressive feel with **one card and no second model**; the split's only real edge is parallelism, and gathering the local data (~15–20 s here) is the floor either way. Not worth the extra card/lane/model plumbing.
-- **Cold-spawn warmed off the critical path.** The Agent SDK boots a CLI subprocess on the first `run()` of each session (~5–10 s; classifier Haiku measured cold 5.7–9.4 s). It was paid serially on the first question by both the classifier and the lead research lane. `session_start` now fires fire-and-forget warm-ups (`warmClassifier()` + a trivial run on `researchLanes[0]`) so the first real question skips both boots.
+- **Codex is unfit for research and query.** The same question took about 170
+  s on Codex and 25–34 s on Claude. Codex sends nothing until the turn ends.
+  It is still selectable, and it is acceptable for the classifier, whose output
+  is one JSON object.
+- **Claude must be told to answer progressively.** With no instruction, it ran
+  every tool and wrote one block about 24 s into the run. The system prompt
+  requires two passes in one turn: a short `From your notes:` answer from the
+  local search first, then a revision from the web and connectors. Useful text
+  arrives about 9 s into the run, 15 s earlier, for about 5 s more in total.
+  The prompt forbids narration, so the first block is content.
+- **Rejected: a separate local-only card.** It started sooner (first text at
+  about 5 s) but finished later (about 38 s). One instructed agent gives the
+  same progressive effect with one card and one model.
+- **Warm-ups.** The SDK starts a CLI subprocess on the first `run()` of each
+  session (5–10 s; a cold Haiku classifier took 5.7–9.4 s). `session_start`
+  warms the classifier (`warmClassifier()`) and the lead research lane, so the
+  first question does not wait for either.
 
-Remaining floor is STT finalisation (~8–12 s, app-side, separate) plus the unavoidable local-gather time. The ≤5 s aspiration in the latency budget above remains aspirational for agentic answers.
+The remaining floor is STT finalisation (about 8–12 s, in the app) and the time
+to gather local data. The ≤5 s aspiration is not met for agentic answers.
+
+Commit: `1773607`.
 
 ## Whisper removed (2026-06-14)
 
-Whisper.cpp dropped entirely; Apple SpeechAnalyzer is now the only STT engine. In real use Apple won on every axis that mattered (streaming endpointing, no noise hallucination, near-vanishing echo), and the whisper path carried real cost: a vendored CMake/Metal build, the `CWhisper` C shim and header symlinks (`setup.sh`), ~6 native dylibs flattened into the bundle with rpath surgery, a 1.5 GB model to source, and the whole VAD `Segmenter` + decode-queue machinery. Removing it deleted `WhisperTranscriber`, `Segmenter`, `CWhisper`, `setup.sh`, the `--smoke` headless test (whisper-only), the `STTEngine` enum and its Preferences picker, and the `ADVISOR_WHISPER_MODEL` / model-path plumbing in `AppResources`.
+Apple SpeechAnalyzer is the only STT engine. It won on each point that
+mattered: streaming endpointing, no hallucination from noise and almost no
+echo. Whisper cost a vendored CMake/Metal build, a C shim, about 6 native
+libraries in the bundle, a 1.5 GB model and a VAD segmenter with a decode
+queue. The vocabulary dictionary went too: its only purpose was to bias
+whisper's `initial_prompt`, and the Apple engine has no equivalent hook.
 
-The vocabulary/dictionary feature went with it: its sole purpose was biasing whisper's `initial_prompt`, and Apple's path has no equivalent hook — so `VocabularyStore`, the Dictionary preferences pane, and the right-click "Add to dictionary" submenu are gone. Supersedes the "STT engine switch" and "STT tuning findings" sections above. The historical reasoning there is kept as the record of how the engine choice evolved.
+Commit: `f4ee9d9`.
 
 ## Optional API-key auth (2026-06-14)
 
-Subscription login (Claude Code / Codex CLI) stays the default, but a machine
-with no CLI login can now authenticate with a provider API key — an **opt-in
-fallback**, not a requirement (which the project constraints still forbid). A
-Preferences **Authentication** toggle picks `subscription` vs `apiKey` for the
-active provider; the key is held in the **macOS Keychain** (`Keychain.swift`),
-never in `config.json`. In API-key mode the app reads the active provider's key
-at sidecar spawn and injects it as an environment variable
-(`SidecarManager.apiKeyEnv`): `ANTHROPIC_API_KEY` for Claude, `OPENAI_API_KEY`
-for Codex.
+The CLI subscription login stays the default. A machine with no CLI login can
+use a provider API key, as an opt-in fallback; a key is never required. The key
+is kept in the macOS Keychain (`Keychain.swift`), never in `config.json`. At
+spawn the app injects it as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
+(`SidecarManager.apiKeyEnv`), so the sidecar never reads a secret from config.
 
-The injection is the whole mechanism — the sidecar never sees the secret in
-config. Claude needs **no sidecar change**: the Agent SDK's `query()` spawns the
-`claude` CLI which inherits `process.env`, so the env key flows through (when set
-it takes precedence over a stored OAuth login). Codex needs an explicit pass —
-`codexConstructorOptions(process.env)` returns `{ apiKey }` only when
-`OPENAI_API_KEY` is present, since a leftover ChatGPT login would otherwise win;
-`env` is left unset so the Codex CLI still inherits the rest of `process.env`.
-`authMode` is App-side only (like `sttLocale`) — deliberately absent from
-`sidecar/src/config.ts`, because the sidecar acts purely on the injected env.
-Supersedes the "no API key" lines in the packaging and Codex sections above.
+- **Claude** needs no sidecar change. The CLI inherits `process.env`, and an
+  environment key takes precedence over a stored OAuth login.
+- **Codex** needs an explicit key. `codexConstructorOptions(process.env)` gives
+  `{ apiKey }` only when `OPENAI_API_KEY` is set, because a leftover ChatGPT
+  login otherwise wins. `env` stays unset, so the CLI inherits the rest of the
+  environment.
+- `authMode` is app-side only.
 
-**Key validation at entry (2026-06-14).** An invalid key previously failed
-silently — it surfaced only as an "Invalid API key" research-lane error
-mid-session. `AuthValidator` now tests a key directly against the provider's
-models endpoint (Anthropic `x-api-key`, OpenAI bearer) when entered in
-Preferences, showing inline status and an alert on rejection. The key field is a
-visible rounded-border input.
+An invalid key at first surfaced only as a research error during a session.
+`AuthValidator` now checks a key against the provider's models endpoint when
+the user enters it.
+
+Commit: `44036d3`.
 
 ### Authentication refresh at session start (2026-09-21, issue #82)
 
-The sidecar outlives individual recordings, so reading authentication only at
-app launch left mode changes, replacement keys and provider changes unapplied.
-`sendSessionStart` now reads the selected provider's current Keychain key and
-compares the effective API-key overrides with those used at spawn. Unchanged
-authentication keeps the process; changed authentication replaces it before
-sending the new session, replaying lane and auto settings first. A required
-replacement cancels any in-flight saved-document request.
+The sidecar outlives each recording, so a read of the authentication at launch
+alone left changes unapplied. `sendSessionStart` reads the current Keychain key
+and compares the effective overrides with those of the spawn. When they match,
+the process stays. When they differ, the app replaces the process before it
+sends the new session, and cancels any in-flight saved-document request.
 
-Both provider API-key variables are removed from the inherited environment
-before applying the selected key. Subscription mode therefore leaves neither
-override. The developer launch still uses a login shell to find Node, but
-reapplies the selection after loading the shell profile, which may itself
-export keys. Temporary environment variables carry the selection through that
-step and are removed before Node starts. Keys remain in Keychain and process
-environment, never command arguments, config or NDJSON messages.
-
-Process state and incoming frames are confined to the main actor. Each spawn
-has a generation: termination, spawn-failure, output, write-error and delayed
-restart callbacks from retired generations cannot disturb the replacement.
-Tests exercise real harmless child processes and pipes with placeholder keys,
-including a developer login profile that exports conflicting keys.
+Both key variables are removed from the inherited environment before the
+selected key is applied, so subscription mode leaves neither. The dev launch
+finds Node through a login shell, which can export keys, so the app applies the
+selection again after the shell profile. Keys never go into arguments, config
+or NDJSON. Each spawn has a generation, and callbacks from a retired generation
+cannot affect its replacement.
 
 ## Listening view redesign (2026-06-14)
 
-The Listening view was rebuilt to a high-fidelity handoff spec, keeping
-behaviour but introducing the app's first design-token layer (`Theme.swift`:
-semantic light+dark colour tokens via dynamic `NSColor`s, plus spacing/radius/
-type-scale metrics). Decomposed into components: `ListeningToolbar` (record
-cluster — waveform + timer + pause/stop + mic mute — audio-source menu, Context
-chip, Auto-cards switch, Float, Export, Sessions; idle collapses to a single
-Listen pill), `AskBar` (sparkle input + ⌘↵), and `ListeningCardView` (type/verdict
-pill, Researching state, copy/collapse/expand + dismiss, themed Markdown body,
-trigger-quote + sources footer, follow-up input). (Superseded 2026-10-06:
-`FeedCardView` replaced `ListeningCardView` in both windows — see *One feed for
-both windows*. `AskBar` was replaced 2026-10-20 by toolbar Ask and Note popovers
-— see *Ask and Note from the toolbar*.) The transcript is a centred
-812 pt column with a day divider and flowing paragraphs that group consecutive
-utterances, breaking only on a >1 s gap or an injected card, with a blinking
-interim line.
+The Listening view got the app's first design-token layer, `Theme.swift`:
+semantic light and dark colours as dynamic `NSColor`s, plus spacing, radius and
+type metrics. Card-model fields from this change remain: `isExpanded`
+(fact-checks start collapsed) and `triggerQuote`. A dismissed in-flight card
+cancels its research. The note is written again only when a card change alters
+its output. The rest is superseded:
 
-Card-model changes: `isExpanded` (fact-checks collapse by default),
-`triggerQuote` (derived from the anchor utterance), `sources` and `verdict`
-(parsed when the sidecar emits them; absent for now — removed 2026-10-18, see
-*Card sources and verdict removed*); `toggleCard`/`dismissCard`
-on the store. Pause now freezes the session timer (`sessionStart` shifted
-forward by paused durations so elapsed excludes pauses); dismissing an in-flight
-card cancels its research; the session note re-writes only on output-bearing
-card changes. The session-prompt box moved from a fixed strip below the toolbar
-into the Context-chip popover; mic mute moved into the record cluster.
+- `ListeningCardView`: replaced 2026-10-06, see *One feed for both windows*.
+- `AskBar`: replaced 2026-10-20, see *Ask and Note from the toolbar*.
+- Pause: removed 2026-06-19, see *Resume after stopping; Pause removed*.
+- Summarise: removed here, back 2026-06-22, see *Summarise a conversation*.
+- Card `sources` and `verdict`: removed 2026-10-18, see *Card sources and
+  verdict removed*.
 
-The summarise control (a transient AskBar action) was removed shortly after —
-post-meeting summaries remain out of scope (REQUIREMENTS). (Reversed 2026-06-22:
-an on-demand Summarise control returned — see *Summarise a conversation*.)
+Commit: `63fc787`.
 
-### 2026-06-18 — Markdown export + one session format (inline cards)
+## Markdown export + one session format (2026-06-18)
 
-A toolbar **Export** button (share icon, left of Sessions) shares the current
-session note via `NSSavePanel`. Rather than give export its own renderer, the
-**session note format was unified** on the inline layout (`SessionMarkdown.inline`):
-utterances and finished cards merge chronologically (a card sorts after an
-utterance at equal time, the same ordering the live feed uses), each card a
-`>`-quoted "chat" block — `LABEL · Title`, body, then a grounding/trigger-quote +
-sources footer — so the saved note reads like the window. Export is then trivial:
-flush + copy the on-disk file (`SessionWriter.export`).
+A session note has one format, the inline layout (`SessionMarkdown.inline`).
+Utterances and finished cards merge in time order, a card after an utterance at
+an equal time, as in the live feed. Each card is a `>`-quoted block, so the
+note reads like the window. Export flushes the note and copies the file
+(`SessionWriter.export`). Rejected: the footnote format, with `[^card-N]`
+backlinks for Obsidian and GitHub and an "Other cards" section. One format is
+much less code than backlink navigation. Old notes keep their old format, with
+no migration.
 
-This **dropped the footnote format** (the prior `[^card-N]` line↔card backlinks
-for Obsidian/GitHub, plus the "Other cards" orphan section). Trade accepted: one
-format and far less code over backlink navigation; orphan/query cards now place
-chronologically by `created` time instead of in a trailing section. Nothing
-parses these files (write-only archival), so no migration — old notes keep their
-old format. `SessionMarkdown` is a pure function, covered by the project's first
-unit tests (`Tests/AdvisorTests`, swift-testing).
+Commit: `b20ac12`.
 
-### 2026-06-18 — Sessions browser (master/detail) + ask-and-append
+## Sessions browser (master/detail) + ask-and-append (2026-06-18)
 
-The **History** button (clock icon) opens the **Sessions** window (`SessionsView`,
-a single `Window(id: "sessions")` with `.hiddenTitleBar`) — a master/detail
-browser over saved notes, per `design_handoff_advisor/SESSIONS.md`. `SessionArchive`
-lists `~/Library/Application Support/Advisor/sessions/*.md`, parsing the
-`yyyy-MM-dd-HHmmss.md` name to a date (the filename formatter + on-disk location,
-previously private to `SessionWriter`, moved here so both share one source of
-truth). Left: search + an All / This week filter + a date-grouped list (Today /
-Yesterday / Earlier this week / This month / Earlier); each row shows title, gist,
-time, duration and card count, with the selected row a white card + blue accent
-bar. Right: the selected session — title, meta line, the questions asked of it,
-and the full transcript (cards inline, as in the live feed) — plus the ask bar.
-(Starting a recording stays in the Listening window's toolbar, not duplicated
-here. The ask bar became a toolbar Ask popover on 2026-10-20 — see *Ask and Note
-from the toolbar*.)
+A master/detail browser shows the saved notes (`SessionsView`; `SessionArchive`
+lists notes by their `yyyy-MM-dd-HHmmss.md` name). (Changed 2026-06-19: see
+*Sessions as the main window*.)
 
-**Scope: layout + real data only.** Everything rendered comes from the saved
-notes. The handoff's AI-derived fields (category badge, topic chips, summary,
-people, action items) and star / Resume are deliberately **not** built yet — they
-need new generation, protocol changes and per-session storage. Two deviations from
-the handoff, both deliberate: (1) the handoff wants Sessions and Listening as two
-destinations of *one* window (`NavigationSplitView`); fully merging them safely
-means hoisting the recorder/sidecar/writer lifecycle out of `TranscriptView` (it
-rebuilds on `.task`, so a naïve swap would respawn the sidecar each visit), a large
-refactor — Sessions is its own window for now (the handoff allows "your existing
-navigation"). (2) Titles come from the **session context** the user types before
-Listen, now persisted to the note's frontmatter (`SessionMarkdown.inline` writes
-`context:`, collapsed to one line; `SessionWriter` carries it, updatable
-mid-session), with a date fallback for untitled/old notes.
+- **Scope.** Layout and real data only. The design handoff's AI-derived fields
+  (category, topic chips, summary, people, action items) and star were not
+  built: they need new generation, protocol changes and storage for each
+  session.
+- **Titles.** `SessionDetail` uses the `name:` frontmatter, else `context:`,
+  else the date. A note that the live writer still owns is renamed through the
+  writer (`renameOwnedNote`): the next debounced rewrite overwrites a direct
+  frontmatter edit. Other notes use `SessionArchive.setName`.
+- **Rendered like the live window.** `TranscriptDoc` is the inverse of
+  `SessionMarkdown.inline`: lines join into paragraphs (a gap of more than 2 s
+  starts a new one), and blockquotes become cards. `SessionDetail.parse` splits
+  surfaced cards from questions (`Q ·`).
+- **Ask on its own path.** The query lane holds live-session state (cursor,
+  session prompt, `busy` gate). A question about a saved note through it would
+  pollute the live context and wait behind live queries. `ask_document` carries
+  the whole note to a transient one-shot session, and `document_answer` returns
+  by request id. A crash, a spawn failure or a stop fails every outstanding
+  request. Two document questions can run at once. A finished answer is
+  appended under `# Follow-ups` (`SessionMarkdown.followUpBlock`).
+- **Two writers.** `SessionWriter` rewrites its whole note every 2 s and keeps
+  its file after the session ends. The detail pane therefore edits no file that
+  the live writer owns (`writer.currentFileURL`). `TranscriptWindowContext`
+  carries the sidecar and the owned file across scenes.
 
-**Optionally naming a session.** A session can be given an explicit `name:`
-(frontmatter), which wins over `context` as the browser title — context steers
-research and is often verbose or empty, so a short label keeps the list scannable
-(`SessionDetail` precedence: name → context → date). Set two ways: **before/during
-a live session** from the toolbar's Context popover (a Name field beside the
-context box — seeded into the writer at `start`, edited live via `updateName`,
-gated on `sessionActive` like context so the stop-time blank can't wipe it), or
-**after the fact** from the Sessions detail (the `…` menu → Rename). Two write
-paths mirror the two-writer split: the **live/just-finished note** (still owned by
-`SessionWriter`) is renamed *through* the writer (browser rename calls
-`renameOwnedNote`, which sets the name and flushes; live edits ride the normal
-debounced write) — a direct frontmatter write would be clobbered when a late
-research card finishes; **any other saved note** is edited on disk via
-`SessionArchive.setName` (a pure `settingName` frontmatter editor that inserts/
-replaces/removes the key while preserving body and follow-ups). The browser
-reaches the live writer through `TranscriptWindowContext`, the same bridge it uses
-for the live sidecar.
+Residual: the list refreshes when it opens and on `.advisorSessionsChanged`.
 
-**Rendered like the live window, not as raw markdown.** The saved format is a
-timestamped bullet list with `>`-quoted cards, so rendering it via `MarkdownUI`
-read nothing like the live feed. `TranscriptDoc` reconstructs display blocks —
-the inverse of `SessionMarkdown.inline`: consecutive transcript lines join into
-flowing paragraphs (new paragraph when the inter-line gap exceeds 2 s, matching
-the live feed's collapsing; blank lines between entries do **not** split, since
-`inline` blank-separates every entry), blockquotes become cards. Paragraphs render
-through the same `SelectableTranscriptText` the live view uses (no AI actions);
-card blocks render in live card chrome. `SessionDetail.parse` layers on top,
-splitting the card blocks into "surfaced cards" vs "you asked" (a `Q ·` label) and
-deriving title/gist/timing. Pure parsers, unit-tested (`TranscriptDocTests`,
-`SessionDetailTests`).
-
-**Asking runs on its own isolated path, not the live query lane.** The query lane
-is bound to live-session state (the rolling transcript-delta cursor, the session
-prompt, the single `busy` gate), so routing a question about a *saved* document
-through it would pollute the live conversation's context and serialise against
-live queries. Instead `ask_document` carries the whole note as a self-contained
-`document` and is answered by a **transient one-shot session** — the same pattern
-as `card_reply` (`makeLane("document")` then `reset()` in `finally`): no pool
-slot, no `busy` gate, no live-session state, parallel-safe, works mid-session.
-Streamed back as `document_answer` keyed by request id; `SidecarManager` routes
-each frame to a per-id handler registered by `askDocument` (kept out of the live
-`store.cards`) and drops it on a terminal state. Sidecar crash, spawn failure and
-deliberate stop fail and clear every outstanding handler, so saved-session Ask
-and Summarise cannot remain pending across process loss. Concurrent document
-questions are capped (2) like replies, so a burst can't fork unbounded SDK subprocesses.
-
-On `done` the answer is appended to the note under a one-time `# Follow-ups`
-heading as a `>`-quoted block matching the inline-card style
-(`SessionMarkdown.followUpBlock`), then the view reloads from disk — so the saved
-transcript grows with the questions asked of it.
-
-**Two-writer hazard, guarded.** `SessionWriter` rewrites its note wholesale (a
-2 s debounced re-render from the store) and keeps owning its `fileURL` after
-`end()` (late research cards still land in the file). A follow-up append to that
-same file would be clobbered by the next debounced rewrite. The detail pane
-therefore refuses to ask about **any file the live writer still owns**
-(`writer.currentFileURL`, not merely "while listening") — the just-ended session
-becomes askable once the next session starts or the app restarts. Because the
-Sessions window is a sibling scene (not a child of the live view), it can't
-receive the sidecar/owned-file as params; `TranscriptWindowContext` (a
-`@MainActor` shared holder the live view populates) carries both across scenes.
-Residual limitation (accepted for a single-user local tool): the list refreshes
-on open and on `.advisorSessionsChanged` (posted when a session starts or ends).
+Commit: `d235d06`.
 
 ## Appearance preference (2026-06-18)
 
-Light/dark/system picker in Preferences (issue #3). `config.appearance`
-("system"|"light"|"dark") is App-side only — deliberately absent from the
-sidecar config (like `sttLocale`/`authMode`), since appearance is pure UI.
-`AppDelegate` sets `NSApp.appearance` (nil for "system", `.aqua`/`.darkAqua`
-otherwise) at launch and again on every `.advisorConfigChanged` post, so the
-change lands without a relaunch. The Theme's colours are already dynamic
-NSColors resolved against `NSApp.effectiveAppearance`, so forcing the app
-appearance drives the whole UI for free — no per-view `.preferredColorScheme`.
+A light, dark or system preference (issue #3). `config.appearance` is app-side
+only. `AppDelegate` sets `NSApp.appearance` at launch and on each
+`.advisorConfigChanged`, so a change needs no relaunch. The theme colours are
+dynamic `NSColor`s, so the app appearance drives the whole UI with no
+`.preferredColorScheme` on each view.
+
+Commit: `c82f50e`.
 
 ## Sessions as the main window (2026-06-19, issue #4)
 
-The app now opens on the **Sessions** browser, not the live feed. `SessionsView`
-is the first scene — a `Window(id: "sessions")` with `.defaultLaunchBehavior(.presented)`.
-A new recording is started with **Cmd-N** (see issue #11 below). The
-recording window (`TranscriptView`) is a separate `Window(id: "recording")`
-(`.defaultLaunchBehavior(.suppressed)`, `.restorationBehavior(.disabled)`); being a
-`Window` (not a `WindowGroup`) makes it single-instance for free — New just brings
-the existing one forward, satisfying "only one recording window at a time".
+The app opens on the **Sessions** browser. The recording window
+(`TranscriptView`) is a separate `Window(id: "recording")`, opened with ⌘N. A
+`Window`, not a `WindowGroup`, gives one recording window at a time: ⌘N brings
+the existing one forward.
 
-This forced the **service-lifecycle hoist** the 2026-06-18 Sessions-browser entry
-deferred. The sidecar and writer can no longer live in `TranscriptView.setup()`:
-if the recording window is the only thing that starts them, the Sessions browser
-couldn't answer questions about saved transcripts before a recording window ever
-opened. A new `AppServices` (`@MainActor ObservableObject`, the `@StateObject` in
-`AdvisorApp`) owns the **app-lifetime** trio — `store`, `sidecar`, `writer` —
-constructed in its `init` (so the `@StateObject`-can't-reference-another-`@StateObject`
-rule never bites) and started once from the Sessions scene's `.task`. It publishes
-`sidecar`/`writer` into the existing `TranscriptWindowContext` bridge, so
-`SessionsView` is unchanged. The **`Recorder`** (the audio device) stays
-window-owned — built on demand by the recording window — and `AppServices` holds it
-only `weak`, purely so the terminate cleanup (`onTerminate`, registered once in
-`start()`) can stop it before `_exit(0)`. (Superseded 2026-10-06: `onTerminate` is
-gone — ⌘Q runs `QuitSequence`, which calls `AppServices.shutdown`, the same close
-as the window's; see *⌘Q saves the recording's tail* below.)
+`AppServices` owns the app-lifetime store, sidecar and writer, and the Sessions
+scene starts them. Reason: the Sessions browser must answer questions about
+saved notes before a recording window opens. The `Recorder` belongs to the
+recording window, and `AppServices` holds it weakly.
 
-**Close = clean stop.** Closing the recording window mid-session ends *that*
-session — `onDisappear` runs the stop branch (stop audio, `session_end`,
-`writer.end()`) but never `sidecar.stop()`, so the shared sidecar survives. It then
-clears the app-lifetime store so a reopened window starts blank.
+**Close = clean stop.** A close of the recording window ends that session and
+clears the store. It never stops the shared sidecar, so the Sessions browser
+continues to work.
 
-**Close guard for in-flight agents (2026-06-19, issue #7).** Ending the session
-doesn't stop the research/query agents it already dispatched — they finish on
-their shared lanes after the window is gone. `WindowCloseGuard`
-(`SessionClose.swift`) intercepts the close to handle this. It's a zero-size
-`NSViewRepresentable` that makes a coordinator the window's `NSWindowDelegate`,
-proxying SwiftUI's own delegate (forwarding every message except
-`windowShouldClose`). On close, if any card is still researching
-(`store.cards.contains { $0.isResearching }` — covers research, query and reply
-agents) it prompts: **Wait** stops recording and polls until the in-flight cards
-reach a terminal state, flushes the note, drops the overlay, then closes via
-SwiftUI's `dismissWindow(id:)`. While waiting, a blocking `finishingOverlay`
-covers the window and the live UI is `.disabled` — and the Space key monitor is
-dropped — so the about-to-close window can't be driven (Space would otherwise start
-a fresh session, recording having stopped); the overlay's **Stop now** button
-cancels the remaining agents to close at once. The guard ignores any close attempt
-while `finishing` is set (the `isFinishing` closure), so the wait can't re-prompt.
+**Close guard for in-flight agents (2026-06-19, issue #7).** Agents that a
+session dispatched continue after its window closes. `WindowCloseGuard`
+(`SessionClose.swift`) proxies the window's `NSWindowDelegate`. If a card is
+still researching, it asks the user to **Wait**, **Stop and Close** or
+**Cancel**. The single-instance `Window` has two traps:
 
-Two traps the single-instance `Window` sprang here, both fixed: it keeps the
-recording view's **`@State` across close/reopen**, so the `finishing` flag is reset
-in `onDisappear` (and before the dismiss) or a "Wait"-close would leave a stale veil
-over the *next* session; and **`NSWindow.close()` did not fire SwiftUI's
-`onDisappear`**, so the wait's close goes through `dismissWindow` instead —
-otherwise the session's clean-stop (`releaseNote`, store-clear) was skipped and the
-previous session leaked into the new one. **Stop and Close** cancels each
-in-flight
-card (`sendCancel`, marked `cancelled` locally so the final write records it) and
-closes; **Cancel** keeps the window open. Nothing running → closes straight away,
-as before. The sidecar is never stopped — only this session's tasks — so the
-Sessions browser keeps working. The pure choice→action map (`SessionClose.action`)
-is unit-tested; the AppKit plumbing is exercised by hand. Cmd-Q still bypasses all
-of this via `applicationShouldTerminate` (which `sidecar.stop()`s, killing the node
-child and every agent with it) — but since 2026-10-06 it ends the recording first
-(below).
+- It keeps the view's `@State` across a close and a reopen. Reset the
+  `finishing` flag in `onDisappear`, or a stale overlay covers the next session.
+- `NSWindow.close()` does not fire SwiftUI's `onDisappear`. The wait closes
+  through `dismissWindow(id:)`, or the clean stop does not run.
 
-**⌘Q saves the recording's tail (2026-10-06, code review).** Quit used to call
-`recorder.stop()` without awaiting it, flush the note and `_exit(0)` at once, so
-microphone text still in the 1.5 s echo delay and the finals the speech engines
-emit while stopping never reached the note — the close path already waited for
-both (issue #79). `applicationShouldTerminate` now answers `.terminateLater` and
-hands `AppServices` (as `Quitting`) to `QuitSequence`:
+**⌘Q saves the recording's tail (2026-10-06, code review).** Quit runs the same
+close path as the window, through `QuitSequence`.
+`applicationShouldTerminate` answers `.terminateLater`. `shutdown` runs
+`releaseRecording` and stops after **5 s**, so a wedged SpeechAnalyzer cannot
+block quit. `finishQuit` always follows: a synchronous save, `sidecar.stop()`,
+then `_exit(0)`. Reason: before this change, quit lost the microphone text in
+the 1.5 s echo delay and the finals that the engines emit as they stop.
+In-flight agents are not waited for. This replaced the `onTerminate` cleanup.
 
-- **`shutdown`** runs the whole close path, `releaseRecording` — the tail
-  reaches the note, which is flushed and released, the window's controls are
-  locked meanwhile (`isClosingRecording`, so Space can't resume recording), and a
-  close already under way is joined rather than raced.
-- It is cut off after **5 s** (a healthy teardown is the echo delay plus engine
-  finalisation; the margin is for a slow one), so a wedged SpeechAnalyzer can't
-  stop the app quitting.
-- **`finishQuit`** always runs next, deadline or not: a synchronous save —
-  `writer.end()` while still recording, otherwise `flush()` so an ended session
-  keeps its end time (both no-ops once the note is released; otherwise they save
-  what the cut-off missed, and a card that finished after a "Wait" close) — and
-  `sidecar.stop()`. Then `_exit(0)`. A cut-off is logged; a second ⌘Q meanwhile
-  does nothing. With no recording window, note or close, `shutdown` does nothing.
+**Trailing-STT bleed across sessions (2026-06-19).** `AppleSpeechEngine.stop()`
+flushes buffered audio as trailing finals, and the echo delay holds `me` finals
+for up to 1.5 s. These finals reached the shared store after the window closed.
+The fix is a session token, `TranscriptStore.sessionGeneration`. Each result
+carries the token from capture, and the store write on the main actor drops a
+result with an old token. The generation increases at each store reset that
+starts a blank view (start, and the window's `onDisappear`), but not at a plain
+Stop. Rejected: a "stopped" flag. A reused recorder re-armed it before a
+delayed final fired, and a queued callback had no late check.
 
-In-flight agents are still not waited for. Tested with the real `Recorder` over
-fake speech engines (`req_quit_saves_tail_finals`), the deadline and ordering in
-`QuitSequenceTests`, and by quitting the dev build with a quit Apple Event (exits
-in well under a second with no recording open, node child gone).
+**Auto-classifier outliving the session (2026-06-19).** A `sessionActive` flag
+in the sidecar stops new automatic work after `session_end`, and
+`session_end` drops queued research. The check repeats after the classify
+await. Research lanes already running continue. User queries (Ask,
+right-click) are not gated, so they work after Stop.
 
-**Trailing-STT bleed across sessions (2026-06-19).** Closing and quickly reopening
-showed fragments of the previous conversation in the new session. Cause:
-`AppleSpeechEngine.stop()` calls `finalizeAndFinishThroughEndOfInput`, which flushes
-buffered audio as *trailing finals*, and `acceptAsync` defers `me` results by up to
-1.5 s for echo dedup — so finals land in the **shared, app-lifetime** `store` after
-the window closed, and the old `Recorder` lingers because its in-flight closures
-retain it. Fix: a **session token**. `TranscriptStore.sessionGeneration` bumps on
-each `Recorder.start()`; the token is passed into `AppleSpeechEngine.start` and
-tagged onto every result it emits (`onFinal`/`onVolatile` carry it), threaded
-through `acceptAsync`/`accept`, and **checked at the actual store write** on the
-main actor — the write is dropped when the token no longer matches. This beats a
-"stopped" flag (a first attempt): a reused recorder's reset would re-arm before a
-1.5 s-delayed `me` final fired, and an already-queued callback had no late check.
-The token is fixed at capture, so a previous session's straggler is dropped whether
-the recorder is reused (fast Stop→Listen) or a fresh recorder writes to the same
-shared store (close→reopen). The generation bumps at **every store reset that
-starts a blank view** — synchronously in `toggle`'s start branch (before the clear
-and any `await`, closing the race) and in the recording window's `onDisappear`
-(which also runs atomically on the main actor) — but **not** on a plain Stop, so a
-just-stopped session still shown in its window keeps receiving its own trailing
-finals. The close bump is the one that fixed the reported bleed: without it, a
-closed session's still-processing finals matched the unchanged generation and
-appended to the blank store the next window showed.
+**Cancel now reaches reply agents (2026-06-19).** The `cancel` search includes
+the transient reply lanes (`replyLanes`), so Stop and Close interrupts a
+follow-up agent too.
 
-**Auto-classifier outliving the session (2026-06-19).** `session_end` cleared only
-the debounce timer, so a classify already scheduled or mid-flight could still
-enqueue research and stream cards into a closed/replaced session (the close prompt's
-`agentsInFlight` can't see a classify that hasn't emitted a card yet). Fix: a
-`sessionActive` flag in the sidecar — set on `session_start`, cleared on
-`session_end` (which also drops the queued-but-undispatched `researchQueue`).
-`scheduleClassify`/`runClassify` bail when it's false, including a re-check after the
-classify await. In-flight research lanes keep running — the close prompt waits for or
-cancels those; only *new* auto-work is suppressed. User queries (Ask box, right-click)
-are deliberately ungated, so they still work after Stop.
+**The store-clear hazard, guarded.** `SessionWriter` rewrites its note from the
+store, so a clear of the shared store could overwrite the saved note.
+`SessionWriter.releaseNote()` runs on window close, after the last flush, and
+makes every later rewrite a no-op. After that, `SessionArchive` manages the note
+on disk.
 
-**Cancel now reaches reply agents (2026-06-19).** Card-reply follow-ups run on a
-transient lane outside `researchLanes`/`queryLane`, and the `cancel` handler only
-searched those two — so "Stop and Close" marked a reply card cancelled locally while
-its agent kept running in the shared sidecar. Fix: track in-flight reply lanes
-(`replyLanes`, keyed by `currentCardId`), include them in the cancel search so the
-session is interrupted, and guard `runCardReply`'s streamed/terminal sends with
-`cancelledCards` like `runCard` does.
+### Recording ownership and finalisation (2026-09-21, issues #78/#79)
 
-**The store-clear hazard, guarded.** Clearing the *shared* store while the writer
-still owned its just-saved note was a data-loss trap: `SessionWriter` rewrites the
-note wholesale from the store, and `end()` keeps `fileURL` (late cards land in the
-file), so the app-terminate flush — or the store-clear's own debounced rewrite —
-would serialise the emptied store over the saved note. The fix is
-`SessionWriter.releaseNote()`: on window close (after the final `end()` flush) it
-nils `fileURL`/`started`, so `write()`'s existing `guard let fileURL, let started`
-no-ops every later rewrite. `liveFileURL` is dropped at the same point, so the
-finished note is handed off to disk-based management (the browser renames/queries
-it via `SessionArchive`, not the now-detached writer) — which also releases the
-two-writer ask-lock immediately on close instead of waiting for the next session.
+The writer owns its note until the Recording window closes, also while stopped
+or while agent cards finish. Folder rename and delete reject a folder that
+holds that note, and the command checks again when the user confirms.
+
+A window close starts a close task that the app owns. The task stops capture
+and awaits both speech-result consumers. Then it drains pending transcript
+lines through the mic echo delay and the main-actor store writes. Only then
+does it save, release the note and advance the session generation. A reopened
+window awaits this task, and late callbacks from the old generation are
+ignored. The Wait path drains speech first, keeps the writer while cards
+finish, and starts no new agent work.
 
 ## Delete sessions (2026-06-19, issue #8)
 
-**Delete** lives in the detail pane's `…` menu (below Rename/Export/Reveal, after a
-divider, `role: .destructive`), behind a confirmation alert — the note is removed
-from disk, irreversible. It sits with the other note actions rather than as a
-per-row icon (tried a row trash icon first; it crowded the cell). The delete itself
-is one line — `SessionArchive.delete` (`removeItem`, returns false rather than
-throwing) — and the browser's notification-driven `reload()` already reconciles the
-selection when the open session goes away. The live (still-writing) session is
-exempt: its `SessionWriter` would just recreate any note deleted out from under it,
-so the menu item is `disabled(isLive)`.
+**Delete** is in the detail pane's `…` menu, behind a confirmation. A trash icon
+on each row was tried first and rejected: it crowded the row. The live session
+cannot be deleted, because its `SessionWriter` would write the note again.
 
 ## Resume after stopping; Pause removed (2026-06-19, issue #6)
 
-**Stop is now resumable, and Pause is gone.** Pause kept the audio engines alive
-and merely dropped incoming samples; Stop tore everything down and ended the
-session. The two overlapped, so Pause was removed and Stop took on its role: Stop
-tears down the audio engines (releasing the mic + ScreenCaptureKit stream) but
-leaves the *session* live — no `session_end`, no `writer.end()`, `sessionStart`
-retained. The record cluster then shows a frozen-timer **Resume** control that
-restarts audio into the **same** session: no STT generation bump (so existing
-utterances stand), no new `session_start` (so the sidecar classifier keeps full
-context), no new note. The timer excludes stopped spans the way it used to exclude
-paused ones (`sessionStart` shifted forward by the stop's duration on resume —
-`RecordControl.resumedStart`).
+Pause and Stop overlapped, so Pause was removed. Stop releases the audio
+engines (the mic and the ScreenCaptureKit stream) but keeps the session live:
+no `session_end`, no `writer.end()`, no new note. **Resume** restarts audio into
+the same session with no generation change, so the classifier keeps its
+context. A session ends only when the recording window closes or the app quits.
+A new session therefore needs a new recording window. The toolbar states and
+the timer arithmetic are in the pure `RecordControl` helper.
 
-A session is therefore finalised only when the **recording window closes** (or the
-app terminates): the close path ends the session whenever one is in progress
-(`sessionStart != nil`), not only when audio is live. Consequence: in-window
-Stop→Listen no longer starts a fresh session — a new session means closing the
-window and opening a new one from the Sessions browser, matching the
-single-session-per-window model. The toolbar's three states (idle Listen pill /
-recording cluster / resumable cluster) and the resume timer maths live in the pure
-`RecordControl` helper (unit-tested, mirroring `SessionClose`); the Space monitor
-maps the same three states to start/stop/resume. `store.paused`, the recorder's
-`paused` atomic, and `Recorder.pause()/resume()` were deleted.
+### Short replies and recording retries (2026-09-21, issues #80/#83)
+
+A line with no distinctive word is not evidence of echo. The app suppresses a
+short mic reply only when its token sequence exactly matches recent system
+speech. Longer lines keep the overlap rule.
+
+`RecordingControl` holds the start, stop and resume state and the timer for the
+toolbar and the Space shortcut. A failed start or a failed automatic recovery
+leaves a stopped session with Resume, and keeps the note, the context and the
+generation. A start in progress blocks duplicate retries. A close cancels the
+bookkeeping of that start.
 
 ## Pre-canned contexts (2026-06-19, issue #10)
 
-A library of named, reusable session contexts. A `SavedContext {id, name, text}`
-list lives in `config.json` as `contexts` — App-side only data, decoded
-tolerantly and **ignored by the sidecar** (its `mergeConfig` reads keys
-field-by-field; the sidecar only ever receives the resolved context *text* per
-session, like `appearance`/`sttLocale`/`authMode`). Pure list operations
-(`ContextLibrary.saving` by name, `.upserting` by id, `.removing`) are
-unit-tested; the SwiftUI views are thin wrappers over them.
-
-Managed in three places, kept in sync via the existing `advisorConfigChanged`
-post: **Preferences** has a "Saved contexts" section (list + add/edit/delete
-through a sheet editor, committing by id so a rename can't spawn a duplicate);
-the **recording window's Context popover** gains **Load** (pick a saved context
-into the box) and **Save…** (store the current text under a name, upserting by
-name). The recording window persists via `AdvisorConfig.persistContexts`, a
-load-modify-save that touches only the `contexts` key so it can't clobber
-preference settings it doesn't hold in view state. Because contexts are now
-editable from two windows, `PreferencesView` also pulls on-disk context changes
-back in on `advisorConfigChanged` (guarded on inequality, so it never reacts to
-its own posts — no save loop), and the recording window reloads its library on
-the same post. Trade accepted (single-user tool): the Preferences "Add" path
-commits by id, so typing an already-used name there yields two same-named
-entries that the by-name recording-window Save can't disambiguate.
+Saved contexts (`SavedContext {id, name, text}`) are in `config.json` as
+`contexts`. They are App-side only: the sidecar receives only the resolved
+context text. `ContextLibrary` holds the pure list operations. Preferences and
+the recording window both edit the list. `AdvisorConfig.persistContexts` writes
+only the `contexts` key, so it cannot overwrite preferences that it does not
+hold. Each window reloads on `advisorConfigChanged` only when the list differs,
+so no save loop occurs. Accepted limit: Preferences adds by id, so a duplicate
+name there gives two entries that the by-name **Save…** cannot tell apart.
 
 ## Cmd-N, no Sessions title panel (2026-06-19, issue #11)
 
-Dropped `SessionsView`'s custom 52pt title panel (the "Advisor · Sessions"
-heading + **New** button). Starting a recording is now **Cmd-N**, wired as a
-`RecordingCommands: Commands` that `CommandGroup(replacing: .newItem)` (the
-shortcut belongs in the menu bar, and there's no document to "new"). It's a
-`Commands` type rather than inline `.commands {}` so it can read `openWindow`
-from the environment, which the `App` struct can't. The Sessions window keeps
-`.hiddenTitleBar`; with the panel gone its traffic lights now overlay the
-sidebar's top-left, so the search/filter block gains `.padding(.top, 38)` to
-clear them (superseded 2026-06-21 — the toolbar now owns that row; see *Floating
-sidebar*). The top strip stays draggable (hidden title bar) and `openWindow`'s
-single-instance `Window` semantics are unchanged — Cmd-N just brings an existing
-recording window forward.
+The Sessions window's custom title panel and its **New** button were removed.
+⌘N starts a recording through `RecordingCommands`, which replaces `.newItem`,
+because the shortcut belongs in the menu bar. It is a `Commands` type because it
+reads `openWindow` from the environment, and the `App` struct cannot. (The
+sidebar padding for the window controls was superseded 2026-06-21: see
+*Floating sidebar*.)
 
 ## Session tags (2026-06-20, issue #15)
 
-Sessions can carry tags. A **tag library** (name + colour) lives in
-`config.json` as `tags: [SavedTag]` — App-side only, like `contexts`, so the
-sidecar never sees it (`TagLibrary` holds the pure upsert/remove/lookup ops).
-Tags are managed in **Preferences ▸ Tags** (add / recolour / delete) and
-*applied* to a session from a **Tags chip** — present on both the live recording
-toolbar and the Sessions browser detail header (the "both surfaces" choice). The
-chip's popover is a pick-list of the library's tags (no free-text entry, no
-colour there): you assign existing tags only, because creation + colour belong in
-one place (Preferences).
+The tag library (`tags: [SavedTag]`, name and colour) is in `config.json`,
+App-side only, with pure operations in `TagLibrary`. Tags are created and
+coloured only in Preferences. The Tags chip on the recording toolbar and on the
+session detail only picks from the library. Reason: creation and colour belong
+in one place.
 
-A session stores its tags **by name** in note frontmatter (`tags: a, b, c`, one
-collapsed line — the same scalar shape as `context`, formatted by the single
-`SessionArchive.tagsLine`, which trims, squashes the comma/newline separators out
-of names, and de-dups case-insensitively). Colour is resolved at render time by
-looking the name up in the library, which has three consequences we leaned into:
+A note stores its tags by name in frontmatter (`tags: a, b, c`, formatted by
+`SessionArchive.tagsLine`), and the colour comes from the library at render
+time. Consequences:
 
-- **Delete is cheap and matches the issue's "just removes them from each card":**
-  rows render only library-known tags, so deleting a tag in Preferences makes its
-  pills vanish everywhere without rewriting a single note.
-- **Rename propagates** so the name reference doesn't orphan. Editing a tag's
-  name (`SessionArchive.renameTag`) rewrites that tag across every *saved* note's
-  frontmatter; the *live* note is skipped on disk and renamed through its writer,
-  driven by the `advisorTagRenamed` notification the recording window observes
-  (which remaps its staged `sessionTags`, cascading to `setOwnedNoteTags`). The
-  editor blocks a rename that would collide with another tag's name. Mass-rewrite
-  is synchronous — fine for a personal archive; revisit if it ever gets large.
-- Pills are drawn by a shared `TagPill` (colour text on a low-opacity capsule, so
-  one stored hex reads in both light and dark) laid out by a small `FlowLayout`
-  (SwiftUI has no built-in flow); colours come from a preset swatch palette in
-  `Theme`, stored as `0xRRGGBB` strings.
+- A delete in Preferences rewrites no note: rows show only tags that the
+  library knows.
+- A rename rewrites every saved note (`SessionArchive.renameTag`), and the live
+  note through its writer (`advisorTagRenamed`). The rewrite is synchronous;
+  revisit if the archive becomes large. A rename to an existing name is
+  blocked.
+- `TagPill` draws colour text on a low-opacity capsule, so one stored hex value
+  reads in light and dark.
 
-Persistence mirrors `name`/`rename`: a *saved* note is tagged by a direct
-frontmatter write (`SessionArchive.setTags`); the *live/just-finished* note is
-tagged through the writer (`SessionWriter.setOwnedNoteTags`, ungated like
-`renameOwnedNote`) so a late card-finish rewrite can't clobber it. Because that
-path is ungated, `endSession` nulls `sessionStart` *before* clearing the staged
-`sessionTags`, or the clear's `onChange` would flush empty tags over the saved
-note. Search includes tag names in the browser's haystack, and a `#tag` token
-(`SessionSearch`) filters by tag specifically rather than matching any transcript
-word.
+The live note is tagged through `SessionWriter.setOwnedNoteTags`, so a late card
+rewrite cannot overwrite the tags. `endSession` clears `sessionStart` before it
+clears the staged tags, or empty tags overwrite the saved note. In search, a
+`#tag` term filters by tag (`SessionSearch`).
 
 ## Choosable transcript folder (2026-06-20, issue #16)
 
-Where session notes live is now a preference. `config.json` gains `sessionDir`
-(App-side only, like `sttLocale`/`contexts`/`tags` — only the app reads or writes
-notes, so the sidecar never sees it): `""` means the built-in default
-(`Application Support/Advisor/sessions`), otherwise an absolute path.
-`SessionArchive.directory` reads it **fresh** each access
-(`directory(for: AdvisorConfig.load().sessionDir)` over a pure resolver split out
-for testing), so a folder change applies without an app relaunch. The
-launch-lifetime `SessionWriter` is the subtle case: it would otherwise pin the
-launch-time folder, so it resolves the directory **at each `start()`** (injected
-resolver, defaulting to `SessionArchive.directory`) rather than caching it at
-`init` — every new session lands in the *current* folder. The browser's `list()`
-reads it per notification-driven `reload()`. Resolution is the only hot use and
-the config file is tiny, so re-reading beats caching + invalidation.
+The `sessionDir` preference (App-side only; `""` is the default folder) sets
+where notes are saved. `SessionArchive.directory` reads it at each access, and
+`SessionWriter` resolves it at each `start()`, so a change applies with no
+relaunch. Reason: the config file is small, and a fresh read is simpler than a
+cache with invalidation.
 
-**Preferences ▸ Session storage** shows the resolved path with a **Change…**
-button (`NSOpenPanel`, directories only, create allowed). On a new pick, if the
-old folder holds transcripts the user is offered **Move / Leave Them / Cancel**
-(`SessionArchive.move` — relocate the session `.md`, create the dest, never
-clobber a name collision, ignore non-session files; synchronous, like
-`renameTag`). `move` returns `(moved, skipped)`: a partial/failed move would
-split the archive across two folders, so the switch isn't silent about it — a
-total failure (nothing moved) keeps the old folder, and a partial move reports
-what stayed behind before still switching to where the bulk now lives. Writing
-`config.sessionDir` rides the form's existing `onChange` → `save()` +
-`advisorConfigChanged`, which the Sessions browser already reloads on, so it
-re-lists from the new folder for free.
-
-The **live** note is excluded from the move (like `delete`/`renameTag`): the
-still-writing session already resolved its `fileURL` in the old folder at
-`start()`, and a debounced rewrite would recreate any file moved out from under
-it. Consequence (accepted, not fought): a session recording *across* the change
-keeps writing to the old folder — it won't appear in the browser (now listing the
-new folder) until it ends and — if ever — the folder is pointed back. New
-sessions started after the change use the new folder, so this only affects an
-in-flight recording; blocking the change mid-session was considered and dropped
-as over-scoped.
+A change offers **Move / Leave Them / Cancel**. `SessionArchive.move` never
+overwrites a name, ignores files that are not sessions, and returns
+`(moved, skipped)`. If nothing moves, the old folder stays; a partial move
+reports what stayed behind. The live note does not move. Accepted limit: a
+recording that continues across the change writes to the old folder, and the
+browser does not show it. Rejected: a block on the change during a recording,
+as more scope than the problem needs.
 
 ## Session list right-click menu (2026-06-21, issue #20)
 
-The browser list rows get a `.contextMenu` with the same four actions as the
-detail pane's `…` menu — Rename / Export / Reveal in Finder / Delete — so you can
-act on a session without first selecting it. The menu acts on the *right-clicked*
-row (the `LoadedSession` captured in the closure), not the selected one, so its
-Rename/Delete alerts are presented against optional `renaming`/`deleting` row
-state in `SessionsView`, separate from the detail pane's own alert state.
-
-The shared part is the *actions*, not the menu chrome: `renameSession` /
-`deleteSession` / `exportSession` are file-private `@MainActor` free functions in
-`SessionsView.swift`, called by both surfaces, so the live-note handling (rename
-routes through the writer; delete is `disabled` for the live note) can't diverge.
-Export now reports failures via an `NSAlert` modal rather than the detail pane's
-inline `askNote`, since the row has no such inline surface — one error path for
-both. This keeps the "actions belong in a menu, not per-row icons" decision from
-the Delete section above, just adding a second way to open that menu.
+Each list row has a context menu with the detail pane's actions, applied to the
+right-clicked row, not to the selection. Both surfaces call the same functions
+(`renameSession`, `deleteSession`, `exportSession` in `SessionsView.swift`), so
+the live-note rules cannot diverge. An export failure shows an `NSAlert` on both
+surfaces.
 
 ## Share a session (2026-06-21, issue #23)
 
-Both session menus (the list row's `.contextMenu` and the detail pane's `…`
-menu) gain a **Share…** entry beside Export: a SwiftUI `ShareLink` over the
-note's file `URL`, which presents the standard macOS share sheet (Mail, AirDrop,
-Messages, …). `SharePreview(detail.title)` gives the sheet the session's title
-rather than the `yyyy-MM-dd-HHmmss.md` filename. This is distinct from Export:
-Export copies the markdown to a chosen path (`NSSavePanel`); Share hands the
-*same on-disk file* to a share service, so AirDrop sends it and Mail/Messages
-attach it. `ShareLink` is a view, so it drops straight into the menu builders —
-no shared free-function helper like `exportSession` is needed.
+**Share…** is a `ShareLink` over the note's file URL, with
+`SharePreview(detail.title)` so the sheet shows the title, not the file name.
+Export copies the markdown to a chosen path; Share gives the same file to a
+share service.
 
 ## Session folders (2026-06-21, issue #25)
 
-Sessions can be filed into **folders**. Unlike tags (a config-side library of
-names + colours, many-per-session), a folder is a **real sub-directory** of the
-storage folder and a session lives in **exactly one** (or none). So folders need
-no `config.json` registry — the folder list is derived from disk, and an empty
-folder simply persists as an empty directory. They show in Finder too, which is
-why the real-directory model was chosen over a virtual `folder:` frontmatter key.
+A folder is a real sub-directory of the storage folder, and a session is in one
+folder or in none. Rejected: a `folder:` frontmatter key. Real directories show
+in Finder and need no registry in `config.json`. Empty folders stay.
 
-`SessionArchive` owns the on-disk shape. `list` now descends **one level**: a
-note in `<root>/Work` comes back as a `SessionFile` with `folder == "Work"`, one
-directly in `<root>` with `folder == nil` (deeper nesting and dot-directories are
-ignored). `folders` returns the immediate sub-directory names (empty ones
-included). Every mutation is a `moveItem` with a pre-move `fileExists` clobber
-guard, so nothing is ever overwritten or half-written:
+- `SessionArchive` owns the layout. `list` descends one level and ignores
+  deeper and dot-prefixed directories.
+- Each change is a `moveItem` behind a check for an existing file, so nothing
+  is overwritten.
+- `deleteFolder` never deletes sessions. It moves them back to the root and
+  removes the directory only when it is empty.
+- `sanitiseFolderName` is the one name check. It rejects empty and dot-prefixed
+  names, `/` and `:`.
+- The live note cannot be filed, because its writer owns the path.
+- The storage move (issue #16) keeps the folder structure.
 
-- `setFolder(_:for:)` moves a note between `<root>` and `<root>/<folder>`,
-  returning the relocated `SessionFile` (or `nil` on a name clash / invalid name).
-  Un-filing the last note leaves its folder behind empty **by design** (folders
-  persist).
-- `createFolder` / `renameFolder` / `deleteFolder` manage the directories.
-  `renameFolder` allows a case-only rename on a case-insensitive volume but blocks
-  a collision with a *different* folder. `deleteFolder` **never deletes sessions**:
-  it un-files them back to the root (collisions skipped) and removes the directory
-  only if nothing remains — an unmovable note keeps both the note and the folder.
-- `sanitiseFolderName` is the single gate (trims; rejects empty, dot-leading, and
-  `/` or `:`), so a folder name can't escape its single path component.
-
-The **live/just-finished owned note is excluded from filing**, the same exemption
-Delete and the issue-#16 storage move already apply: its `SessionWriter` owns the
-file path, so moving the file out from under it would be clobbered by the next
-debounced rewrite. The Sessions browser enforces this three ways — the row isn't
-`.draggable`, the "Move to Folder" menu is `.disabled`, and `fileSession` guards
-on `ctx.liveFileURL`. (A saved note is filed by the direct disk move; there's no
-writer-routed path for folders, unlike rename/tags, because you simply can't file
-the note that's still being written.) The #16 storage-relocation `move` now
-**preserves folder structure** — a note in `source/Work` lands in `dest/Work`.
-
-In the sidebar (`SessionsView`), folders render as collapsible rows above the
-date-grouped un-foldered list: `grouped` only buckets `folder == nil` sessions,
-`sessions(in:)` supplies each folder's flat list, and `visibleFolders` shows every
-folder when unfiltered but only folders with a match while searching. (The header
-is a plain row, **not** a `Section` header — a sidebar Section header flattens
-nested controls, which would hide the per-folder record button added in `#35`.)
-Filing changes a note's URL — the selection key — so `fileSession` re-points
-`selection` to the moved file before the reload. Drag-and-drop carries the row's
-file `URL` and the folder header is a `.dropDestination`; unknown URLs (e.g. a
-file dragged in from Finder) are filtered against the current `sessions` so a
-stray drag can't misfile, and dropped rows are resolved up front since each
-`fileSession` reload reassigns `sessions`. Folder create/rename/delete are inline
-(the FOLDERS bar's `+`, and the folder header's right-click menu) rather than in
-Preferences, since drag-and-drop already makes the sidebar the place you organise.
+A folder header is a plain row, not a `Section` header: a sidebar `Section`
+header flattens nested controls and hides the folder's record button
+(issue #35). A drop ignores URLs that are not current sessions, such as a file
+from Finder. Folders are managed in the sidebar, not in Preferences.
 
 ## Card text via AppKit, link cursor (2026-06-21, issue #26)
 
-Card bodies (live feed, the Sessions-browser cards, and the ask-and-append
-answer) rendered through `MarkdownUI`, which builds the text as a SwiftUI `Text`.
-SwiftUI/`Text` never shows the pointing-hand cursor over a link on macOS — links
-are `.link` runs inside one `Text`, with no per-link view to attach a
-`pointerStyle` to — so links read as plain text. `NSTextView` shows the native
-link cursor (and handles clicks) for free over `.link` attributed runs.
-
-So card text now renders through **`MarkdownText`** (`MarkdownText.swift`), an
-`NSViewRepresentable` over a read-only, selectable `NSTextView` — the same
-height-via-`intrinsicContentSize` pattern as the transcript's `SelectableTranscriptText`/
-`ActionTextView` (issue #12), so it lays out like a wrapping label. It is an
-**inline-first** markdown renderer, not a full one: blocks split on blank lines,
-each parsed with `AttributedString(markdown:.inlineOnly)` (bold/italic/code/links),
-then `inlinePresentationIntent` runs are mapped to real fonts and `Theme` colours
-(NSColor twins added for accent/code/muted). Soft breaks collapse to spaces;
-lists get `•`/kept ordering, headings render bold, `---` becomes a rule. This
-suits the app's concise card bodies (the research prompt cites sources inline as
-markdown links); nested lists/tables degrade to plain lines — acceptable, and
-revisit if card bodies grow richer. (Superseded: nested lists 2026-10-04, see
-*Sessions window restyle*; tables 2026-10-15, see *Card tables*.) `MarkdownUI` is now unused and the dependency
-is dropped. The footer's discrete source `Link`s (live feed) keep a SwiftUI
-`linkCursor()` (`NSCursor.pointingHand` on hover) since they aren't `NSTextView`
-links. (Both went with the sources footer 2026-10-18 — see *Card sources and
-verdict removed*.)
+Card text renders through **`MarkdownText`** (`MarkdownText.swift`), a
+read-only, selectable `NSTextView`. Reason: SwiftUI `Text` shows no
+pointing-hand cursor over a link on macOS, because a link has no view of its
+own; `NSTextView` gives the cursor and the click. The renderer is inline-first:
+it splits blocks on blank lines and parses each with
+`AttributedString(markdown:.inlineOnly)`, with fonts and colours from `Theme`.
+The `MarkdownUI` dependency was removed. (Superseded in part: nested lists
+2026-10-04, see *Sessions window restyle*; tables 2026-10-15, see *Card
+tables*; the source links 2026-10-18, see *Card sources and verdict removed*.)
 
 ## Floating sidebar (2026-06-21)
 
-`SessionsView` moved from a hand-rolled `HStack { sidebar(350) | Divider |
-detail }` to a native **`NavigationSplitView`**. On macOS 26 (Tahoe) that renders
-the sidebar column as a floating Liquid-Glass panel over the full-bleed detail —
-the Calendar/Notes look — which two opaque side-by-side columns could never do.
-The float is tied to the column being a real **`.sidebar` `List`**, so the
-custom `ScrollView`/`LazyVStack` became a `List` (same `Section`s for folders and
-date groups); rows keep their bespoke look via `plainSidebarRow()` (cleared row
-insets/separator/background) and the glass shows through
-(`.scrollContentBackground(.hidden)`). Selection, folder collapse and row
-drag-to-folder are unchanged code, just re-homed in the `List`.
-
-The **Record** button moved out of the sidebar's content top block into the
-sidebar `.toolbar` (`ToolbarItem(.primaryAction)`), so it sits in the title-bar
-row aligned with the traffic lights (the user's ask) rather than a row below
-them. Knock-ons, accepted: the sidebar is now user-resizable (320–420, was a
-fixed 350); section headers are no longer pinned/sticky (was
-`pinnedViews: [.sectionHeaders]`) — native sidebar behaviour.
-
-Layout-only change, verified by screenshotting the dev build (sidebar floats with
-a soft shadow, no hard divider; Record on the traffic-light row; single folder
-chevron, no native double-disclosure). Row click / drag / collapse are
-runtime-only and weren't automatable (synthetic clicks need an Accessibility
-grant) — confirm by hand in the running app.
+`SessionsView` uses `NavigationSplitView`. On macOS 26 its sidebar renders as a
+floating Liquid Glass panel over the detail. Rejected: the hand-made
+`HStack` of two opaque columns, which cannot float. The float needs a real
+`.sidebar` `List`, so the sidebar became a `List`, and `plainSidebarRow()` keeps
+the row style. **Record** moved into the sidebar toolbar, on the row of the
+window controls. Accepted: the sidebar is resizable (320–420 pt), and section
+headers no longer stay at the top. A screenshot verified the layout. Row click,
+drag and collapse need a manual check, because synthetic clicks need an
+Accessibility grant. Commit: `8d7f472`.
 
 ## Mic capture wedge + stable signing (2026-06-21)
 
-Two separate faults surfaced while debugging "the mic stopped working", worth
-recording because both are easy to misdiagnose as each other.
+Two faults that are easy to mistake for each other:
 
-**The silent mic was an AVAudioEngine bug, not permissions.** `AudioCapture`
-selected the input device by setting `kAudioOutputUnitProperty_CurrentDevice` on
-`engine.inputNode.audioUnit` for *any* chosen device. On macOS 26, setting that
-to a device that is **already the system default input** wedges the input: the
-engine starts, `isRunning` is true and `inputFormat` is valid, but the tap never
-fires — zero buffers, no error. (Diagnosed by logging tap callbacks: none.) Fix:
-only switch the AU's device when the chosen one differs from the default
-(`AudioCapture.defaultInputDeviceID()`); the node is already bound to the default,
-so the common case needs no set at all. Selecting a genuine non-default device
-still goes through the property set. Symwise it presents as "system audio
-transcribes but mic is silent" because system audio uses ScreenCaptureKit, a
-different path. *Not* caused by the Studio Display, AEC, or STT.
+- **The silent mic was an AVAudioEngine bug, not permissions.** On macOS 26, if
+  `kAudioOutputUnitProperty_CurrentDevice` on the input node is set to the
+  device that is already the system default input, the input wedges. The
+  engine runs, and the format is valid, but the tap never fires, and no error
+  occurs. Tap-callback logging found it. `AudioCapture` sets the device only
+  when it differs from the default (`defaultInputDeviceID()`). The symptom is
+  "system audio transcribes but the mic is silent", because system audio uses
+  ScreenCaptureKit. The cause is not the Studio Display, echo cancellation or
+  STT. See *Non-default mic selection* for the follow-up.
+- **TCC grants resetting was the ad-hoc signature.** An ad-hoc signature
+  changes the code hash at each build. macOS then treats each build as a new
+  app and drops the Microphone and Screen Recording grants, but System Settings
+  still shows them as on. `package.sh` and `install.sh` sign with a stable
+  identity (a Developer ID or the self-signed `Advisor Dev` certificate), so the
+  Designated Requirement stays the same. See docs/development.md.
 
-**TCC grants resetting was the ad-hoc signature.** Separately, the app's mic /
-screen-recording approvals kept lapsing because the local build is ad-hoc signed
-— its code hash rotates every build, so macOS sees each rebuild (and each of the
-duplicate dev-binary / installed-`.app`, which share the bundle id) as a different
-app and drops the grant, while still *showing* it enabled in System Settings.
-Fix: `package.sh`/`install.sh` sign with a stable identity (a self-signed
-**`Advisor Dev`** cert, or a Developer ID if present), keeping the Designated
-Requirement constant so grants persist. See docs/development.md. Distribution-grade sharing
-is `dmg.sh`; `sign.sh` (formerly `notarize.sh`) is the app-level Developer ID
-signing helper it runs.
+Commit: `7588806`.
 
 ## System-audio permission preflight (2026-06-23)
 
-Starting system audio by calling `SCShareableContent.excludingDesktopWindows`
-directly made a first-run permission miss look like a capture failure:
-"The user declined TCCs for application, window, display capture". That was
-especially confusing while changing mic devices because mic capture was healthy,
-but the status line reported a ScreenCaptureKit failure beside it.
-
-`SystemAudioCapture` now preflights/requests Screen & System Audio Recording via
-CoreGraphics before touching ScreenCaptureKit. If access is missing, recording
-continues mic-only and the status tells the user to grant the permission in
-System Settings and relaunch. ScreenCaptureKit TCC errors are still normalised
-to that same instruction in case preflight and `SCStream` disagree.
+`SystemAudioCapture` checks and requests Screen & System Audio Recording
+through CoreGraphics before it calls ScreenCaptureKit. Reason: a direct call to
+`SCShareableContent.excludingDesktopWindows` made a missing permission look like
+a capture failure ("The user declined TCCs for application, window, display
+capture"). Without the permission, recording continues with the mic only, and
+the status line tells the user to grant it and relaunch. A ScreenCaptureKit TCC
+error gives the same instruction, in case the check and `SCStream` disagree.
+Commit: `c4e7a46`.
 
 ## Non-default mic selection (2026-06-24)
 
-The previous mitigation only avoided `kAudioOutputUnitProperty_CurrentDevice`
-when the chosen mic was already the system default. The built-in **MacBook Pro
-Microphone** can also wedge when selected as a non-default device while the
-Studio Display mic is default: STT starts, system audio can transcribe, but mic
-samples never reach Apple STT. Advisor now uses `AVAudioEngine` only for the
-default input path and uses `AVCaptureSession` for any explicitly selected
-non-default mic, matched by CoreAudio device UID with a name fallback. That keeps
-the app-level mic picker without changing the user's global macOS default input.
+`AudioCapture` uses `AVAudioEngine` only for the default input. A selected
+non-default mic goes through `AVCaptureSession`, matched by CoreAudio device
+UID, then by name. Reason: the built-in MacBook Pro Microphone, selected as a
+non-default device while the Studio Display mic is the default, also wedges:
+STT starts, but no mic samples arrive. This keeps the app's mic picker and does
+not change the macOS default input. Commit: `26fa3f7`.
 
 ## Correct a transcription word/phrase (2026-06-22, issue #32)
 
-On-device STT mis-hears words; you can now fix them in place. Highlight text in a
-transcript paragraph and right-click ▸ **Correct "…"** or **Replace all "…"**, type
-the replacement, and it's written back. Scope is chosen in the menu (this
-occurrence vs every occurrence in the session) — the user asked to pick per
-correction rather than have a fixed rule.
+Right-click a selection for **Correct "…"** (this occurrence) or **Replace all
+"…"** (every occurrence in the session). The user chooses the scope for each
+correction, as asked. `TranscriptCorrection` holds the pure logic for both
+surfaces.
 
-The maths lives in a pure, unit-tested `TranscriptCorrection` (no UI), shared by
-both surfaces:
+- Live: the correction changes the utterance `text` in `TranscriptStore`. It is
+  text-only: nothing goes to the sidecar, and no card is generated again.
+- Saved: `SessionArchive.correctOccurrence` and `correctAll` change only the
+  transcript lines. Frontmatter, cards and follow-ups stay byte-identical. The
+  browser cannot correct the live note, because two writers would overwrite
+  each other.
 
-- **Live feed** — the source of truth is the in-memory `TranscriptStore`. A
-  paragraph carries its `utteranceIds`; the menu reports the highlighted span's
-  0-based occurrence index *within that paragraph* (`occurrenceIndex`, UTF-16 so
-  it matches `NSTextView` offsets), and `TranscriptStore.correctOccurrence`
-  rewrites the right utterance's `text` in place (now `var`, keeping id/time/
-  source). The writer's existing `onChange(of: utterances)` debounce persists it.
-  Correction is **text-only** — nothing is re-sent to the sidecar, so no cards
-  regenerate.
-- **Saved sessions** — the source of truth is the markdown file.
-  `SessionArchive.correctOccurrence/correctAll` apply the same primitives to the
-  file body and post `advisorSessionsChanged` to reload. Only the transcript
-  utterance lines (`- HH:MM:SS …`) change; frontmatter, cards, and follow-up
-  blockquotes are left byte-identical. The still-being-written **live note is
-  excluded** in the browser (`onCorrect == nil` when `isLive`), same guard the
-  ask-and-append path uses, to avoid the two-writer clobber.
-
-Paragraph indexing for "this occurrence" must stay in lock-step with how
-`TranscriptDoc` groups display blocks (cards/headings/2s-gap breaks, empty-text
-lines skipped) — the grouping is mirrored in `TranscriptCorrection` and guarded by
-a test, since a drift would silently correct the wrong line. *Superseded:* the
-mirror drifted and is gone; a saved correction now edits the block it was shown
-(the issue #91 entry).
-
-Out of scope (documented limitation): a selection that straddles a paragraph join
-boundary — a phrase split across two utterances / two transcript lines by the 2s
-rule — isn't matched for single-occurrence correction (it's counted per line).
-Whole-session replace is unaffected. *Superseded:* the count is now taken over the
-joined text, and the menu refuses a straddling selection for both scopes (the
-issue #92 entry).
+(Superseded: a saved correction now edits the block that the pane showed, see
+the issue #91 entry. The menu refuses a selection across two transcript lines
+for both scopes, see the issue #92 entry.)
 
 ## Summarise a conversation (2026-06-22, issue #30)
 
-Post-meeting summaries were originally out of scope, and an early transient
-summarise control was removed (2026-06-14 note above). Issue #30 reintroduces
-them deliberately as an **on-demand Summarise control** — a button on both the
-live recording toolbar (`ListeningToolbar`) and the saved-session detail header
-(`SessionsView.SessionDetailPane`). REQUIREMENTS updated accordingly.
+Issue #30 added an on-demand **Summarise** to the recording toolbar and to the
+saved-session detail. It replaced the summarise control removed 2026-06-14. A
+session has one summary: a `# Summary` section before `# Transcript`, written as
+one `> **SUMMARY**` card. Summarise again updates it in place.
 
-A session has **one** summary, stored in the note as a `# Summary` section placed
-before `# Transcript` and written as a single `> **SUMMARY**` card
-block — the same blockquote-card shape used elsewhere, so it renders in card
-chrome and re-parses via `TranscriptDoc`. Clicking Summarise again **updates** it
-in place rather than appending a second.
+The summary covers the whole transcript, not the classifier's delta, so it runs
+on a transient one-shot session (`prompts.summaryTask`).
 
-The summary always covers the **whole** transcript (not the classifier's delta),
-so it runs on a transient one-shot session — like `card_reply`/`ask_document` —
-sharing one prompt (`prompts.summaryTask`). Two wirings, one note location:
+- Live (`summarise_live`): the app sends the transcript and, on a repeat, the
+  card id; the sidecar answers with a `card_update` on that id.
+  `SessionMarkdown.inline` writes the section from the done card.
+- Saved (`summarise_document`): the answer comes on the `document_answer`
+  channel, and `SessionArchive.upsertSummary` replaces the section. It is
+  disabled while the writer owns the note.
 
-- **Live** (`summarise_live`): the app sends the full transcript and, on
-  re-summarise, the existing summary card's id. The sidecar emits a
-  `summary`-kind card (first time) or a `card_update` on that id (re-summarise),
-  so there's only ever one summary card. `SessionMarkdown.inline` derives the
-  `# Summary` section from the done summary card and **excludes** summary cards
-  from the inline transcript — so the store-driven full rewrite keeps one summary.
-- **Saved** (`summarise_document`): reuses the `document_answer` channel (shared
-  `runDocumentTask`), then `SessionArchive.upsertSummary` writes/replaces the
-  `# Summary` section on disk and reloads the browser. Disabled while the note is
-  still live-owned (the writer would clobber it — same guard as ask-and-append).
-
-The two paths produce a **byte-identical** `# Summary` section for the same text
-(`SessionMarkdown.inline` insert == `SessionArchive.upsertingSummary` insert),
-guarded by a test, so "update existing" holds even across surfaces: a session
-summarised live and later re-summarised from the browser replaces the same
-section rather than duplicating it. Summary cards take no follow-ups, and a
-`cancel` interrupts an in-flight live summary (its lane is in the cancel search).
+Both paths write a byte-identical section, so a summary made live and repeated
+from the browser replaces the section and does not duplicate it. Summary cards
+take no follow-ups.
 
 ## Transcript runs in their own card (2026-06-22)
 
-The feed already collapsed consecutive utterances into paragraphs; now each run
-of paragraphs *between two cards* is grouped into a single transcript card, so
-the feed reads as a stack of cards rather than cards floating in bare prose. The
-grouping is a thin display pass over the existing paragraph list (live:
-`displayedItems` in `AdvisorApp.swift`; saved: `displayBlocks` over
-`TranscriptDoc` blocks in `SessionsView.swift`) — a card or heading flushes the
-current run. Each paragraph keeps its own selectable text view inside the card so
-right-click actions and `#32` corrections still map to the right utterances
-(grouping doesn't touch paragraph identity or offsets).
-
-Transcript cards use the recessed `surfaceCardInset` fill (vs `surfaceCard` for
-answer/context cards) so transcript reads as a quieter, sunken surface and answer
-cards stand out — the visual hierarchy is fill-tint, not chrome. Applied to both
-the live feed and saved sessions so the two stay identical. (Reversed: the
-Sessions window dropped the run cards for plain text with margin times on
-2026-10-04 — see *Sessions window restyle* — and the recording window followed on
-2026-10-06, both now rendering `FeedTranscriptRun`; see *One feed for both
-windows*.)
+Each run of transcript paragraphs between two cards showed in one recessed card
+(`surfaceCardInset`), so that answer cards stood out by fill. (Superseded
+2026-10-04 and 2026-10-06: plain text with times in the margin, see *Sessions
+window restyle* and *One feed for both windows*.) Commit: `19382f0`.
 
 ## Editorial notes injected into the transcript (2026-06-24, issue #34)
 
-On-device audio can mishear or miss implied context. The user can now inject
-their own context: highlight (or just right-click) a transcript paragraph in the
-live feed ▸ **Add note here…**, type the note, and it lands as a distinct
-green-bordered **NOTE** card anchored at that line. Deletable via the card's
-dismiss button; add + delete only (no edit) — like a `#32` correction, removal is
-display/persistence only and never un-sends what the agents already read.
-(Since 2026-10-20 the note is typed in the toolbar's Note popover, which can
-also add one with no line chosen — see *Ask and Note from the toolbar*.)
+The user can add a note at a transcript line, for context that the audio
+missed. It shows as a green **NOTE** card. Notes can be added and deleted, not
+edited. A delete does not take back what the agents already read.
 
-The note is **fed to the agents as part of the transcript stream**, not a
-side-channel: the app sends a new `note` NDJSON frame (`SidecarManager.sendNote`),
-and the sidecar pushes it into the same `transcript[]` every research/query lane
-and the classifier read via their cursor deltas. It's labelled, not disguised as
-speech — `prompts.transcriptLine` renders a note as `[note from the user] …` (vs
-`me:`/`them:`), and the classifier system prompt is told that line is
-authoritative user context. Per the user's choice, a note also `scheduleClassify`s
-and **may itself trigger research** (it's not gated out).
+The note goes to the agents in the transcript stream, not on a separate
+channel. The app sends a `note` frame (`SidecarManager.sendNote`), and the
+sidecar adds it to the same `transcript[]` that the classifier and the lanes
+read. `prompts.transcriptLine` labels it `[note from the user] …`, and the
+classifier prompt treats that line as authoritative. A note schedules a
+classify and can trigger research, as the user chose.
 
-Placement hugs the selected text: the right-click offset (selection end, or the
-character nearest the click when nothing is highlighted) is mapped back through
-the paragraph's `utteranceIds` to the line it falls in (`NoteAnchor.time`), and
-that line's time becomes `EditorialNote.time`. The feed/markdown sort then uses a
-tie-break rank — utterance (0), note (1), card (2) — so at one line the note sits
-directly under the text and above any card triggered by it. The sidecar still
-appends the note at receipt (it carries the anchor `ts` but order there is
-arrival order) — semantically "the user just added this", regardless of where it
-sits in the scrollback. Deletion is append-only on the sidecar side (consistent
-with utterances/corrections).
-
-Persistence mirrors the inline-card format: `SessionMarkdown.noteBlock` writes a
-`> **NOTE**` blockquote, and `TranscriptDoc` parses a `**NOTE**`-headed quote back
-to a `.note` block (distinct from `.card`) so the Sessions browser re-renders it
-in the same green chrome (`SessionsView.noteBlock`). The green styling is
-duplicated live (`EditorialNoteView`) vs saved, mirroring the existing
-`transcriptCard`/`cardBlock` live-vs-browser split. (Superseded 2026-10-06: one
-`FeedNoteView` renders notes in both windows — see *One feed for both windows*.)
-Notes aren't counted as cards
-or questions in `SessionDetail`, and (known minor gap) aren't yet in the browser
-search haystack.
+The note takes the time of the line under the right-click (`NoteAnchor.time`).
+At one time, the sort order is utterance, note, card, so the note sits under its
+line and above a card that it triggers. The sidecar adds the note in arrival
+order. The note is saved as a `> **NOTE**` block (`SessionMarkdown.noteBlock`),
+and `TranscriptDoc` reads it back as a `.note` block. Notes do not count as
+cards or questions. Known gap: browser search does not include notes. (Since
+2026-10-20 the toolbar's Note popover takes the text, see *Ask and Note from
+the toolbar*. Rendering superseded 2026-10-06: see *One feed for both
+windows*.)
 
 ## Start a recording in a folder (2026-06-25, issue #35)
 
-Filing a saved session into a folder (`#25`) is a post-hoc drag/menu move. You can
-now start a recording **already filed**: each folder header in the Sessions sidebar
-carries a small red record button (`folderRecordButton`) that targets that folder
-for the next recording, so its note is written straight into `<root>/<folder>/`
-rather than the root and a later move.
+The red record button on a folder header starts a recording whose note is
+written straight into `<root>/<folder>/`. The target goes through `pendingFolder`
+on `TranscriptWindowContext`, because `openWindow(id:)` cannot pass a value to a
+single-instance `Window`. Session start and the window's `onDisappear` clear it,
+so ⌘N starts a recording outside any folder. `SessionWriter.start(…, folder:)`
+applies `sanitiseFolderName`; an unusable name falls back to the root.
 
-The target rides a `pendingFolder` on `TranscriptWindowContext` (the same shared
-holder the recording window already reads `liveFileURL`/`sidecar` from), because the
-recording window is a single-instance `Window` and `openWindow(id:)` can't pass a
-value to it. The folder button sets `pendingFolder` then opens the window; the
-global record button (and the writer's un-foldered default) clear it. At session
-start `startSession` reads `pendingFolder`, passes it to `SessionWriter.start(…,
-folder:)`, captures it into the window's `recordingFolder` for display, and clears
-the pending value so it can't leak to a later un-foldered recording. The window's
-`onDisappear` also clears both, so reopening with ⌘N starts un-foldered.
-
-`SessionWriter.start` nests under the resolved base directory:
-`base.appendingPathComponent(sanitiseFolderName(folder))` (an unusable name falls
-back to the root, reusing the `#25` gate). `list` already returns such a note with
-`folder` set, so no browser change is needed — it appears under its folder.
-
-The folder is **fixed at session start**, shown read-only as a folder chip in the
-recording toolbar (`ListeningToolbar.folderIndicator`), not a picker. Re-filing mid
-recording would mean moving the live note the `SessionWriter` owns — exactly the
-two-writer clobber the `#25` live-note filing exemption avoids — so it's deferred to
-the saved-note **Move to Folder** path after the session ends.
+The folder is fixed at session start and shows read-only in the toolbar.
+Rejected: a folder picker during the recording. It would move the note that the
+writer owns, which the issue #25 rule forbids. **Move to Folder** after the
+session does the job.
 
 ## Folder-level context (2026-06-25, issue #36)
 
-A folder can carry a **default context** that a recording started in it inherits as
-the seed of its session prompt — so a "Weekly platform sync" folder pre-fills who's
-there and what to focus on without retyping per session.
+A folder can hold a default context that seeds the session prompt of each
+recording started in it. It is a hidden `.context.md` in the folder
+(`SessionArchive.folderContext`, `setFolderContext`), not a config entry.
+Reason: folders stay pure file system, and the context moves with a folder
+rename. `list` and `folders` ignore the dot-prefixed file.
 
-Stored where folders already live: a hidden `.context.md` inside the folder
-directory (`SessionArchive.folderContext`/`setFolderContext`/`folderContextURL`), not
-config. This keeps the `#25` "folders are pure filesystem, no registry" property —
-the context **travels with `renameFolder`** automatically (the directory moves) and
-needs no rename bookkeeping. The dot-prefixed, non-session-date name means `list`
-and `folders` already ignore it. Two file ops were taught about it: `deleteFolder`
-removes it so an otherwise-empty folder can go, but **only once everything else is
-gone** — it's excluded from the emptiness gate, not deleted up front, so an aborted
-delete (a same-named note that couldn't un-file) keeps the folder *and* its context;
-`move` (the `#16` storage relocation) carries each folder's context file across, or a
-storage-dir change would strand it. A blank save removes the file (no empty litter).
+- `deleteFolder` removes it only when nothing else remains, so an incomplete
+  delete keeps the folder and its context.
+- The storage move (issue #16) carries it.
+- A blank save removes the file.
 
-The Sessions sidebar folder header gains a context button (`FolderContextButton`)
-left of the record button: a speech bubble, tinted/filled when a context is set,
-opening a popover with a `TextEditor`. It owns its own draft/popover state so each
-folder row edits independently; `SessionsView.folderContexts` caches each folder's
-text (loaded in `reload`) for the button state and is updated in place on save.
-The popover also has the `#10` **Load** menu (`SavedContextMenu`, shared with the
-recording window's Context popover), filling the draft from a saved context;
-`SessionsView` reads `config.contexts` in `reload` and on `advisorConfigChanged`,
-so a Preferences edit shows without a relaunch. Load copies the text — the folder
-keeps its own `.context.md`, not a link to the saved context.
-
-Inheritance reuses the `#35` `pendingFolder` bridge: when the recording window opens
-via a folder's record button, `seedDefaultsFromPendingFolder` seeds the recording
-draft's context from that folder's saved context (`RecordingDraft.seedFromFolder`,
-loading `FolderRecordingDefaults` in `TranscriptWindowContext.swift`; since #76 the
-same seed also carries the folder's default tags) — at `setup` for a fresh window,
-and via a `pendingFolder` onChange for an already-open one. It's a **seed, not a
-lock**: the user edits it freely per session, and it's skipped once `sessionStart`
-is set so it never
-disturbs (or pushes stale context to the sidecar for) a live session.
+**Load** copies a saved context's text into it; it is not a link.
+`seedDefaultsFromPendingFolder` seeds the recording draft through
+`pendingFolder` (`RecordingDraft.seedFromFolder`, `FolderRecordingDefaults`;
+since issue #76 it seeds the folder's tags too). It is a seed, not a lock: the
+user can edit it, and it does not apply once `sessionStart` is set.
 
 ## Failed classify no longer drops its window (2026-07-03, issue #43)
 
-The classifier is fed only the transcript delta because its session is
-persistent — the earlier fix (2026-06-19, above) leans on "every line judged
-exactly once". But `classifierDelta` advanced the `classifier` cursor when the
-window was *built*, and `classify` returned the same `{triggers: []}` for a
-genuine "found nothing" **and** for a classify timeout (30 s) or unparseable
-output. So a single mid-meeting timeout advanced the cursor past 4–5 utterances
-(perhaps the only explicit question) that were then never re-fed — judged zero
-times, no card, no error surfaced.
+Decision: the classifier cursor moves only when a classify succeeds. A
+timeout (30 s), empty output or unparseable JSON gives `{ok:false}`
+(`ClassifyResult`, `parseClassifierResponse`), and the next pass sends the same
+window again.
 
-Fix: make success and failure distinguishable and commit the cursor only on
-success. `classify` now returns a discriminated `ClassifyResult`
-(`{ok:true, triggers}` | `{ok:false}`); a set run `error` (timeout / dead
-session), empty output, missing JSON, or a `JSON.parse` throw all map to
-`ok:false`. The parse is extracted to a pure `parseClassifierResponse` so the
-distinction is unit-tested without the SDK. `classifierDelta` no longer mutates
-the cursor — it returns the window's end index and `runClassify` commits it only
-on `ok:true`; on `ok:false` the cursor stays put, so the window is re-fed next
-pass. This is safe because classify is serialised (the `classifying` guard), so
-no second delta runs during the await to double-feed or skip lines; the end
-index is captured at delta time, so lines that arrive mid-await are still judged
-next pass, not folded into the committed window.
+Reason: the classifier session is persistent and gets only the transcript
+delta, so each line must be judged once. Before this fix, one timeout moved the
+cursor past 4–5 utterances that nothing then judged. No card and no error
+showed.
 
-Re-feed loop bounded: `MAX_CLASSIFY_RETRIES` (3) consecutive failures → give up
-on that window and advance anyway, so a persistently failing classifier can't
-stall the pipeline or grow the re-fed window without bound. Retries are
-utterance-driven (the existing debounce/`rerunWanted` path), so in an active
-conversation a failed window is re-judged within seconds; only in dead silence
-does it wait for the next utterance. Residual: on re-feed the persistent session
-may see the failed window's lines a second time, but the classifier is already
-told to treat near-duplicates as one, and re-judging is strictly better than the
-previous silent drop.
+Limits: after 3 consecutive failures (`MAX_CLASSIFY_RETRIES`), the pipeline
+moves on, so a failed classifier cannot stall the pipeline. A retry needs a new
+utterance, so in silence a failed window waits. A re-fed window can show lines
+to the session twice; the classifier prompt already treats near-duplicates as
+one.
 
 ## Pooled lanes recycle on failure, never wedge (2026-07-03, issue #46)
 
-Transient lanes (reply/summary/document) `reset()` their session every turn;
-pooled lanes (the 1–8 research lanes + the query lane) deliberately do **not** —
-they keep the SDK subprocess warm and carry transcript-delta context across
-triggers (M5). But that meant a pooled lane had *no* recycle path: if a turn
-timed out, `AgentSession.run`'s 180 s timeout settled the task and fired a
-best-effort `interrupt()`, but if the interrupt failed the SDK turn never emitted
-a `result`, so its settled `PendingTask` stayed at the FIFO head forever. Every
-later trigger `drainResearch` routed to that lane then (a) queued behind the
-wedged turn and burned a full 180 s with no output, indefinitely, and (b)
-desynced — the stream loop's `!current.settled` guard (head still settled)
-suppressed the new task's streaming, and a late `result` shifted the *stale* head
-rather than the new task.
+Decision: a pooled lane (research or query) resets its session after a failed
+turn (timeout or error). A successful turn keeps the warm session and its
+context. Transient lanes already reset after each turn.
 
-Fix, two parts:
+Reason: when `interrupt()` failed after the 180 s timeout, the SDK turn never
+sent a `result`. The settled task stayed at the head of the queue, and each
+later card on that lane waited 180 s with no output, or got the stream of the
+wrong task.
 
-- **Recycle on failure (`runCard`, now in lanes.ts).** After any failure outcome
-  (timeout or error) on a pooled lane, `reset()` the session so the next
-  `drainResearch` dispatch re-spawns clean. This mirrors the transient lanes'
-  `reset()`-in-`finally`, but gated on failure so the **success path keeps the
-  warm session and its context**. Ordering is load-bearing: `runCard`'s `finally`
-  (the reset) completes before `drainResearch`'s chained `.finally` clears
-  `lane.busy` and re-dispatches, so the re-dispatch always sees a fresh session
-  and a consistent `busy` flag. Cost accepted: a failed card pays one cold-spawn
-  (and loses pre-failure session memory — the lane rebuilds context from
-  subsequent deltas; the `cursors` entry is intentionally left as-is, so no giant
-  whole-transcript replay). *Reversed 2026-10-06 — see below.*
+Each spawn has its own `pending` array, so an old stream loop cannot take
+tasks from a new one. As a backstop, `run()` recycles when it finds a settled
+task at the queue head, which also recovers a wedged classifier or warm-up
+turn.
 
-- **`reset()` made robust + a defensive recycle in `run()` (agent.ts).**
-  `reset()` now also settles any unresolved queued task (so a caller's promise
-  can't hang) and clears the queue. Each spawn binds its **own** `pending` array,
-  captured by that generation's stream loop, so after a recycle the old
-  (possibly wedged) loop drains its orphaned queue and can never fight the new
-  generation over a shared array. As a backstop, `run()` recycles up-front if it
-  finds an already-settled task at the queue head — this also recovers a wedged
-  **classifier** or **warm-up** turn, which settle via timeout but don't pass
-  through `runCard`. A genuinely wedged SDK subprocess may still linger until GC /
-  sidecar restart (interrupt is best-effort), but it no longer stalls the pool.
-
-Unit-tested without the SDK via an injectable `queryFn` (default: the real
-`query`; the pattern mirrors the injectable `realpath`): a fake stream drives the
-timeout → recycle → fresh-spawn lifecycle and asserts no result desync, that
-streaming lands on the recycled task, and that the success path reuses the warm
-spawn (`agent.test.ts`).
+Cost and limits: a failed card pays one cold spawn. A wedged SDK subprocess can
+stay until the sidecar restarts, because interrupt is best-effort, but it no
+longer blocks the pool. (The cursor rule changed 2026-10-06: see *Recycled
+lanes replay the conversation*.)
 
 ### Recycled lanes replay the conversation (2026-10-06, code review)
 
-Leaving the cursor as-is meant the fresh session never saw anything said before
-the failure: the next card on that lane got only the newest lines. Automatic
-cards mostly survived (the classifier writes each research query to stand
-alone), but the query lane didn't — after one timed-out card, an Ask-box "who
-owns it?" lost the conversation it referred to. The recycle now forgets the
-lane's cursor (`Transcript.forget`), so its next card is sent the whole
-conversation once. The cost is one larger prompt per failure (a one-hour meeting
-is roughly 10–15k tokens, small beside a research turn's web fetches), the same
-replay a lane added mid-session already gets. Rejected: re-sending a bounded tail,
-which keeps short-range referents but still loses earlier topics.
+Decision: a recycled lane forgets its cursor (`Transcript.forget` in
+`lanes.ts`), so its next card gets the whole conversation once.
 
-`runCard` and the transcript/cursor bookkeeping moved out of `main.ts` into
-`lanes.ts` (`Transcript`, `runCard` with injected deps, like `guardedRun`), so
-the recycle is tested through the real card flow (`lanes.test.ts`).
+Reason: with the cursor kept, the fresh session saw only the newest lines.
+Automatic cards mostly survived, because each research query stands alone. The
+query lane did not: after one timed-out card, an Ask such as "who owns it?"
+lost its referent.
+
+Cost: one larger prompt per failure. A one-hour meeting is about 10–15k
+tokens, small beside the web fetches of a research turn. A lane added
+mid-session already gets the same replay.
+
+Rejected: resend a bounded tail. It keeps short-range referents but loses
+earlier topics. Commit: `53b80af`.
 
 ## Auto cards off means off (2026-10-06, code review)
 
-The toggle only set a flag that `scheduleClassify` checked, so switching it off
-mid-flow still produced cards: the classify waiting out its 1.5 s pause fired
-anyway, a classify already running enqueued its triggers when it returned, and
-research queued behind busy lanes kept dispatching as lanes freed. Off now stops
-all three — the timer is cleared, the queue dropped (its subjects un-covered, so
-they can come up again), and a running classify's result discarded. Cards
-already researching finish; cancelling those is the per-card ✕.
+Decision: Auto cards off clears the classify timer, discards the result of a
+running classify, and drops queued research. The dropped subjects can come up
+again. Cards that already research finish. The reason: the toggle only set a
+flag that `scheduleClassify` checked, so cards still came.
 
-Turning it back on moves the classifier's cursor to the end of the transcript:
-the stretch spoken while it was off is not classified on re-enable, which would
-research topics that have gone stale (chosen over catching up).
+Auto cards on moves the classifier cursor to the end of the transcript, because
+topics from the time it was off are stale. This was chosen over catch-up.
 
-A result is discarded by an **epoch** the pipeline bumps on every toggle and on
-session start/end, checked when a classify returns — so a classify from before an
-off-and-on can't drag the cursor back over the skipped stretch, and one from a
-previous session can't commit its cursor or cards into the next (the old
-`sessionActive` re-check covered only the end, not end-then-start).
-
-The pipeline moved out of `main.ts` into `autoPipeline.ts` (`AutoPipeline`, with
-the classifier, lane choice and research injected), so it is tested directly
-(`autoPipeline.test.ts`), including the issue #43 re-feed-on-failure behaviour
-that had no test before.
+An epoch, bumped on each toggle and on session start and end, discards a stale
+classify result. Thus an old classify cannot move the cursor back or write into
+the next session (`AutoPipeline`). Commit: `f42231f`.
 
 ### Subjects in any script (2026-10-06)
 
-The dedup key (`normalise`) kept only `a-z0-9` and spaces, so a subject written
-entirely in another script — 東京, Ελλάδα — keyed as the empty string, which is
-skipped: no card at all, silently, for any non-Latin conversation (the app
-transcribes other locales via `sttLocale`). Accented subjects also collided
-(café and caf both keyed `caf`).
+Decision: the dedup key (`normalise`) keeps the letters, marks and digits of
+every script and drops punctuation. It folds only case and whitespace. Turkish
+İ maps to I first, because otherwise it lower-cases to i plus a combining dot.
+It uses NFC.
 
-The key now keeps letters, marks and digits of every script and drops
-punctuation, folding only what is certainly the same word: case (Turkish İ
-mapped to I first, or it lower-cases to i plus a combining dot) and whitespace. The governing asymmetry: a wrong merge silently loses a card, a
-missed merge only duplicates one (and the classifier's covered list catches
-many). So marks are kept — año/ano, мой/мои, Vietnamese tones and Japanese
-がっこう/かっこう are different words — ß is not folded to ss (Maße/Masse), and
-NFC is used, not NFKC, which would make ½ and 12 one key. Accepted duplicates: Greek capitals written without
-accents (ΕΛΛΑΔΑ vs Ελλάδα), full-width letters, vocalised vs unvocalised
-Arabic/Hebrew, Straße vs STRASSE. A first cut that dropped Latin/Greek/Cyrillic
-accents and folded ß was reverted for exactly the wrong merges above. Not attempted: symbols still drop
-(C# and C++ both key `c`, as before), and translations (東京 vs Tokyo) can't
-meet by key.
+Reason: the old key kept only `a-z0-9`, so a subject in a non-Latin script
+(東京, Ελλάδα) gave an empty key, and an empty key gives no card. Accented
+subjects also collided (café and caf).
+
+The rule: a wrong merge loses a card silently, but a missed merge only
+duplicates one, and the classifier's covered list catches many. So marks stay
+(año/ano, мой/мои, Vietnamese tones, がっこう/かっこう), ß does not fold to ss
+(Maße/Masse), and NFKC is rejected because it makes ½ and 12 one key. A first
+version that dropped Latin, Greek and Cyrillic accents and folded ß was
+reverted for these wrong merges.
+
+Accepted duplicates: Greek capitals with no accents (ΕΛΛΑΔΑ, Ελλάδα),
+full-width letters, vocalised and unvocalised Arabic or Hebrew, Straße and
+STRASSE. Not attempted: symbols still drop (C# and C++ both key `c`), and a
+translation (東京, Tokyo) cannot share a key. Commit: `8b9e35a`.
 
 ## Versioning and the release cut (2026-07-04)
 
-The repo-root `VERSION` file is the single source of truth for the app
-version, chosen over deriving it from git tags: tags demand tagging
-discipline this repo doesn't have (work lands straight on main between
-releases), untagged builds would get noisy `git describe` versions, and a
-forgotten tag silently reuses the previous version. A one-line file is
-edited deliberately and reads the same everywhere — scripts, CI, a tarball
-without git. `package.sh` stamps it into the bundle as
-`CFBundleShortVersionString`; `CFBundleVersion` is the commit count
-(`git rev-list --count HEAD`, falling back to 1 without git) — monotonic
-with zero bookkeeping. `dmg.sh` names its artefact `Advisor-<version>.dmg`.
+Decision: the repo-root `VERSION` file is the single source of truth for the
+version. `package.sh` writes it to `CFBundleShortVersionString`.
+`CFBundleVersion` is the commit count (`git rev-list --count HEAD`, or 1 with
+no git), which increases with no bookkeeping.
 
-`mise run release` cuts a release: build the DMG, rewrite the version/size line
-on `www/index.html` from the real artefact, commit that sync, tag
-`v<version>`. Two guards make it honest: it refuses to run if the tag
-already exists (forcing a `VERSION` bump, which also guarantees the sed
-changes the line) and if `www/index.html` is already dirty — the release
-commit must contain only the sync, never sweep up unrelated edits. Pushing
-commit and tag stays manual.
+Rejected: a version from git tags. Work lands on main between releases with no
+tags, so untagged builds get noisy `git describe` versions, and a forgotten tag
+silently reuses the previous version.
+
+`mise run release` refuses to run when the tag already exists, which forces a
+`VERSION` bump. (Its website sync was superseded 2026-10-17: see *Website
+removed*.) Commit: `f9120c0`.
 
 ## Beta time limit, removed (2026-09-17; added 2026-07-04, issue #67)
 
-Packaged betas used to expire one month after packaging. `package.sh` stamped
-`AdvisorBetaExpiry` (packaging date + 1 month) into the bundle's Info.plist and,
-from midnight UTC on that day, `BetaExpiry.swift` blocked recording **and all AI
-interaction**: `SidecarManager.spawn()` refused to start an agent process at all
-(covering every path including crash-restart replay) and `send()` dropped every
-message bar `cancel`/`session_end`/`config`, with UI guards in the recording
-window and the Sessions browser there only to say *why*.
-
-All of it is gone — the stamp, `BetaExpiry.swift`, its tests and every gate.
-Builds no longer stop working. Keep the reasoning that shaped it in case a time
-limit is ever wanted again: it was a courtesy gate for honest beta users, not
-DRM (anyone could flip their clock or edit the plist), and licence servers and
-signed timestamps were rejected because no server exists in this architecture
-(REQUIREMENTS.md). The terms lost their time-limit clause with it (TERMS.md §2,
-`www/terms.html`); the terms stay at Version 1.0, since dropping a restriction
-is not a material change and must not re-prompt anyone to accept.
+Packaged betas expired one month after packaging (`AdvisorBetaExpiry` in
+Info.plist, `BetaExpiry.swift`), and then blocked recording and all AI work.
+All of it was removed on 2026-09-17. If a time limit is wanted again: it was a
+courtesy gate, not DRM, and licence servers and signed timestamps were rejected
+because the architecture has no server.
 
 ## Terms of use + first-run acceptance (2026-07-05)
 
-The repo-root `TERMS.md` is the canonical terms text (licence, agent-action
-responsibility, AI-accuracy and recording-consent disclaimers, E&W liability
-caps). `package.sh` bundles it; `AppResources.termsURL` resolves
-bundle-then-repo like every other resource. `www/terms.html` carries the same
-text for the site — a material change means updating **both**, bumping the
-"Version" line in each, and bumping `TermsAcceptance.currentVersion` to match
-(a test pins the constant to TERMS.md's version line).
-
-First run, the Sessions window presents a blocking sheet (`TermsSheet`):
-Accept persists `acceptedTermsVersion` (app-side only key in config.json, like
-`sttLocale`); Decline quits. Any other accepted version — older terms or "" —
-re-presents the sheet. Because ⌘N can open the recording window behind the
-sheet, three UI entry points (`startSession`/`resumeRecording`/`submitQuery`)
-also surface `TermsAcceptance.notice`; there is no `SidecarManager`
-chokepoint — the sheet is the enforcement, the guards close the ⌘N gap.
-
-Known gap, accepted: Monoidal Ltd's company number/registered office and a
-contact email are still to be added to TERMS.md and terms.html.
-
-(Superseded 2026-10-18: the terms and the sheet are gone — see *Terms of use
-removed*.)
+`TERMS.md` held the terms of use, and a first-run sheet (`TermsSheet`) asked
+the user to accept each version (`acceptedTermsVersion`). (Superseded
+2026-10-18: see *Terms of use removed*.) Commit: `2b7a524`.
 
 ## Review-suggestion batch: hardening + de-duplication (2026-07-04, issues #55–66)
 
-The 2026-07-03 codebase review's lower-severity half landed as a batch. Most were
-mechanical fixes (git history and the closed issues carry those); the decisions
-worth not re-litigating:
+The lower-severity half of the 2026-07-03 review. The closed issues and git
+history hold the mechanical fixes. These decisions stay:
 
-- **`cancelledCards` is bounded by construction (#55).** A `cancel` marks an id
-  only while a lane is actually running it — the set can therefore hold at most
-  one id per live lane, and each run clears its own id in `finally`. Previously a
-  cancel for an already-terminal card (or any document id) was added and never
-  removed, leaking for the process lifetime. Cancellation also routes by pool: a
-  document task streams back as `document_answer` (keyed by request id on the app
-  side), a card as `card_update` — sending the wrong frame was a silent no-op on
-  both ends. The handler lives in a side-effect-free `cancel.ts` so it is testable
-  without main.ts's stdin/lane globals. The document-cancel path is latent today
-  (the history-browser ask UI has no cancel affordance) but no longer a dead end.
-  (Superseded 2026-10-06: Skip on a saved research card and the Sessions Answer
-  panel's ✕ now use it, through `SidecarManager.discardDocumentRequest` — see
-  *Stopping Ask and Summarise in Sessions* under *One feed for both windows*.)
+- **`cancelledCards` is bounded (#55).** A `cancel` marks an id only while a
+  lane runs it, and each run clears its own id in `finally`, so the set holds
+  at most one id for each live lane. Cancellation answers on the channel of its
+  pool: `document_answer` for a document task, `card_update` for a card
+  (`cancel.ts`).
+- **One run skeleton (`guardedRun`, #66).** Every card, reply, document and
+  summary run streams, sends a terminal frame and suppresses output after a
+  cancel through `guardedRun`. It returns whether the turn failed, so that a
+  pooled lane can recycle (#46).
+- **One intrinsic-height text view (#66).** The transcript and the card
+  renderer subclass `IntrinsicHeightTextView`, so the #12 height fix exists
+  once.
+- **`maxTurns` is 40 (#58).** The 180 s task timeout is the real limit.
+  `maxTurns` only stops a tight loop or a prompt injection inside it.
+- **#57 is prevented, not fixed.** The per-spawn `pending` array from #46
+  makes the reset-then-run hazard unreachable, and a regression test pins it.
+  Do not add a guard.
 
-- **One cancel-aware run skeleton (`guardedRun`, #66).** `runCard`,
-  `runCardReply`, `runDocumentTask` and `runSummariseLive` had repeated the same
-  run→stream→terminal→error block, differing only in the message they build.
-  Extracted to `guardedRun(session, cardId, task, frame, …)`: it streams via
-  `frame(body, state)`, suppresses everything once the id is cancelled, and
-  returns whether the turn failed (so a pooled lane can recycle per #46). Each
-  caller supplies only its `frame`.
+Won't fix at the current scale:
 
-- **Shared intrinsic-height text view (#66).** The transcript's `ActionTextView`
-  and the card renderer each carried a byte-identical copy of the #12
-  height-reporting machinery (`intrinsicContentSize` + width-tracked
-  `setFrameSize`) — a divergence risk for exactly the bug it fixes. Both now
-  subclass `IntrinsicHeightTextView`. Toolbar controls likewise share a
-  `.controlChrome()` modifier; the two accent-toggle buttons keep their own
-  state-dependent fill and are deliberately left out of it.
-
-- **`maxTurns` is a secondary bound (#58).** Dropped 1000 → 40. The 180 s task
-  timeout is the real ceiling; `maxTurns` only caps a tight loop or prompt
-  injection within it, so a realistic tens-scale value is enough.
-
-- **#57 is already prevented, not fixed.** The reset()+immediate-run() FIFO
-  hazard the review flagged was made unreachable by the per-spawn `pending`
-  capture from #46; it is pinned by a regression test rather than re-fixed — do
-  not re-add a guard.
-
-Deliberately **not** done (won't-fix at current scale, recorded so they aren't
-re-opened blindly): memoising `SessionsView.filtered` (#61 — the O(folders ×
-n log n) per-body-pass recompute is microseconds at single-user scale, and a
-correct memoise means restructuring the sidebar view); de-duplicating card and
-tag-pill *view scaffolding* (#66 tail — CPD flags it by token overlap, but
-forcing shared views there trades clarity for DRY on UI that needs a live session
-to verify); and a SidecarManager crash/restart injection harness plus codex.ts
-streaming tests (#65 — real value, poor ROI versus the fake-process scaffolding
-they need). SidecarManager's restart path is consequently the one area still
-without a unit harness; its #63 fix (clear pipe readability handlers on exit;
-retry a spawn that throws inside `restart()` so the sidecar isn't stranded) was
-verified by build + inspection, not a runtime harness.
-
-Small policy also folded in: `config.json` now writes `.atomic` and logs failures
-rather than silently resetting every preference on a mid-write crash (#60);
-`package.sh` prunes dev deps from the shipped bundle and prints install output on
-failure (#64); `renameFolder`/`deleteFolder` route names through
-`sanitiseFolderName` as defence-in-depth (#62); the API-key field is a
-`SecureField` (#59); and `askedTime` anchors to the `_Asked …_` footer rather
-than the first "Asked " anywhere in a card (#65).
+- Memoise `SessionsView.filtered` (#61). The recompute takes microseconds for
+  one user.
+- Share the view scaffolding of cards and tag pills (#66 tail). CPD flags the
+  overlap, but shared views cost clarity on UI that needs a live session to
+  verify.
+- A crash and restart harness for `SidecarManager`, and streaming tests for
+  `codex.ts` (#65). The return is poor for the fake-process scaffolding. Thus
+  the #63 restart fix was verified by build and inspection only.
 
 ## Notarisation: nested entitlements + one notary round (2026-07-05)
 
-The v0.2.0 DMG shipped a broken sidecar: every SDK lane died in ~70 ms with
-"Claude Code process exited with code 1". Root cause: the agent SDK (2.1.x)
-vendors a Bun-compiled `claude` binary
-(`@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`), and `notarize.sh`
-hardened-runtime-signed nested Mach-O executables **without entitlements** —
-JavaScriptCore without `allow-jit` loses `SharedArrayBuffer`, so the CLI
-crashed at startup. Dev builds (unsigned) never hit it. Fix: the nested-binary
-signing loop now applies `entitlements.plist` (the JIT set `node` already got).
-The crash was invisible because the sidecar dropped the CLI's stderr;
-`AgentSession` now passes a `stderr` callback that logs per line (per chunk
-would truncate a crash dump whose error sits at the end).
+Decision: `sign.sh` signs every nested Mach-O binary with `entitlements.plist`
+(the JIT set that `node` gets).
 
-Same day, the double notary round was dropped: `notarize.sh` used to zip and
-notarise the app, staple it, then `dmg.sh` notarised the DMG again (~220 MB
-uploaded twice). Apple scans the DMG's nested content in one submission, so
-`sign.sh` (renamed from `notarize.sh`) now only builds and signs; `dmg.sh` owns
-the single notarise+staple. Trade-off accepted: the app inside the DMG carries
-no stapled ticket, so a recipient's first launch needs the network for
-Gatekeeper's ticket lookup — fine for website distribution.
+Reason: in the v0.2.0 DMG, each SDK lane died in about 70 ms with "Claude
+Code process exited with code 1". The agent SDK (2.1.x) bundles a
+Bun-compiled `claude` binary, and JavaScriptCore without `allow-jit` loses
+`SharedArrayBuffer`, so the CLI crashed at start. Unsigned dev builds did not
+show the fault. `AgentSession` now logs the CLI's stderr line by line, not by
+chunk, so a crash dump keeps the error at its end.
+
+Decision: one notary round, in `dmg.sh`. `sign.sh` (formerly `notarize.sh`)
+only builds and signs. Apple scans nested content in one submission, so the
+app needs no round of its own, and a second upload of about 220 MB goes.
+Accepted: the app has no stapled ticket, so its first launch needs the network
+for the Gatekeeper lookup. Commit: `2ce18da`.
 
 ## Live-feed tail following (2026-07-10, issue #70)
 
-The live feed auto-scrolls only while it is following the bottom. A user scroll
-that moves the viewport away disables following, so incoming utterances and
-cards do not yank earlier content away while it is being read. Continuous scroll
-geometry re-enables following as soon as the viewport is within 24 pt (roughly
-one transcript line) of the bottom. Following disables only when the visible
-bottom moves upwards while the container size stays fixed, so it does not depend
-on SwiftUI scroll-phase delivery and content growth alone never disables it.
+The live feed scrolls automatically only while it follows the bottom. A user
+scroll away from the bottom stops it. A viewport within 24 pt (about one line)
+of the bottom starts it again. It stops only when the visible bottom moves up
+while the container size stays the same. Thus it does not depend on the
+delivery of SwiftUI scroll phases, and content growth alone never stops it.
 
 ## Transcript disfluency cleanup (2026-07-13, issue #40)
 
-Apple Speech occasionally finalises a single segment with filler words and long
-runs of the same recognised word. `Recorder.cleanedTranscript` removes the narrow
-filler set `um`/`uh`/`er`/`erm` and collapses only immediately repeated words,
-case-insensitively. Non-consecutive repeats remain because they may carry meaning.
-Cleanup runs at the common final-result boundary before echo matching and store
-insertion, so the UI, markdown transcript and sidecar all receive identical text;
-volatile in-progress text remains untouched.
+`Recorder.cleanedTranscript` removes `um`/`uh`/`er`/`erm` and collapses
+immediately repeated words, case-insensitively. Repeats that are not adjacent
+stay, because they can carry meaning. Cleanup runs on each final result before
+echo matching, so the UI, the note and the sidecar get the same text. Volatile
+text does not change.
 
 ## Folder tag defaults (2026-07-30, issue #76)
 
-A folder can hold default tags from the existing tag library. Its header gains a
-tag button beside the context and record buttons; the same `SessionTagsEditor`
-used by session surfaces edits the defaults. Starting a recording through that
-folder seeds the live window's editable `sessionTags`, then the existing
-`SessionWriter.start(tags:)` path writes them to note frontmatter. Filing an
-existing session into the folder does not change its tags.
+Decision: the default tags of a folder live in `<root>/<folder>/.tags` (the
+comma-separated form from `SessionArchive.tagsLine`), beside `.context.md`.
 
-Defaults live in `<root>/<folder>/.tags` as the canonical comma-separated value
-from `SessionArchive.tagsLine`, alongside the folder-owned `.context.md`. This
-preserves the real-directory model: rename carries defaults automatically,
-storage relocation moves both hidden metadata files, and delete ignores them
-for the emptiness check but removes them only once deletion can complete.
-Renaming a library tag also rewrites folder defaults so future recordings do not
-inherit an orphaned name. Deleting one removes it from folder defaults; the
-recording seed also filters against the current library so a failed/stale metadata
-cleanup cannot put an unknown tag onto a new note.
+Reason: hidden files in the real directory keep the folder model simple. A
+rename carries them, a storage move moves them, and a delete ignores them in
+its emptiness check.
+
+Library renames and deletes update the defaults. The recording seed also
+filters against the current library, so a stale `.tags` file cannot put an
+unknown tag on a new note.
 
 ## Codex runs under a Seatbelt profile (2026-08-10)
 
-The Codex backend used to rely solely on the CLI's own `sandboxMode:
-"read-only"` plus `approvalPolicy: "never"`. That is weaker than it reads.
-Codex's read-only mode is a *modification* boundary, not a read boundary — its
-documentation says the agent "can inspect files", and there is no CLI or SDK
-option to deny reads of particular paths (`ThreadOptions` has none;
-openai/codex#4410 asks for one). So on that backend the whole home directory,
-`~/.ssh` included, was readable, while `networkAccessEnabled` was true whenever
-a component used web tools. Read plus egress is exfiltration. Separately,
-openai/codex#4152 reports MCP tools bypassing both the sandbox mode and the
-approval policy, so a user with a filesystem-writing MCP server in
-`~/.codex/config.toml` had an agent that could write and delete too.
+Decision: the Codex CLI runs under a macOS Seatbelt profile. `codexSandbox.ts`
+builds the profile from the same `deniedPaths()` list as the Claude backend. A
+wrapper that runs the vendored CLI under `sandbox-exec -f` goes to the SDK as
+`codexPathOverride`. Children inherit the profile, so MCP servers and shell
+commands are covered with no help from the CLI. Writes are denied except to
+the state folders of Codex, the temp roots and `/dev`.
 
-None of that is reachable from the SDK, so the fix moves to the process
-boundary. `codexSandbox.ts` generates a macOS Seatbelt profile from the same
-`deniedPaths()` list the Claude backend's `canUseTool` enforces, writes a small
-wrapper that `exec`s the vendored CLI under `sandbox-exec -f`, and passes that
-wrapper as `codexPathOverride`. Children inherit the profile, so MCP servers and
-any shell command the agent runs are covered by construction rather than by the
-CLI honouring a flag. Writes are denied outright except to Codex's own state,
-the temp roots and `/dev`.
+Reason: the `sandboxMode: "read-only"` of Codex limits writes, not reads. Its
+documentation says that the agent "can inspect files". No CLI or SDK option
+denies reads of given paths (`ThreadOptions` has none; openai/codex#4410 asks
+for one). Thus the whole home directory, `~/.ssh` included, was readable while
+`networkAccessEnabled` was on for web tools. Read access plus egress is
+exfiltration. Also, openai/codex#4152 reports that MCP tools bypass both the
+sandbox mode and the approval policy.
 
-Two things worth keeping in mind. Codex's own state (`~/.codex`: `auth.json`,
-`config.toml`, its sqlite databases, sessions, logs and locks — the
-global-state file lives in there too) must stay readable and writable or the
-CLI cannot authenticate or persist threads, so the agent can still read its own
-provider credentials — the one residual the Claude backend's in-process
-denylist covers and this one cannot. (Two files in that folder are write-denied
-all the same; see *Code review batch (2026-10-17)*.) And Seatbelt matches *resolved* paths: on a dotfiles-managed
-machine where `~/.codex` symlinks into `~/dotfiles`, a rule naming the link
-matches nothing. That bit during development in the harmless direction (Codex
-could not log in); the same miss on `~/.ssh` would have left the keys readable.
-`sandboxPolicy()` resolves both lists, and `codexSandbox.test.ts` covers the
-symlinked layout alongside the plain one.
+Residual risks:
 
-Installation failure throws rather than falling back: an unsandboxed Codex is
-the defect this closes, so it must fail the backend, not silently widen it.
+- `~/.codex` (`auth.json`, `config.toml`, sqlite state, sessions, logs, locks)
+  must stay readable and writable, or the CLI cannot log in or keep threads.
+  So Codex can read its own provider credentials. The in-process denylist of
+  the Claude backend covers this case, and this profile cannot. (Its input
+  files are write-denied: see *Code review batch (2026-10-17)*.)
+- Seatbelt matches resolved paths. When `~/.codex` is a symlink into
+  `~/dotfiles`, a rule that names the link matches nothing. This happened in
+  development in the harmless direction: Codex could not log in. The same miss
+  on `~/.ssh` would leave the keys readable. `sandboxPolicy()` resolves both
+  lists, and `codexSandbox.test.ts` covers a symlinked layout.
+
+If the sandbox install fails, the backend fails. There is no fallback, because
+an unsandboxed Codex is the defect that this closes. Commit: `6aec82b`.
 
 ## DMG built with `diskutil image` (2026-10-02)
 
-On macOS 27, `hdiutil` warns that `create -size … -volname` and `convert
--format` are deprecated in favour of `diskutil image`. `dmg.sh` used both to
-make a blank HFS+ image, mount it, copy the app in, and convert it to UDZO
-(zlib-9). The script now stages `Advisor.app` and the
-Applications link in a folder and builds the compressed image in one step with
-`diskutil image create from --format ULFO`. Two consequences: `diskutil` cannot
-make HFS+ images, so the volume is APFS (readable on macOS 10.13+, well below
-the app's macOS 26 floor), and it has no compression-level knob, so the image is
-LZFSE rather than zlib-9 — about 2% smaller in practice. The staging folder also
-removes the size estimate the blank image needed.
+Decision: `dmg.sh` stages `Advisor.app` and an Applications link in a folder,
+and builds the compressed image in one step with
+`diskutil image create from --format ULFO`.
+
+Reason: on macOS 27, `hdiutil` warns that `create -size … -volname` and
+`convert -format` are deprecated in favour of `diskutil image`.
+
+Consequences: `diskutil` cannot make HFS+, so the volume is APFS (readable on
+macOS 10.13+, below the macOS 26 floor of the app). It has no option for the
+compression level, so the image is LZFSE, not zlib-9: about 2% smaller in
+practice. The staging folder removes the size estimate that a blank image
+needed. Commit: `8eb388c`.
 
 ## Sessions window restyle (2026-10-04)
 
-The Sessions window read as dated: outlines around every element, bold and
-upper-case labels everywhere, blue on chips, counts and selection, and card bodies
-that ran as a wall of text. Approved from an HTML mockup, the restyle keeps every
-feature and removes signals rather than adding them:
+Decision: the Sessions window uses space, not outlines; two weights and no
+capitals; and one accent, used rarely. The restyle came from an approved HTML
+mockup and keeps every feature. The reason: the window looked dated, with
+outlines, bold capitals, blue on most elements, and card bodies as a wall of
+text.
 
-- **Space instead of outlines.** The transcript is plain text in a centred
-  reading column (`Theme.Metric.readingWidth`), with each paragraph's start
-  time hanging in the left margin. `TranscriptDoc.timedBlocks` keeps the first
-  stamp of each paragraph alongside the blocks (`SessionDetail.blockTimes`), so
-  `blocks(from:)` and its callers are unchanged. Cards and notes
-  (`SessionCardView`) lose their borders and keep a faint fill
-  (`surfaceCardSubtle`).
-- **Two weights, no capitals.** Section labels (Folders, date buckets,
-  Transcript, You asked) are title-case semibold in grey; the session title is
-  semibold 24pt. The date-bucket strings themselves are now title case.
-- **Card text layout.** `MarkdownText.lines(from:)` lays a card body out into
-  prose, lead lines (a bold line directly above a list, or a line that is bold
-  end to end), list items with nesting level from their indentation, headings
-  and rules; `render` hangs item text past the marker on a tab stop, puts list
-  items closer together than blocks, gives leads and headings room above, sets
-  strong runs semibold, and uses 14pt at about 1.5 line height. This replaces the
-  inline-first renderer's flattened lists (the 2026-06-21 section) and applies to
-  the Recording window's cards too, which share it. Saved cards split their
-  `**LABEL · Title**` header (`SessionDetail.cardParts`) into a coloured kind
-  label over the title; Copy shows on hover. (Superseded 2026-10-06: saved
-  cards are parsed into `Card`s and share the recording window's card view — see
-  *One feed for both windows*.)
-- **One accent, used rarely.** `Theme.accent` and its tints follow the macOS
-  accent colour (`NSColor.controlAccentColor`) instead of a fixed periwinkle, in
-  both windows. Card counts and metadata are grey, row tags are coloured dots
-  (names in the tooltip), and "1 cards" is now "1 card".
-- **Native sidebar.** A plain Search field (the `#tag` hint moved to its tooltip)
-  with All / This week and Newest / Oldest first in a filter menu at its end;
-  the glyph takes the accent while "This week" hides sessions. Selection is one
-  soft fill (`selectionFill`) in place of fill, outline, shadow and accent bar.
-  The opaque strips behind folder and date headers — left over from when headers
-  were pinned — are gone, so the glass shows through. Folder rows show their
-  count, and swap it for the context, tags and record buttons on hover (by
-  opacity, so an open popover stays anchored); the filled glyphs, not the
-  accent, now show a folder has context or tags.
-- **Quieter chrome.** The detail's Hide Transcript, Summarise, Tags and `…`
-  actions moved from boxed buttons beside the title into one toolbar group, and
-  the window uses `.unifiedCompact`, which shrinks the toolbar buttons — Record
-  among them, still beside the window controls.
-- **Ask field.** One glass capsule with an inline send arrow that takes the
-  accent once there's a question, floating over the bottom of the reading column
-  with the page fading out beneath it; a streaming answer shows as a card above
-  it.
+These decisions stay:
 
-The Recording window was out of scope beyond the shared card renderer and accent
-colour; its toolbar, AskBar and card chrome keep their earlier look.
+- `Theme.accent` follows the macOS accent colour
+  (`NSColor.controlAccentColor`), not a fixed periwinkle.
+- The transcript is plain text in a centred reading column
+  (`Theme.Metric.readingWidth`), with paragraph times in the left margin.
+- `MarkdownText.lines(from:)` lays out card bodies as prose, leads, nested
+  lists, headings and rules. It replaces the flattened lists of *Card text via
+  AppKit, link cursor*.
+- Folder rows show their buttons on hover by opacity, so an open popover stays
+  anchored.
+
+(The saved-card view was superseded 2026-10-06: see *One feed for both
+windows*.) Commit: `f35ac60`.
 
 ## Website rebuilt as plain HTML (2026-10-04)
 
-The site in `www/` was a design-tool export: every page loaded a generated
-React runtime (`support.js`) to render inline-styled `<x-dc>` templates, with no
-`@media` rules, so at phone width an `overflow: hidden` wrapper silently clipped
-the nav's Download button and every third grid column. Its "screenshots" were
-hand-built HTML mockups that had drifted from the app (upper-case kind chips,
-blue pills, named speakers with avatars, which the app has never had), and the
-copy repeated the privacy pitch six times, advertised a paid plan and
-described the Codex sandbox as it was before the Seatbelt profile.
-
-The three pages now share one `www/style.css` (system font, light and dark
-from `prefers-color-scheme`, two breakpoints) and no script. The index is
-hero, how it works, sessions, six features, privacy once, and download. The
-pricing section is gone: Advisor is free. The terms lost their "paid
-subscriptions, when introduced" sentence (§2, both copies) and stay at Version
-1.0, since removing it adds no obligation. The feature guide was rewritten from
-FEATURES.md, so change the two together. Screenshots are real window
-captures in `www/img/` (`recording-` and `sessions-`, `-light` and `-dark`,
-swapped by a `<picture>` media query), taken with `screencapture -l` from
-staged demo sessions, never real ones, so recapturing after a UI change is the
-whole maintenance cost. `terms.html` kept its wording; `mise run release`'s two
-`sed` lines still match the version line and DMG link.
+The `www/` site was a design-tool export with a generated React runtime and no
+`@media` rules. It was rebuilt as three plain HTML pages with one stylesheet,
+real window captures and no pricing section. (Superseded 2026-10-17: see
+*Website removed*.) Commit: `d3ad3d5`.
 
 ## MIT licence (2026-10-04)
 
 Advisor is free and open source under the MIT licence (`LICENSE`, copyright
-Monoidal Ltd). The terms' §1 used to grant a personal, non-transferable licence
-that forbade redistribution and modification; it now points at the MIT licence
-and says nothing in the terms takes away a right it gives. Both copies (TERMS.md
-and `www/terms.html`) changed together and stay at Version 1.0: like the
-time-limit and paid-subscription removals, the change only widens what users may
-do, so it must not re-prompt anyone to accept.
+Monoidal Ltd). Before this, the terms granted a personal licence that forbade
+redistribution and modification. The terms went on 2026-10-18: see *Terms of
+use removed*. Commit: `d3ad3d5`.
 
 ## One feed for both windows (2026-10-06)
 
-The Sessions detail had drifted from the recording window: saved cards were
-display-only (`SessionCardView`), so they couldn't be collapsed, deleted or
-replied to, and the paragraph-to-run grouping was written twice
-(`displayedItems` live, `displayBlocks` saved). Both windows now render one feed:
+Decision: both windows render one feed. `Feed` builds `FeedItem`s from the
+live store (`Feed.live`) or from a saved note (`Feed.saved`). `FeedView`,
+`FeedCardView` and `FeedNoteView` replace `ListeningCardView`,
+`EditorialNoteView` and `SessionCardView`. Each window supplies `FeedActions`.
+A nil handler hides its control, which keeps the note still being recorded
+read-only in Sessions.
 
-- **One model.** `Feed` (`Feed.swift`) builds `FeedItem`s — transcript runs,
-  cards, notes, headings — from the live store (`Feed.live`) or a saved note's
-  blocks (`Feed.saved`); `Feed.grouped` merges adjacent paragraphs into runs and
-  applies Hide Transcript (paragraphs and headings go, cards and notes stay).
-- **Saved cards are `Card`s.** `SavedCard.card(from:id:)` is the inverse of
-  `SessionMarkdown.cardBlock`: the header label gives the kind, the one-line
-  footer the trigger quote. Only the writer's own footer forms count — an
-  italic `↳ quote`, grounded line or follow-up `Asked …` — so a body that
-  merely ends in italics or links keeps that line. (Until 2026-10-18 the header
-  could also carry a verdict and the footer trailing source links — see *Card
-  sources and verdict removed*.) The `Asked …` stamp has no live field, so it's kept in
-  `Card.footnote`. Saved follow-ups are kind `question` (labelled Question); a
-  blockquote without a known header (one the user typed) has no kind, so it
-  shows no label and no grounded footer.
-- **One view, per-window actions.** `FeedView` renders the items;
-  `FeedCardView` and `FeedNoteView` replace `ListeningCardView`,
-  `EditorialNoteView` and `SessionCardView`. Behaviour comes from `FeedActions`,
-  a struct of handlers each window supplies — the store and sidecar live, the
-  note on disk saved. A nil handler hides its control, which is how the note
-  still being recorded stays read-only in Sessions; otherwise Sessions supplies
-  every handler the recording window does — corrections, collapse, delete,
-  notes, research actions and card follow-ups.
-- **Saved cards have content ids.** A saved card or note has no id in the
-  file, and its block offset shifts whenever another block is added or removed.
-  `Feed.savedIds` gives each one a digest of its markdown (FNV-1a — `hashValue`
-  is seeded per run) plus how many identical blocks precede it, so the id
-  follows the content; an edit maps it back to a block offset with
-  `firstIndex(of:)`. Paragraph ids stay block offsets, which corrections key on.
-- **Detail actions at the trailing edge.** Hide Transcript, Summarise, Tags and
-  `…` sat at the detail column's leading edge, beside the sidebar, where they
-  were missed (macOS places `.primaryAction` there, and `.automatic` measured the
-  same on macOS 26). A flexible `ToolbarSpacer` ahead of the group pushes it to
-  the window's trailing edge, where the recording window keeps its controls.
-- **Saved-note edits splice lines.** `TranscriptDoc.TimedBlock.lines` records
-  the body lines each block was read from, and `TranscriptDoc.splitFrontmatter`
-  (moved from `TranscriptCorrection`) keeps the frontmatter verbatim, so
-  `NoteEdit` edits the note by line. Each edit names the block it expects at the
-  offset and declines if the note no longer has it there, so a stale view can't
-  edit the wrong block; `SessionArchive.rewrite` writes nothing when an edit
-  declines.
-- **Delete is immediate, as live.** `NoteEdit.removingBlock` drops a card's or
-  note's `>` lines and one of the blank separators either side; a `# Summary` or
-  `# Follow-ups` section left empty goes too (the transcript and any heading the
-  user wrote never do). A card that split two paragraphs within 2s of each other
-  lets them rejoin, as dismissing it live would. An edit that doesn't apply
-  still reloads the detail, with a line under the ask field saying so — it
-  usually means the note changed on disk. `SessionArchive.strippingFrontmatter`
-  now delegates to `splitFrontmatter`, so display and edits can't disagree about
-  where the body starts.
-- **Notes in saved sessions.** "Add note here…" on a saved transcript inserts a
-  `**NOTE**` block (`SessionMarkdown.noteBlock`) straight after the line the
-  click or selection end falls in (`NoteAnchor.lineIndex`, shared with the live
-  feed, over `TranscriptDoc.memberText`), so it splits the paragraph there and
-  sits above a card under that line — where the live feed would put it. Nothing
-  goes to the sidecar: a saved session has no agents running.
-- **Research on saved transcripts.** Right-click Answer / Context / Fact check
-  (gated by the same Preferences toggles, via `TranscriptAction.research`) sends
-  `research_document`: the live action's instruction (`researchTask`, wrapped by
-  `documentResearchTask`) over the whole note, on a transient document lane like
-  `ask_document`, streamed back as `document_answer`. The card streams in under
-  its paragraph (`Feed.inserting`, after the cards and notes already there) and,
-  when done, is written into the note with `SessionMarkdown.cardBlock` under the
-  paragraph's last line (`NoteEdit.anchor` / `insertingBlock`) — where a live
-  manual card anchors. The line is found again by its text, nearest where it
-  was, so edits made while the research ran don't misplace the card — or by its
-  `- HH:MM:SS` stamp if a correction changed it; if it has gone altogether the
-  card goes under the last transcript line rather than being lost — not by
-  heading, since a user's own heading can sit inside the transcript and an
-  older note's summary after it, where a later Summarise would replace it. While
-  it streams the card shows under the paragraph that ends with that line, or
-  the paragraph nearest where it was (`NoteEdit.paragraphOffset`), so it doesn't
-  jump as other edits shift block offsets. The save runs from captured values,
-  so it still lands if the user has moved to another session, and is retried at
-  the note's new path if it was filed into a folder meanwhile
-  (`SessionArchive.save(to:)`, via `relocated`). Ask and Summarise saved to
-  the captured path only, so filing the note during either lost the answer
-  until 2026-10-06 (code review); all four saved-note writes now go through
-  `SessionArchive.save(to:)`. An answer researched here is footed "Grounded
-  in the saved transcript" (kept as `Card.footnote`, which `cardBlock` writes in
-  place of the live line). Failed and skipped cards aren't saved; they stay
-  until deleted. Skip and Delete both drop the request's handler
-  (`discardDocumentRequest`), so a finish already on its way can't save the
-  card. The sidecar rejects an unknown action (`researchKind`) instead of
-  prompting with it. Saved research shares the document lanes' cap of two
-  requests with Ask and Summarise; a third is refused at once (the live query
-  lane takes one action at a time).
-- **Smooth scrolling: redraws don't re-lay out text.** SwiftUI calls
-  `updateNSView` whenever a row redraws — and rows redraw a lot: on hover as
-  cards scroll under the pointer, and on every live interim-speech update in
-  the recording window (the row actions are closures, so SwiftUI can't tell a
-  row is unchanged). `MarkdownText` re-parsed and re-rendered its markdown and
-  both text views invalidated their intrinsic size on every update, forcing a
-  layout pass each time, so scrolling stuttered in both windows. Now each text
-  view remembers what it last showed (`IntrinsicHeightTextView.renderedContent`)
-  and an update bringing the same text and style does nothing; the colours are
-  dynamic, so light/dark still follows. And hover lives in a `HoverState` the
-  card holds but never reads — only `HoverReveal`, around the buttons, reads it
-  — so a pointer crossing a card redraws its buttons, not its text.
-- **Built per detail, not per redraw.** The pane builds the note's feed items
-  and card ids in its initialiser, from `detail`, so its own state changes —
-  streamed answers, typing in the ask field — redraw without re-parsing every
-  card. (The parent still re-creates the pane when it redraws.)
-- **Follow-ups on saved cards.** A card's follow-up field sends `reply_document`
-  — `card_reply`'s fields with the whole note in place of the recent transcript
-  slice, answered by `replyTask` in its saved-session wording (`saved: true`:
-  the card is from a session being reviewed, and the context is the whole saved
-  note, not a live slice) on a transient document lane. The
-  sidecar streams only the answer; the app shows it in the live turn format
-  (`SessionMarkdown.replyBody`, which the live optimistic edit now uses too) and,
-  when done, rewrites just that card's body in the note
-  (`NoteEdit.replacingCardBody`), keeping its header and footer. The card is
-  found by its content id, so edits made meanwhile don't misplace the reply; a
-  failed or skipped follow-up leaves the note untouched, and one that finished
-  but couldn't be saved stays on screen to copy. The rewritten card has a new
-  content id, so its expansion is carried over (`NoteEdit.cardId`) — a
-  fact-check would otherwise snap shut on the answer just given. Deleting the card stops its
-  follow-up. Replies aren't offered on summaries (as live), on blockquotes
-  Advisor didn't write, or on a research card that isn't in the note yet.
-  `SidecarManager`'s four document requests share one sender
-  (`sendDocumentRequest`).
-- **Saved collapse is view state.** Saved fact-checks start collapsed, as live
-  ones do. A toggle is kept in the pane by card id, so it survives other blocks
-  changing (a follow-up reply changes the card's markdown, so that card returns
-  to its default); it resets when another session is selected and never touches
-  the note, so the note still being recorded can be collapsed too. A card with
-  neither a kind label nor a title (a blockquote the user typed) can't collapse —
-  it would collapse to an empty box.
-- **One look.** The quiet Sessions style in both windows: a coloured kind label
-  over the title on a faint fill, no outline or pill; Copy, collapse and delete
-  on hover, with the chevron kept visible on a collapsed card. Transparent
-  controls drop out of the accessibility tree, so each card and note also
-  offers them as named accessibility actions, and `CardIconButton` is labelled
-  with its help text rather than its symbol name. The recording
-  window's transcript is no longer boxed into recessed run cards — it is plain
-  text in the same reading column (`readingWidth`, `readingMargin`) with each
-  paragraph's time in the margin. This supersedes the 2026-10-04 restyle's note
-  that the Recording window keeps its earlier card chrome; `contentMaxWidth` is
-  gone.
+Reason: saved cards were display-only, and the paragraph grouping existed
+twice.
 
-**Stopping Ask and Summarise in Sessions (2026-10-06).** The recording window could
-stop any card (✕), including the Ask box's query card and the live summary, but
-the Sessions window's own Ask and Summarise ran in the Answer panel with no stop —
-the field stayed locked until they finished. The panel now has a ✕ while one runs:
-`discardDocumentRequest` (the path Skip already uses for saved research) drops the
-handler, so no late frame can save it, and interrupts the document lane. Nothing
-reaches the note (`req_sessions_answer_cancel` pins the dropped handler), and a
-stopped Ask's question returns to the field, ready to edit or resend. The panel
-(`AnswerPanel`) now keeps its header outside the scroll view, so the ✕ can't be
-scrolled away or sit over text, and it shows while a request runs even before
-any text arrives.
-Follow-ups on cards still can't be stopped in either window (their ✕ is hidden
-while replying) — a separate change, now safe since a cancelled follow-up
-restores the card's answer.
+Decisions inside it:
+
+- **Saved cards are `Card`s** (`SavedCard.card(from:id:)`, the inverse of
+  `SessionMarkdown.cardBlock`). Only the writer's own footer forms count, so a
+  body that ends in italics or links keeps that line.
+- **Saved cards have content ids.** A saved block has no id in the file, and
+  its offset changes when other blocks change. `Feed.savedIds` uses an FNV-1a
+  digest of the markdown plus the count of identical blocks before it.
+  `hashValue` is rejected because each run seeds it. Paragraph ids stay block
+  offsets, which corrections key on.
+- **Saved-note edits splice lines** (`NoteEdit`). Each edit names the block
+  that it expects, and declines when the note no longer has it there, so a
+  stale view cannot edit the wrong block.
+- **Saved-note writes follow a moved note.** All four saved-note writes go
+  through `SessionArchive.save(to:)`, which tries again at the new path. Before,
+  a note filed during an Ask or Summarise lost the answer.
+- **Research on saved transcripts** (`research_document`) runs on a transient
+  document lane. The card goes under the last line of its paragraph, found
+  again by text, else by its `- HH:MM:SS` stamp, else at the transcript end.
+  It is not anchored by heading, because a user heading can sit inside the
+  transcript. Skip and Delete drop the request handler
+  (`discardDocumentRequest`), so a late finish cannot save the card.
+- **Redraws do not lay out text again.** SwiftUI calls `updateNSView` on each
+  row redraw (hover, each interim-speech update), and the re-render made
+  scrolling stutter. `IntrinsicHeightTextView.renderedContent` skips an
+  unchanged update, and only `HoverReveal` reads `HoverState`, so hover redraws
+  the buttons, not the text.
+- **Detail actions at the trailing edge.** On macOS 26, `.primaryAction` (and
+  `.automatic`, as measured) puts them beside the sidebar, where users missed
+  them. A `ToolbarSpacer` pushes them to the trailing edge.
+
+Commit: `5a888f7`.
+
+**Stopping Ask and Summarise in Sessions (2026-10-06).** The Answer panel has a
+✕ while an Ask or Summarise runs. It calls `discardDocumentRequest`, so no late
+frame can save, and it interrupts the document lane. A stopped question returns
+to the field. The panel header is outside the scroll view, so the ✕ cannot
+scroll away. Commit: `2b3996e`.
 
 ## Effort preference (2026-10-07)
 
-Card latency is the main complaint. The log since 2026-09-01 (184 research
-cards): trigger to first card text median 30.5 s (p90 52.7 s), to finished 33.4 s;
-speech to trigger only ~2 s. The 2026-06-13 two-pass prompt ("From your notes:"
-first) mostly doesn't hold — 155 of 184 cards arrived as one block at the end.
+Decision: Preferences ▸ Agent has an **Effort** picker (`effort` in
+`config.json`): Default (inherit) or low, medium, high, xhigh, max. It applies
+to every card lane through `cardLaneOptions` in `lanes.ts`, not to the
+classifier. Claude only.
 
-One cause: card lanes load the user's settings (`settingSources: ["user"]`), so
-they inherit the user's `effortLevel`. Verified against the real CLI with a fake
-model endpoint (`effort.sdk.test.ts`): with `effortLevel: "xhigh"` in settings
-and no SDK `effort`, the request carries `output_config.effort: "xhigh"`; an
-explicit `effort` overrides it.
+Reason: card latency is the main complaint. Over 184 research cards since
+2026-09-01, the time from trigger to first card text had a median of 30.5 s
+(p90 52.7 s), and to a finished card 33.4 s. Speech to trigger was about 2 s.
+Card lanes load the user's settings (`settingSources: ["user"]`), so they
+inherit the user's `effortLevel`. `effort.sdk.test.ts` verified this against
+the real CLI: with `effortLevel: "xhigh"` in settings and no SDK `effort`, the
+request carries `output_config.effort: "xhigh"`. An explicit `effort` overrides
+it.
 
-So Preferences ▸ Agent has an **Effort** picker (`effort` in `config.json`,
-mirrored in `Preferences.swift` and `config.ts`): Default (inherit, so nothing
-changes until the user picks) or low / medium / high / xhigh / max. It applies
-to every card lane — research, query, reply, document, summary — via
-`cardLaneOptions` in `lanes.ts`. Not to the classifier: it doesn't load user
-settings, already answers in ~1.5 s, and more thought would delay every card.
-Claude only; Codex ignores it. Every level is offered whatever the model,
-because the CLI lowers an unsupported one rather than failing the turn (xhigh
-is sent as high to Sonnet 4.6; Haiku 4.5 gets no effort at all). An unknown
-level in `config.json` falls back to Default in the sidecar. Each run's level is
-logged on its `run start` line, so card timings can be compared by level from
-the log.
+The classifier is excluded: it does not load user settings, it answers in
+about 1.5 s, and more thought would delay every card. Every level is offered
+for every model, because the CLI lowers an unsupported level and does not fail
+the turn (Sonnet 4.6 gets xhigh as high; Haiku 4.5 gets no effort). Each run
+logs its level on its `run start` line.
 
-This is a measuring knob, not the whole fix: token streaming
-(`includePartialMessages`) followed on 2026-10-09 — see the next section.
+The two-pass prompt of 2026-06-13 ("From your notes:" first) mostly fails: 155
+of 184 cards came as one block at the end. Effort is a measurement knob, not
+the whole fix (see *Card text streams as it is written*). Commit: `d5f5325`.
 
 ## Card text streams as it is written (2026-10-09)
 
-Cards still felt slow: they showed nothing until the agent finished. Measured
-over 183 research cards since 2026-09-01 (Sonnet, medium effort): run start to
-the last tool call a median 11.8 s, the last tool call to the first text 15.7 s,
-first text to done 0.1 s. 163 of 183 cards arrived as one text block, written
-whole at the end of the turn, so "streaming" per block streamed nothing.
+Decision: card text streams by token delta, and a card shows what the agent
+does until text arrives.
 
-Two changes, one per gap:
+Reason: cards showed nothing until the agent finished. Over 183 research cards
+since 2026-09-01 (Sonnet, medium effort), the medians were: run start to the
+last tool call 11.8 s, the last tool call to the first text 15.7 s, and the
+first text to done 0.1 s. 163 of 183 cards came as one text block at the end
+of the turn, so a stream for each block streamed nothing.
 
-- **Text deltas.** `AgentSession` sets `includePartialMessages`, and the stream
-  loop appends each top-level `text_delta` as it arrives. The finished
-  `assistant` message that follows repeats the text, so a message whose id was
-  streamed adds nothing; one that wasn't (no stream events) is still added
-  whole. The real CLI was checked to give a finished message the id of its
-  `message_start` (`streaming.sdk.test.ts`). A message still open (no
-  `message_stop`) when another starts, or when an unstreamed one arrives, broke
-  off: the CLI retries it or falls back to a non-streaming request under a new
-  id, and drops the partial one from its own transcript, so its text comes off
-  the card too. The `first text` log line now marks the first visible text, so
-  latency stays comparable in the log.
-- **Cut-short answers.** Text can now stop mid-sentence, so a turn that ends in
-  an error with some text (timed out, `error_max_turns`, the CLI exiting) keeps
-  the text and adds "*Stopped early: <reason>.*" (`cardOutcome`).
-- **Activity lines.** Tool calls the sandbox gate lets through
-  (`describeToolUse` in `activity.ts`: "Searching the web for “…”", "Reading
-  example.com", "Reading Cedar.md", connector calls) and thinking blocks
-  ("Thinking…") go to `RunProgress.onActivity`. They come from the gate's allow
-  path, not the model's `tool_use`, so a denied call (a credential read) never
-  shows as if it ran.
-  `guardedRun` sends them as `activity` on `card_update`: with no text yet the
-  frame is `pending` with body "…", as at dispatch. Each frame replaces the line
-  and a frame without one clears it, so text arriving ends it and terminal
-  frames never carry one. `ToolSearch` (loading connector schemas) shows
-  nothing. The app keeps it on `Card.activity` while the card researches and
-  shows it under the body, never in the saved note. Saved-session answers
-  (`document_answer`) ignore it.
+Changes:
 
-`guardedRun` rate-limits streaming frames to one per 150 ms: deltas arrive
-every few words, each frame resends the whole body, and the app re-renders its
-markdown per frame. The first frame goes at once, later ones collapse into one
-trailing frame carrying the latest state, and that trailing frame is dropped
-when the run ends, so nothing follows the terminal frame. `Agent.run` now takes
-a `RunProgress` (`onText`, `onActivity`) instead of a bare text callback.
+- **Text deltas.** `AgentSession` sets `includePartialMessages`. A finished
+  `assistant` message repeats the streamed text, so it adds nothing when its id
+  was streamed. `streaming.sdk.test.ts` verified that the real CLI gives the
+  finished message the id of its `message_start`. A message still open when
+  another starts is dropped from the card, because the CLI tries again under a
+  new id.
+- **Cut-short answers** keep their text and add "*Stopped early: <reason>.*"
+  (`cardOutcome`).
+- **Activity lines** (`activity.ts`) come from the allow path of the sandbox
+  gate, not from the model's `tool_use`, so a denied call never shows as if it
+  ran. The saved note never holds them.
+- **Rate limit.** At most one streaming frame per 150 ms (`throttle.ts`),
+  because each frame resends the whole body and the app renders it again.
+- **Note writes** are keyed on what the note holds (`Card.writerKey`), so
+  streaming no longer holds back the 2 s transcript write.
 
-The session note's debounced rewrite was keyed on every card's body, so each
-streaming frame restarted its 2 s wait and held back transcript writes while a
-card streamed. It is now keyed on what the note holds (`Card.writerKey`, each
-card as `persisted`), which streaming text never changes.
-
-Not changed: time to a finished answer is still the searching and thinking.
-Codex reports no activity yet (its SDK has `item.started` events for web
-searches and connector calls that could feed it). A collapsed card (fact-checks
-start collapsed) shows neither the streaming text nor the activity line until
-expanded. The two-pass "From your notes:" prompt rule predates this and may now
-cost more than it gives — measure before dropping it.
+Limits: the time to a finished answer is still the search and the thought.
+Codex reports no activity yet; its SDK has `item.started` events that could
+feed it. The two-pass "From your notes:" prompt rule can now cost more than it
+gives. Measure it before you remove it. Commit: `3d3a520`.
 
 ## The classifier is offered no tools (2026-10-09)
 
-The classifier was meant to have no tools, but `allowedTools: []` only skips the
-permission check — the CLI still offered it every built-in tool (29 on the real
-login: Grep, Read, WebSearch, AskUserQuestion, ScheduleWakeup, ToolSearch, …),
-and the sandbox let the reads and web searches through. 46 classifies in the
-log used one, 22 of them on 6–9 October: AskUserQuestion 23 times, WebSearch 13,
-ToolSearch 5, Grep 4. Those took a median 10.2 s against 1.9 s, and classifies run
-one at a time, so every later trigger waited behind them.
+Decision: the classifier sets `AgentSessionOptions.noTools`: `tools: []` (no
+built-ins), and `mcpServers: {}` with `strictMcpConfig` (no MCP servers from
+the user or from claude.ai). `tools: []` alone still lets the user's MCP
+servers through. The classifier also keeps `settingSources: []`, because a tool
+that the user's settings switch on still comes through (`ENABLE_LSP_TOOL` adds
+LSP even with `noTools`). Card lanes do not set `noTools`.
 
-`AgentSessionOptions.noTools` now offers the model nothing: `tools: []` (no
-built-ins) plus `mcpServers: {}` with `strictMcpConfig` (no MCP servers but
-those passed, so none of the user's or claude.ai's). The classifier sets it; the
-card lanes don't. `classifier.sdk.test.ts` checks the request the real CLI
-sends: a card lane in the same synthetic home sees a stub MCP server and the
-built-ins, the classifier sees no tools, and `noTools` with the user's settings
-loaded still sees no stub (with `tools: []` alone it does). Checked on the real
-login too: the classifier went from 29 built-in tools and the claude.ai
-connectors (Linear, Gmail, Calendar, Drive, Docs connected; they join after the
-init message, so ask `mcpServerStatus()` after a turn) to no tools and no
-servers. A tool the user's settings switch on still comes through —
-`ENABLE_LSP_TOOL` adds LSP to a card lane with `noTools` — which is why the
-classifier also keeps `settingSources: []`.
+Reason: `allowedTools: []` only skips the permission check. The CLI still
+offered every built-in tool (29 on the real login), and the sandbox let reads
+and web searches through. 46 classifies in the log used a tool (AskUserQuestion
+23 times, WebSearch 13, ToolSearch 5, Grep 4). They took a median of 10.2 s
+against 1.9 s, and classifies run one at a time, so every later trigger waited.
 
-Codex was not covered: its classifier had web search and network off, but kept
-its shell (read-only, under the Seatbelt profile) and the user's MCP servers.
-See the next section.
+Verified: `classifier.sdk.test.ts` checks the request that the real CLI sends.
+On the real login, the classifier went from 29 built-ins plus the claude.ai
+connectors to no tools and no servers. The claude.ai connectors join after the
+init message, so call `mcpServerStatus()` after a turn to see them. Codex has
+its own entry: see *Codex connectors follow the actions toggle*.
+Commit: `d287eef`.
 
 ## Codex connectors follow the actions toggle (2026-10-09)
 
-The Claude backend lets connector reads and searches through and refuses
-actions unless "Allow connector actions" is on (`mcpPermission`). Codex has no
-per-call hook to do that, so every Codex lane had all the user's connectors,
-whatever the toggle said: the MCP servers in `~/.codex/config.toml`, the
-servers its plugins bring, and ChatGPT apps. The classifier had them too, and
-its shell.
+Decision: `codexClientOptions` decides the connectors for each session. With
+"Allow connector actions" on, a Codex session has all connectors, as on Claude.
+With it off (the default), and always for the classifier (`noTools`), a session
+has none: `features.apps` and `features.plugins` are off, and each server in
+the user's config is disabled by name (`mcp_servers.<name>.enabled=false`). The
+classifier also loses the shell (`shell_tool`, `unified_exec`), goals, image
+generation and sub-agents (`multi_agent`).
 
-`codexClientOptions` now decides per session. With actions allowed nothing
-changes: everything is allowed, as on Claude. Without them (the default), and
-always for the classifier (`noTools`), a session gets no connectors:
-`features.apps` and `features.plugins` are off, and each server the user's
-config defines is disabled by name (`mcp_servers.<name>.enabled=false`). The
-names come from `codex mcp list --json -c features.plugins=false`, run through
-the same wrapper from the session's directory when the session first runs
-(about 0.5 s). If that fails, the card fails and the next card tries again.
-Reply, summary and document lanes are made for one card each, so they pay the
-0.5 s on every card; research and query lanes pay it once, research lanes past
-the first (which is warmed) on their first card. The classifier also loses the
-shell (`shell_tool`, `unified_exec`), goals, image generation and sub-agents
-(`multi_agent`).
+Reason: Codex has no per-call hook, so it cannot allow reads and refuse
+actions as `mcpPermission` does on Claude. Before, every Codex lane, the
+classifier too, had all the user's connectors whatever the toggle said: the MCP
+servers in `~/.codex/config.toml`, the servers of its plugins, and ChatGPT
+apps.
+
+The server names come from `codex mcp list --json -c features.plugins=false`
+when the session first runs (about 0.5 s; one-shot lanes pay it on each card).
+If the listing fails, the card fails and the next card tries again.
 
 Found against the real Codex CLI 0.139.0, with a fake Responses endpoint and a
 synthetic `~/.codex` (`codex.sdk.test.ts`):
 
-- `config: { mcp_servers: {} }`, proposed above, does nothing: `--config`
-  overrides merge into the user's tables rather than replace them.
-- `codex exec --ignore-user-config` drops the servers but also the user's
-  model, and Preferences has no Codex model of its own, so on a ChatGPT login
-  the CLI's default (`gpt-5.4`) was refused. Tried and dropped.
-- Disabling a plugin's server by name makes a server with no command, which
-  the CLI rejects. `features.plugins=false` drops those servers instead, which
-  is why the listing runs with plugins off.
-- The tools offered depend on the model: `gpt-6.1-sol` gets sub-agents
-  (`multi_agent_v1`) and no `apply_patch` or `tool_search`; the CLI's default
-  for an API key the reverse.
-- No setting removes `update_plan`, `request_user_input`, `view_image` and,
-  for some models, `apply_patch` and `tool_search`. Each is inert for the
+- `config: { mcp_servers: {} }` does nothing: `--config` overrides merge into
+  the user's tables and do not replace them.
+- `codex exec --ignore-user-config` drops the servers, but also the user's
+  model. Preferences has no Codex model, so on a ChatGPT login the default of
+  the CLI (`gpt-5.4`) was refused. Rejected.
+- A plugin's server disabled by name becomes a server with no command, which
+  the CLI rejects. `features.plugins=false` drops those servers, so the listing
+  runs with plugins off.
+- The tools offered depend on the model. `gpt-6.1-sol` gets sub-agents
+  (`multi_agent_v1`) and no `apply_patch` or `tool_search`. The CLI default for
+  an API key gets the reverse.
+- No setting removes `update_plan`, `request_user_input`, `view_image` and, for
+  some models, `apply_patch` and `tool_search`. Each is inert for the
   classifier: `update_plan` has no effect, `request_user_input` fails in exec
-  mode, `apply_patch` is refused by read-only mode and the Seatbelt profile,
+  mode, read-only mode and the Seatbelt profile refuse `apply_patch`,
   `view_image` reads only what the profile allows, and `tool_search` has no
   connectors to find. The test fails if a CLI upgrade offers anything else.
 
-One classify turn on the real ChatGPT login offered no shell, no MCP servers
-and no apps; it was offered `update_plan`, `request_user_input`, `view_image`
-and the sub-agent tools, which are now off too (checked on the fake only).
-That run had `features.apps=false` on, with no control run, so it doesn't show
-that apps would otherwise have appeared. The turn itself was refused: the
-vendored CLI 0.139.0 can't use the `gpt-6.1-sol` model the user's config names
-on a ChatGPT login, as with `gpt-5.6-sol` in August. The Codex backend needs a
-newer CLI before it runs here at all.
+On the real ChatGPT login, one classify turn was offered no shell, no MCP
+servers and no apps. The sub-agent tools that it was offered are now off too,
+verified on the fake endpoint only. That run had no control run, so it does not
+prove that apps would otherwise appear. The turn itself was refused: CLI
+0.139.0 cannot use the `gpt-6.1-sol` model of the user's config on a ChatGPT
+login. The Codex backend needs a newer CLI before it runs here.
 
-Limits: a server name the SDK can't write as a dotted key (anything but
-letters, digits, `-` and `_`; `codex mcp add` refuses such names, but
-`config.toml` can quote one) fails the session rather than leave the server
-running. Each lane lists the servers when it first runs and again after a
-reset (which recycles a failed lane), but the CLI reads `config.toml` on every
-turn, so a server added mid-recording runs in lanes that started before it
-until they are reset or the next recording rebuilds them. Listing before every
-turn would add the 0.5 s to every research card and classify too. The other
-way round, a server removed mid-recording leaves an override naming a server
-with no command, which the CLI rejects: that turn fails, and a failed turn
-makes the session list again, so the next one runs. A task stopped while the
-listing runs shares it with the next task rather than starting another.
+Limits:
+
+- A server name that is not a valid dotted key (only letters, digits, `-` and
+  `_`) fails the session, so that the server does not run.
+- The CLI reads `config.toml` on each turn, but a lane lists servers only at
+  its first run and after a reset. So a server added mid-recording runs in
+  older lanes until they reset. Rejected: a listing before each turn, which
+  adds 0.5 s to every card and classify.
+- A server removed mid-recording makes one turn fail. The failure makes the
+  session list again, so the next turn runs.
+
+Commit: `2081ad6`.
 
 ## Node and dependencies pinned (2026-10-10)
 
-`package.sh` bundles whatever `node` is on `PATH`, so v0.4.5 shipped Node
-26.10.0 (the build machine's mise default) while CI tested on Node 22. A test
-passed locally and failed in CI: it waited on the session's timeout timer, which
-is unref'd and so keeps nothing alive, and Node 22's test runner ended the test
-before it fired where Node 26's didn't. The test now uses mock timers, which
-holds on any version; the pin is so CI tests what ships.
+Decision: Node is pinned once, in `.tool-versions` (`node 26.11.1` since
+2026-10-15). mise reads it, CI reads it through `node-version-file`, and
+`package.sh` refuses to bundle any other version. npm dependencies are exact in
+`sidecar/package.json`, and `sidecar/.npmrc` sets `save-exact`.
 
-Node is now pinned once, in `.tool-versions` (`node 26.10.0`): mise reads it
-locally, CI's `actions/setup-node` reads it through `node-version-file`, and
-`package.sh` refuses to bundle any other version. Node 26 because the app
-already shipped it, and it becomes LTS this month; both SDKs need only Node 18
-or later. npm dependencies are exact in `sidecar/package.json` (the Claude Agent
-SDK was `latest`, `typescript` and `@types/node` were ranges) at the versions
-the lockfile already resolved, and `sidecar/.npmrc` sets `save-exact` so new
-ones are pinned too. `@types/node` moved from 22.19.21 to 26.6.3 to match the
-runtime: Node 22's types would type-check calls to APIs Node 26 removed.
-(Bumped to 26.11.1 on 2026-10-15. The line must say `node`, not asdf's
-`nodejs`, because `package.sh` reads the `node` line, though mise accepts both.)
+Reason: `package.sh` bundled any `node` on `PATH`, so v0.4.5 shipped Node
+26.10.0 while CI tested on Node 22. A test passed locally and failed in CI: it
+waited on an unref'd timer, and the test runner of Node 22 ended the test
+before the timer fired. The test now uses mock timers. The pin makes CI test
+what ships.
+
+Node 26 was chosen because the app already shipped it and it became LTS in
+October 2026. `@types/node` follows the runtime, because older types would
+type-check calls to removed APIs. The line must say `node`, not asdf's
+`nodejs`, because `package.sh` reads the `node` line. Commit: `11a1feb`.
 
 ## Card tables (2026-10-15)
 
-A pipe table in a card body showed as one run-on line of pipes: `MarkdownText`
-joins a block's lines with spaces, and the 2026-06-21 renderer left tables to
-degrade. Every place the app shows markdown goes through `MarkdownText` (live
-and saved cards, notes, Ask and Summarise answers, the terms sheet), so tables
-are handled there once.
+Decision: `MarkdownText` renders a GitHub-flavoured pipe table as an AppKit
+text table (one `NSTextTableBlock` for each cell). Every view that shows
+markdown goes through `MarkdownText`, so tables are handled once. The parse
+follows GFM, with one difference: rows end at the first line with no pipe, not
+at a blank line, because a line straight after a table is more likely prose.
 
-`lines(from:)` finds a GitHub-flavoured table anywhere in a block, as GFM does:
-a piped header row followed by a piped delimiter row (`---`, `:--`, `--:`,
-`:-:`) with the same number of cells. Lines above it lay out as before, prose
-directly above becoming its lead; rows run to the first line without a pipe
-(GFM runs on to a blank line, but straight after a table such a line is more
-likely prose), padded or cut to the header's width; the delimiter's colons set each column's
-alignment; `\|` is a literal pipe, and a pipe inside a code span still splits
-the cell, as in GFM.
+Rejected:
 
-`render` builds the table as an AppKit text table: one paragraph per cell,
-each in its own `NSTextTableBlock`, with a hairline grid (`hairlineStrong`), a
-semibold header row, its italic and code runs included, on a faint fill
-(`surfaceCardSubtle`), cell padding from
-`Theme.Metric`, and inline markdown in cells. Text tables need TextKit 1, which
-the view already forces for height measurement, so the card's intrinsic height
-includes the table, cells wrap at the card's width, and the table stays part of
-the one selectable text view, links and their cursor included. Tab stops were
-rejected because a cell longer than its stop breaks the columns rather than
-wrapping. A SwiftUI `Grid` was rejected because it splits the card into several
-views, so one selection could no longer span the table and the text around it.
+- Tab stops. A cell longer than its stop breaks the columns and does not wrap.
+- A SwiftUI `Grid`. It splits the card into several views, so one selection
+  cannot span the table and the text around it.
 
-TextKit 1's table layout needed working around, measured against the real
-layout manager:
+Text tables need TextKit 1, which the view already forces for height
+measurement. TextKit 1 table behaviour, measured against the real layout
+manager, and the workaround for each:
 
-- **Columns split evenly.** The "automatic" layout algorithm gives every
-  column the same width whatever its content, and it ignores minimum and
-  maximum cell widths. Fixed cell widths are honoured as content widths, but
-  are scaled down when they don't fit. So `FittedTextTable`, an `NSTextTable`
-  subclass, records each column's widest word and longest cell when the card
-  renders. In `rect(for:layoutAt:in:…)`, TextKit's per-cell layout callback,
-  it sets fixed widths for the width on offer, as a browser does:
-  - every column at its natural width when they all fit, so a small table
-    shrinks to its content;
-  - otherwise narrow columns first at their natural width (see below), and
-    the rest at their widest word plus a share of what remains, in proportion
-    to their slack;
-  - and when even the widest words don't fit, words must break somewhere:
-    narrow columns keep their widest word, and the rest are scaled into what
-    remains.
+- The automatic layout gives every column the same width and ignores minimum
+  and maximum widths; fixed widths are scaled down when they do not fit.
+  `FittedTextTable` sets fixed widths in `rect(for:layoutAt:in:…)`, as a
+  browser does: natural widths when they fit, else narrow columns first at
+  natural width and the rest by slack, else widest words kept for narrow
+  columns. One point stays spare, because a full-width table overhangs by half
+  a point and its right border was clipped.
+- Table and cell margins are ignored, so a spacer line follows a table that is
+  not last.
+- Translucent borders double where cells meet, so cells draw only their top
+  and left edges.
+- Cells align by their top edge, and `.baselineAlignment` has no effect, so
+  cell lines get the body line height as a minimum.
 
-  A point is kept spare, because a full-width table overhangs by half a point
-  and its right border was clipped.
-- **Table and cell margins are ignored**, so a table that isn't last is
-  followed by an empty spacer line one block-spacing tall. It works between
-  two tables, and gives what follows the same rhythm as after any block.
-- **Translucent borders double where cells meet.** Cells draw only their top
-  and left edges, and the last row and column close the frame, so each line is
-  drawn once.
-- **Cells align by their top edge**, and `.baselineAlignment` has no effect.
-  A cell of only inline code, which is smaller, sat higher than its row, so
-  cell lines get the body font's line height as a minimum.
-- **Narrow columns keep their natural width.** Shares in proportion to slack
-  alone left a short header ("Monthly cost") a few points short, so it
-  wrapped beside a long column that could spare them. So, narrowest first, a
-  column that fits an even share of the remaining width keeps its natural
-  width, provided the other columns can still fit their widest words.
+Commit: `e6387f5`.
 
 ## Website removed (2026-10-17)
 
-The `www/` site (index, features, terms, served by Cloudflare with the DMG in
-an R2 bucket) is gone: it was never kept in step — the DMG link on the live
-page returned 404 for the last three releases and the tags it advertised had
-not been pushed since v0.4.0. `mise run release` now just builds the DMG and
-tags `HEAD`, which also fixes an off-by-one: the sync commit used to land
-*after* the DMG was built, so the tag pointed one commit past the source the
-bundle's `CFBundleVersion` (commit count) was stamped from. `TERMS.md` is the
-only copy of the terms; the in-app fallback when the bundled file is missing
-names the repo file rather than a URL, since the repo is private and there is
-no public page. The DMG is not published anywhere until a new home is chosen
-(GitHub Releases is the obvious one, with `gh release create` in the task).
+The `www/` site (on Cloudflare, with the DMG in an R2 bucket) was removed,
+because nobody kept it in step: its DMG link returned 404 for the last three
+releases. `mise run release` now only builds the DMG and tags `HEAD`. This also
+fixed an off-by-one: the sync commit landed after the DMG build, so the tag
+pointed one commit past the source that `CFBundleVersion` counted. (Superseded
+2026-10-19 for the DMG: see *DMG published to GitHub Releases*.)
+Commit: `6b83f0e`.
 
 ## Code review batch (2026-10-17)
 
-A whole-codebase review (both halves, read against the sandbox, the process
-lifecycle and the docs) found no release blocker; the fixes landed one per
-commit, in order of risk.
+A review of the whole codebase found no release blocker. Each fix is one commit,
+in order of risk.
 
 **A flagged `success` result is a failure.** The Claude SDK reports some
-failures as a `success` result with `is_error` set and the message in
-`result` — a logged-out CLI answers "Not logged in · Please run /login" that
-way, instantly, without touching the API, and echoes the same text as an
-assistant block whose `message.model` is `<synthetic>`. `AgentSession` keyed
-only on the subtype, so the message reached the card as a *done* answer; and
-because `runCard` recycles on `result.error` alone, the lane's transcript
-cursor was not forgotten — the CLI exits after such a result (the SDK rethrows
-it as "Claude Code returned an error result"), so the next card re-spawned the
-session but was sent only the lines after the cursor, missing the ones the
-dead turn had consumed. Now: synthetic assistant messages are skipped at the
-source (they are the CLI's words, not the model's), `resultOutcome` reports a
-flagged result as a failure carrying the CLI's message (text streamed *before*
-the failure is kept, so the card can say it stopped early), and an error result
-carries its subtype plus the CLI's own first message rather than a bare
-`error_max_turns`. A stream that dies names its cause ("agent session ended:
-Claude Code process exited with code 1") instead of leaving the reason in
-stderr alone. `auth.sdk.test.ts` proves the logged-out shape against the real
-CLI. (A 401 from the API is a different path: the CLI retries it ten times with
-backoff, longer than a task lives, so that one ends as the lane's timeout.) The
-session is kept after a flagged result: with no credentials the CLI exits within
-~100 ms and the stream's end drops it, but after an API 400 ("prompt is too
-long", probed) it carries on and answers the next prompt, and dropping it would
-cold-spawn the classifier on every recoverable error. The gap between a fatal
-flagged result and the process exit is real but shorter than any dispatch
-interval; a task caught in it fails with the cause named.
+failures as a `success` result with `is_error` set. A logged-out CLI answers
+"Not logged in · Please run /login" in this way, at once and with no API call,
+and echoes the text as an assistant block with `message.model` `<synthetic>`.
+Now `AgentSession` skips synthetic messages, and `resultOutcome` reports a
+flagged result as a failure with the CLI's message, so the lane forgets its
+cursor and the card says why. `auth.sdk.test.ts` proves the logged-out shape
+against the real CLI. A 401 from the API is different: the CLI retries it ten
+times, longer than a task lives, so it ends as the lane timeout. The session is
+kept after a flagged result. With no credentials the CLI exits in about 100 ms
+anyway, but after an API 400 ("prompt is too long", probed) it answers the next
+prompt, so a drop would cold-spawn the classifier on each recoverable error.
+Residual: a task in the short gap between a fatal flagged result and the process
+exit fails, with the cause named. Commit: `b704ae9`.
 
-**Codex may not write its own inputs.** The Seatbelt profile allowed writes to
-all of `~/.codex`, and Codex writes all over it (sqlite databases, sessions,
-logs, locks, temp files), so the folder has to stay writable. But the CLI
-re-reads its config every turn and Advisor disables the user's connectors by
-name through `--config` overrides (*Codex connectors follow the actions
-toggle*), so a research lane's shell could append an `[mcp_servers.x]` block to
-`config.toml` and have a connector back next turn — and `managed_config.toml`
-is layered *above* those overrides, so a line there would re-enable one by
-name. `hooks.json` runs commands; `.env` is loaded into the CLI's environment,
-so an `OPENAI_BASE_URL` there would redirect the user's token and transcript;
-`AGENTS.md`, `instructions.md`, `agents/`, `skills/`, `rules/`, `prompts/` and
-`plugins/` are instructions and commands every later session loads, which
-makes them the persistence a prompt-injected turn would reach for. Only Codex's
-own `read-only` mode stood in the way, which is kept but not relied on.
-`sandboxWriteDenials` lists those inputs and the profile denies them with
-`subpath` rules placed after the folder allowance (last match wins). Each input
-is denied under every path the kernel might match it by: its own name resolved
-through its folder (what `rm` and a fresh `>` act on; the folder is the part a
-dotfiles symlink redirects) and, when the input is itself a symlink, its target,
-dangling or not (where a write *through* the link is matched). Either alone was
-bypassable — unlink-and-replace at the name, or a write through the link to an
-undenied target. A relative link target is read from the resolved folder, and a
-dangling one resolves as far as its ancestors exist. Two things Seatbelt does
-on its own (verified against the kernel, pinned in the tests): a hard link
-cannot lend a denied file an allowed name, since linking needs write access to
-the source path, and on the default case-insensitive volume a case variant
-(`HOOKS.JSON`) is matched too. Not covered: a symlink nested *inside* a denied
-folder (`skills/mine` → elsewhere in `~/.codex`) is not followed, so a write
-through it lands where it points — a residual. The CLI's own writes under the
-denied folders (`skills/.system`, the plugin cache) are refused as well; its
-turns complete regardless, and plugins are off under Advisor, but a Codex
-upgrade that re-syncs its bundled skills while Advisor runs would need a
-carve-out. `auth.json` stays writable: the OAuth token refresh rewrites it. It is a
-denylist of inputs, not an allowlist of the state the CLI writes: that set is
-large and changes with releases, and an allowlist would break the backend on the
-first unexpected write, where a denylist leaves a new input class open until it
-is added. Two outputs are also read back and stay writable as known residuals:
-a resumed thread's rollout under `sessions/` (the sidecar resumes threads by id,
-so a turn could edit its own history) and the memories the CLI writes and feeds
-into later prompts. A CLI-initiated config write (a model-migration notice on
-upgrade, a trust entry) now fails with EPERM too; the real CLI completes its
-turns regardless (`codex.sdk.test.ts`), but that path is otherwise
-unexercised. Verified both ways on the files: append, rename-over, new-file and
-through-the-link writes fail under the new profile and succeed under the old.
+**Codex may not write its own inputs.** `~/.codex` stays writable, because Codex
+writes all over it. But the CLI reads its inputs again on every turn, so a write
+there can undo the sandbox: a connector block in `config.toml` or
+`managed_config.toml` re-enables a connector, `hooks.json` runs commands, `.env`
+can redirect the token (`OPENAI_BASE_URL`), and `AGENTS.md`, `instructions.md`,
+`agents/`, `skills/`, `rules/`, `prompts/` and `plugins/` instruct every later
+session. The profile denies those inputs (`sandboxWriteDenials`) with `subpath`
+rules after the folder allowance. Each input is denied by its name resolved
+through its folder and, for a symlink, by its target, dangling or not; either
+rule alone was bypassable. Verified against the kernel: a hard link cannot give
+a denied file an allowed name, and a case variant (`HOOKS.JSON`) matches on a
+case-insensitive volume. `auth.json` stays writable for the OAuth refresh.
+Codex's own `read-only` mode stays, but Advisor does not rely on it. Rejected:
+an allowlist of the state that the CLI writes. That set is large and changes
+with releases, so an allowlist breaks the backend at the first unexpected write.
+Residuals: a symlink inside a denied folder is not followed; a resumed thread's
+rollout under `sessions/` and the CLI's memories are read back but stay
+writable; and the CLI's own writes to denied folders fail with EPERM. Turns
+still complete (`codex.sdk.test.ts`), but a Codex upgrade that re-syncs its
+bundled skills while Advisor runs needs a carve-out. Commit: `20bac19`.
 
-**The connector gate judges names by structure, not only by verb list.**
-`mcpPermission` (the Claude backend's read/search-only rule for the user's MCP
-connectors with actions off) had `share` in its *read* allowlist — sharing
-grants a third party access — and lacked `replace`, `insert`, `append`,
-`submit`, `save`, `modify`, `put` and more, so a compound such as
-`find_and_replace` passed on its leading read verb. Adding verbs alone created
-regressions the other way: `comment`, `reply`, `mark`, `patch`, `push`,
-`deploy`, `share`, `copy`, `open`, `commit`, `release` are the nouns read tools
-are named after (`get_comment`, `get_commit_patch`, `list_deploy_keys`,
-`get_share_link`). The gate now works in layers over a normalised name
-(camelCase and acronym runs split, every separator a tool name may use — `.`,
-`/`, `:`, space — folded to `_`, the `mcp__<server>__` prefix stripped at its
-first `__` so a tool's own `__` is kept): a conjunction (`_and_`, `_or_`,
-`_then_`) denies outright, whatever follows — fail-closed, so a read tool named
-with one (`search_public_and_private`) is refused too, the recorded cost; an
-unambiguous action verb anywhere denies; an ambiguous verb denies unless a read
-verb precedes it (`jira_get_issue_comment` reads, `gmail_mark_as_read` acts);
-a whole-word read verb anywhere allows; a read noun (`history`, `docs`, `info`,
-`schema`) allows only as the whole name or last word (`conversations_history`,
-`atlassianUserInfo`), so `purge_history` is judged by its verb. What remains
-open is a verb on no list ahead of a read verb (`listen_webhook` was the probe
-until `list` became a whole word); the lists are the defence and connector
-actions being off by default the backstop. `sandbox.sdk.test.ts` now drives a
-stub connector through the real CLI to prove tool names reach the hook in the
-shape the gate assumes.
+**The connector gate judges names by structure, not only by verb list.** A verb
+list alone failed in both directions: `find_and_replace` passed on its read
+verb, but many action verbs (`comment`, `patch`, `commit`) are also nouns in
+read tool names (`get_commit_patch`). `mcpPermission` now normalises the name
+(camelCase split, separators folded to `_`, the `mcp__<server>__` prefix
+stripped) and applies layers in order. A conjunction (`_and_`, `_or_`, `_then_`)
+denies; this fails closed, and a refused read tool is the accepted cost. An
+unambiguous action verb denies. An ambiguous verb denies unless a read verb
+comes before it (`jira_get_issue_comment` reads, `gmail_mark_as_read` acts). A
+whole-word read verb allows. A read noun (`history`, `info`) allows only as the
+whole name or the last word. Residual: a verb on no list ahead of a read verb
+passes; the lists are the defence, and actions off by default are the backstop
+(see #87 below). `sandbox.sdk.test.ts` proves through the real CLI that tool
+names reach the hook in the shape that the gate assumes. Commit: `a9f6ac6`.
 
-**One shutdown contract.** The app closed the sidecar's stdin and sent SIGTERM
-in the same instant, so the sidecar's own stdin-close path (exit once the lanes
-were idle) was unreachable, and the two sides disagreed about who ended the
-process. The idle wait bought nothing — the app has already failed every
-in-flight card before it closes the pipe — but the exit path matters for a
-different reason: it is where the sidecar's CLI children are cleaned up. On
-stdin close the sidecar now resets every lane, which aborts its in-flight turn
-— the Codex SDK kills its CLI on abort and registers no exit handler, so
-leaving without this would orphan a running `codex exec`; the Agent SDK kills
-its CLIs from Node's `exit` handlers as well, which a SIGTERM skips — then
-exits on the next tick (`main.ts`). `SidecarManager.discardProcess` closes
-stdin and terminates only a sidecar still running after `exitGrace` (2 s;
-injectable, so the tests use 0.2 s) — the backstop against a wedged one, not
-the mechanism. ⌘Q is the exception: `finishQuit` is followed by a synchronous
-`_exit`, so a delayed backstop would never fire there; `stopForExit` instead
-waits for the clean exit, bounded (1 s on quit, so a wedged sidecar adds at
-most that to the 5 s shutdown deadline) — including the wait for the queued
-stdin close, which a write blocked on a wedged sidecar's full pipe must not
-hold up — and terminates what is left. On an authentication change the old
-sidecar likewise gets the grace before it is terminated, so for up to 2 s two
-may be running, the old one's stderr still reaching the log. The
-`stopping` flag went entirely: a deliberate stop bumps the generation, which
-every crash, spawn-failure and backoff callback checks first, so no branch on
-the flag was reachable. Tests: the sidecar exits within a second of stdin
-closing (`stdin.test.ts`); a fake sidecar that reads stdin leaves by exit
-status, not signal, one that ignores stdin is terminated after the grace
-period, not before, and the quit path does both synchronously.
+**One shutdown contract.** The sidecar ends itself when its stdin closes: it
+resets every lane, which aborts the in-flight turn, then exits (`main.ts`). Only
+this path cleans up its CLI children, because the Codex SDK kills its CLI only
+on abort and the Agent SDK only from Node's `exit` handlers, which a SIGTERM
+skips. `SidecarManager.discardProcess` closes stdin and terminates only a
+sidecar that still runs after `exitGrace` (2 s), as a backstop. On ⌘Q, a
+synchronous `_exit` follows, so `stopForExit` waits at most 1 s, inside the 5 s
+shutdown deadline. On an authentication change, two sidecars can run for up to 2
+s. A deliberate stop bumps the generation, which every crash, spawn-failure and
+backoff callback checks first, so the `stopping` flag is gone. Commit:
+`c8b8010`.
 
-**Transcript text stays out of the log by default.** `Recorder` logged every
-recognised utterance and every echo-suppressed one verbatim, and the sidecar
-the first 60 characters of each utterance and note, all into
-`~/Library/Logs/Advisor/advisor.log` — up to 10 MB of rolling conversation
-text, surfaced in Console.app, whatever folder the `sessionDir` preference had
-moved the transcripts to. The guide disclosed it, but it undercut that
-preference. The log is now diagnostics: both sides log the length of a line,
-not its text (`Recorder.utteranceLogLine`), and an app-side-only preference,
-`logTranscriptText` (General tab, off by default), turns the text back on for
-debugging echo dedup and disfluency cleanup. The recorder holds it in an atomic
-and the recording window applies it on every `advisorConfigChanged`, so the
-switch works mid-recording; the sidecar has no such key because it no longer
-logs transcript text at all (utterances and notes as lengths, a bad frame as
-its size and error name, a denied tool by its path or URL only, an unparseable
-classifier reply by its length). Not covered, by choice: card bodies and the
-classifier's parsed triggers still reach the log — the agents' words about the
-conversation, kept for diagnosing cards — and a trigger's `query` restates
-what was said. (Superseded 2026-10-20: the sidecar's utterance line follows
-`logTranscriptText` too — see *Utterance text and decision time in the sidecar
-log*.)
+**Transcript text stays out of the log by default.** The log held up to 10 MB of
+verbatim conversation, visible in Console.app, wherever the `sessionDir`
+preference put the transcripts. Now both sides log the length of a line, not its
+text (`Recorder.utteranceLogLine`). The `logTranscriptText` preference (off by
+default) turns the text back on, also mid-recording, to debug echo dedup and
+disfluency cleanup. Not covered, by choice: card bodies and the classifier's
+triggers still reach the log for the diagnosis of cards, and a trigger's `query`
+restates what was said. (Superseded 2026-10-20: the sidecar's utterance line
+follows `logTranscriptText` too — see *Utterance text and decision time in the
+sidecar log*.) Commit: `5fa0507`.
 
-**Hardening batch.** Three smaller findings from the same review. *Lane
-shrink leaked subprocesses:* lowering the parallel-agents preference only
-stopped dispatching to the lanes beyond the new count; each kept its warm CLI
-subprocess until the next session start. The research pool is now a `LanePool`
-(`lanes.ts`, unit-tested without the SDK): it grows lazily to its size and
-sheds an excess lane as soon as it is idle — at the resize for idle ones, and
-for one that was mid-card the moment its card finishes, which the pipeline
-reports through `releaseLane` (waiting for the next dispatch would not do: in a
-quiet conversation there is none). A shed lane's session is reset so the CLI
-goes, and its transcript cursor is forgotten, so a lane re-created under the
-same name is sent the whole conversation — the same rule `runCard` applies when
-it recycles a failed lane. *Session folder path:* `SessionArchive.directory(for:)` took the
-`sessionDir` preference verbatim, so a hand-edited `~/Transcripts` or a relative
-path resolved against the app's working directory (`/` when packaged) and every
-save failed with "session note not saved". A `~` now expands; a relative path
-falls back to the default folder. Preferences itself only ever writes an
-absolute path. *Apple Events and launchers:* the Codex Seatbelt profile's
-`(allow default)` left `appleevent-send` open, so `osascript -e 'tell app
-"Finder" to do shell script …'` would have run the script inside Finder,
-outside the profile, gated only by a TCC prompt — and `open`, `launchctl` and
-`shortcuts` hand a program to launchd the same way. The profile now denies
-Apple Events and the `process-exec` of those four binaries; nothing the CLI or
-an MCP server does needs them (the real-CLI tests still pass). The exec denial
-is exercised live (`osascript -e '1 + 1'`, which needs no Apple Event, is
-refused); the Apple Events rule is pinned in the profile text only, since
-driving `osascript` at Finder from a test would raise the very TCC prompt.
-Residual: any other route to launchd (a scripting bridge, a different launcher
-binary) is still open under `(allow default)`.
+**Hardening batch.** Three smaller findings. *Lane shrink:* the research pool is
+a `LanePool` (`lanes.ts`) that sheds an excess lane when the lane is idle (at
+the resize, or through `releaseLane` when its card finishes), so a lower
+parallel-agents preference no longer leaves warm CLI subprocesses alive. A shed
+lane's cursor is forgotten, so a new lane with the same name gets the whole
+conversation. *Session folder path:* `SessionArchive.directory(for:)` expands
+`~` in a hand-edited `sessionDir`, and a relative path falls back to the default
+folder; before, a relative path resolved against `/` in a packaged app and every
+save failed. *Apple Events and launchers:* the Codex profile denies
+`appleevent-send` and the `process-exec` of `osascript`, `open`, `launchctl` and
+`shortcuts`, because each can run a program outside the profile, behind at most
+a TCC prompt. Nothing that the CLI or an MCP server does needs them. The Apple
+Events rule is pinned in the profile text only, because a live test raises the
+TCC prompt. Residual: other routes to launchd (see #88 below). Commit:
+`5fa0507`.
 
-**The crash path is tested at the manager.** `SidecarManager`'s recovery —
-failing the cards a dead sidecar can never finish, the restart budget and its
-exhaustion message, the healthy-run reset, the replay of lanes, auto and
-`session_start` to the replacement — was covered only through `Card.apply` and
-one test of a backoff being replaced by a new session. The authentication
-harness (a real `/bin/sh` child behind `launchProcess`) already supported the
-rest; the backoff delay and the healthy-run threshold are now injectable (the
-production defaults unchanged), so the tests run in well under a second where
-the real 1/2/4/8 s backoff would take half a minute.
+**The crash path is tested at the manager.** Tests drive the recovery in
+`SidecarManager` directly: failed cards, the restart budget, the reset after a
+healthy run, and the replay to the new sidecar. The backoff delay and the
+healthy-run threshold are injectable, so the tests take under a second. Commits:
+`5fa0507`, `5efbe83`.
 
-**Two files became seven.** `AdvisorApp.swift` (1,200 lines) held the app
-delegate and scenes, the whole recording window and an `NSTextView` subclass;
-`SessionsView.swift` (1,630) held the sidebar with its folder controls, three
-free functions shared with the detail pane, and the 650-line detail pane. Both
-are now split along those seams — `TranscriptView.swift`, `ActionTextView.swift`;
-`SessionFolders.swift`, `SessionActions.swift`, `SessionDetailPane.swift` — as
-moves: declarations used across a new file boundary lost their file-scope
-`private`, the browser's export free function became `exportSessionCopy` (it
-had shared a name with the recording window's method, which only member lookup
-kept apart), and `repoRoot` moved to `AppResources.swift`, where it is used.
-One change rode along: the two Export save panels (recording window via the
-writer, browser as a file copy) differed — only one offered the `.md` content
-type — and now share `exportDestination(suggestedName:)` in
-`SessionActions.swift`.
+**Two files became seven.** `AdvisorApp.swift` (1,200 lines) and
+`SessionsView.swift` (1,630 lines) are split along their seams, as moves. The
+only behaviour change: the two Export save panels share
+`exportDestination(suggestedName:)`, because only one offered the `.md` content
+type. Commits: `6181c2b`, `ac7cb94`.
 
-**Add note on a stale row reloads (issue #84).** The saved pane's "Add note
-here…" closure indexed `detail.blocks` with the paragraph's id unchecked, where
-its sibling `startResearch` guards it, so an id outside the blocks would trap
-with an index out of range. Not seen in use: `FeedView` builds each row's
-paragraph and its action from the same `detail` in one pass, so the guard is
-defensive. The closure's body is now `SessionDetailPane.addNote`, which returns
-whether the note was written. An id that isn't one of the detail's block
-offsets — past the end, negative or not a number — returns false, so the pane
-takes its edit-failed path (`finishEdit(false)`): the note is left alone, the
-pane says it couldn't update the note, and the list reloads. `startResearch`
-returns silently on the same guard; a note is text the user has just typed, so
-it gets the message rather than vanishing. `SessionDetailPaneTests` drive
-`addNote` with each kind of bad id and with a real paragraph. Not covered: the
-correction closure turns the id into a paragraph ordinal by slicing
-`detail.blocks[..<offset]`, unchecked, and would trap the same way (issue
-#90). Both that and `startResearch`'s silent return changed in the next entry.
+**Add note on a stale row reloads (issue #84).** On a saved session, "Add note
+here…" for an id that is not a block offset of the detail now fails: the pane
+says that it could not update the note, and reloads. Before, it could trap. The
+guard is defensive, because `FeedView` builds each row and its action from the
+same `detail`. A note is text that the user just typed, so a failure gets a
+message, not a silent return. Commit: `5c46598`.
 
-**Correct transcription on a stale row reloads (issue #90).** The correction
-closure turned the paragraph's id into an ordinal by slicing
-`detail.blocks[..<offset]` unchecked, so a negative offset, or one beyond
-`blocks.count`, trapped (one at the count gave an ordinal past the last
-paragraph). Defensive, like #84: not seen in use. The three paragraph actions
-now resolve the id through one helper, `SessionDetailPane.blockOffset(of:in:)`,
-so the next action can't miss the check. It accepts only an offset that names a
-paragraph block: a heading or card offset would otherwise give the ordinal of
-the next paragraph, a wrong paragraph rather than a trap. `paragraphOrdinal(of:in:)`
-returns nil for a bad id, and the correction then takes the edit-failed path
-for either scope. "All in session" doesn't need the paragraph, but an id the
-pane can't place means its rows are out of step, so it reloads and the user can
-try again. `startResearch` now takes that path too instead of returning
-silently: its anchor miss, a few lines on, already did, and a right-click that
-does nothing gives no hint the note moved. The guard catches ids the detail
-can't place, not a detail that is behind the file: a correction on a stale row
-whose offset still names a paragraph re-reads the file and edits the paragraph
-at that ordinal, as before, and a correction that finds nothing to change still
-does nothing (Add note and research compare the block's text first).
-`SessionDetailPaneTests` drive `paragraphOrdinal` and `addNote` with each kind
-of bad id, the heading's among them, and `paragraphOrdinal` with both real
-paragraphs. Both of those gaps closed in the next entry.
+**Correct transcription on a stale row reloads (issue #90).** The three
+paragraph actions resolve a row's id through one helper,
+`SessionDetailPane.blockOffset(of:in:)`, so a new action cannot miss the check.
+It accepts only a paragraph block: a heading or card offset would select the
+wrong paragraph without a trap. An id that the pane cannot place means that its
+rows are out of step, so the action takes the edit-failed path and reloads. The
+guard catches ids that the detail cannot place, not a detail that is behind the
+file. Commit: `baf9e4a`.
 
 **Corrections on a saved session check the paragraph, report a failure and
-follow a moved note (issue #91).** Correction was the one paragraph action
-without the checks the others have. "This occurrence" turned the row into a
-paragraph ordinal from the pane's in-memory blocks, and the archive re-read the
-file and edited whichever paragraph had that ordinal. If the note had changed
-on disk since the pane loaded, with a paragraph added or merged ahead of the
-row, it rewrote a match in a different paragraph, silently. Now
-`NoteEdit.correctingOccurrence` takes the paragraph it expects at the row's
-block offset, as `insertingNote` and `anchor` do, refuses a mismatch, and edits
-that block's own lines (`TimedBlock.lines`), so no ordinal is needed. The
-ordinal had been resolved by a second grouping of the note,
-`TranscriptCorrection.replacingOccurrence(inParagraph:ofMarkdown:)`, mirrored
-from `TranscriptDoc` (the issue #32 entry), and the two had drifted.
-`TranscriptDoc` trims a line before looking for its bullet and the mirror
-didn't, so an indented line in a hand-edited note was its own paragraph on
-screen but folded into the one above for the edit. A correction on that line's
-row would have checked its paragraph and then rewritten the next one. That
-grouping, its lock-step tests and `paragraphOrdinal` are gone. "All in session"
-still reads each line its own way (`splitMemberLine`, which doesn't trim before
-looking for the bullet either), so on an indented line it takes the bullet and
-stamp as text and can rewrite the stamp. That predates this change and is left
-as it was (issue #93).
-
-Both corrections go through `rewrite`, so an unreadable or vanished note is
-never recreated (issue #41). At the pane they go through
-`SessionArchive.save(to:)`, so a note filed elsewhere since the pane loaded is
-corrected where it is now, instead of being read as empty at its old path. The
-closure body is `SessionDetailPane.correct`, and the closure hands its result
-to `finishEdit`. A correction that doesn't apply now shows the edit-failed
-message and reloads, as the bad-id path from #90 already did. "All in session"
-takes no paragraph check: it corrects every match wherever it now is. Add note
-and Delete still write to the pane's `file` without `save(to:)`. A note moved
-from outside the app makes them fail and reload, which the message reports,
-rather than follow it (issue #94, closed in the entry of that name below).
-
-The failed path includes a correction that changes nothing on an unchanged
-note, which the issue expected the menu couldn't produce. It can: a selection
-across a line join reads as one phrase in the paragraph but matches neither
-line (the straddle limitation in the issue #32 entry). On an unchanged note,
-that is the only way either scope can change nothing: the selection comes from
-the paragraph's text, and the menu refuses a replacement equal to the original.
-The shared message says the note *may* have changed, which is hedged rather
-than wrong. A message of its own for this one rare case would need a three-way
-result through `NoteEdit`, `rewrite` and `save`, so the correction takes the
-shared path, and the reload is harmless.
-
-The straddle limitation is wider than the issue #32 entry says. It is left as
-it was, because the primitive is shared with the live window. The menu counts
-the selected occurrence over the paragraph's joined text, and the edit counts
-per line. A match across a join earlier in the paragraph shifts the count, so
-"This occurrence" rewrites a later match than the one selected. "All in
-session" corrects the matches within lines and leaves a straddling one, so it
-can report success with the selected text unchanged. Both are issue #92.
-
-`NoteEditTests` cover the pure correction: the expected paragraph past a
-heading and a card, an indented line's own paragraph, a stale paragraph, a
-card, an offset past the blocks, no such occurrence, and a phrase across lines.
-`SessionDetailPaneTests` drive `correct` for both scopes with each kind of bad
-id, a moved note and a phrase across lines. For "This occurrence" they also
-cover a stale row and the second paragraph.
+follow a moved note (issue #91).** `NoteEdit.correctingOccurrence` takes the
+paragraph that it expects at the row's block offset, as `insertingNote` and
+`anchor` do, refuses a mismatch, and edits that block's lines. Before, it edited
+the paragraph with the same ordinal in the file on disk, so a changed note got a
+silent edit in another paragraph. The ordinal came from a second grouping of the
+note that had drifted from `TranscriptDoc`; it is gone. Both scopes go through
+`rewrite`, so a vanished note is never recreated (issue #41), and through
+`SessionArchive.save(to:)`, so a note filed elsewhere is corrected where it is
+now. A correction that does not apply shows the edit-failed message and reloads.
+A correction that changes nothing also takes that path. On an unchanged note,
+its only cause was a selection across a line join, so the shared message says
+that the note *may* have changed. Rejected: a separate message, because it needs
+a three-way result through `NoteEdit`, `rewrite` and `save`. The entries below
+close the three gaps that this one left (#92, #93, #94). Commit: `d286921`.
 
 **Corrections count the paragraph as shown, and the menu refuses a selection
-across a line join (issue #92).** A paragraph shows its lines (live, its
-utterances) joined by single spaces, and the right-click menu takes the
-selected occurrence's index over that text. The edit counted matches line by
-line, so a match that straddled a join counted in the menu's index and not in
-the edit's, and "This occurrence" rewrote the match after the one selected and
-reported success (`this is` / `a cat, this is a dog, this is a bird`: selecting
-`is a` in "…is a dog" corrected "…is a bird"). Now
-`TranscriptCorrection.location(ofOccurrence:of:in:)` finds the n-th match over
-the lines joined by single spaces — the text the menu counted — and maps its
-range back to the line it lies in; `replacingOccurrence` edits that line, so
-`TranscriptStore.correctOccurrence` (live) and `NoteEdit.correctingOccurrence`
-(saved) count as the menu does. A match that crosses a join lies in no one line
-and gives nil, a refusal rather than a miscount or a crash. Live,
-`TranscriptStore.correctOccurrence` also refuses a paragraph one of whose
-utterances has gone since the menu counted it (echo cleanup while the prompt
-was open): counting over what is left would land on a different match.
-
-The menu tells two refusals apart. `TranscriptCorrection.range(ofOccurrence:of:in:)`
-is the match the menu's index names over the joined text, join or no join; when
-that match doesn't start where the highlight does, the selection overlaps an
-earlier copy of itself (the second `aa` of `aaa`: non-overlapping counting puts
-it at index 1, which has no match; the middle `the the` of `the the the the`:
-index 1 is the trailing copy), and the item says so rather than claiming a
-straddle. "Replace all" stays offered there: it takes no index and rewrites the
-highlight along with the rest. Before, the first case silently did nothing
-(live) or showed the hedged edit-failed message (saved), and the second rewrote
-the later copy and reported success. The trimmed text's start within the
-highlight is found with the trim set itself, so a no-break space or CRLF ahead
-of the text doesn't read as an overlap.
-
-A straddling selection isn't corrected across the two lines. Each line carries
-its own stamp (live, its own utterance with a time and source), and a
-replacement has no right split between them: `is a` → `was a` across `this is`
-/ `a cat` could put `was a` on either line, moving a word's spoken time.
-Instead the menu refuses it: `SelectableTranscriptText` takes the paragraph's
-`lines`, and when the trimmed highlight's occurrence has no `location` the two
-correction items are replaced by one disabled "Can't correct “…” — it spans two
-lines". Live, a `FeedParagraph`'s lines are its utterances already. A saved
-paragraph was one `FeedLine` holding the joined text, which would have made
-every selection look within-line, so the lines now travel with the block:
-`TranscriptDoc.TimedBlock.texts` keeps a paragraph's member texts,
-`SessionDetail.blockLines` carries them parallel to `blocks`, and `Feed.saved`
-makes one `FeedLine` per transcript line, all with the paragraph's id (its
-callers key on the paragraph's id, not a line's). That covers "Replace all" too, which works line by line
-(`TranscriptStore.correctAll`, `replacingAllInTranscript`) and would otherwise
-have corrected the same phrase where it lies within a line and reported success
-with the selected text unchanged. So a straddling highlight no longer offers
-"Replace all" for the phrase's intact copies elsewhere, a capability dropped on
-purpose: the user asked for the text under the cursor to change, and a menu that
-corrects everything but that is the misreport this entry removes. An intact copy
-offers it. The one way a correction on an unchanged
-saved note could change nothing (the #91 entry, above) is gone from the menu,
-so the hedged edit-failed message there is now only ever about a note that did
-change or couldn't be written. Residual: "Replace all" still leaves a copy of
-the phrase that straddles a join elsewhere in the session, as before; the
-selected copy is now always within a line, so success is not misreported.
-
-`TranscriptCorrectionTests` cover the probe above for both later matches, a
-refused straddle (and a phrase starting on the join space), UTF-16 offsets, and
-the location's line and range. `TranscriptStoreCorrectionTests` and
-`NoteEditTests` drive the two callers with the probe; `FeedTests` and
-`SessionDetailTests` the saved lines' journey to the feed. `ActionTextViewMenuTests`
-build the real menu from an `ActionTextView` with a selection within a line
-(both items, enabled), across a join (the disabled refusal, neither item),
-across a join with leading whitespace, overlapping an earlier copy of itself
-(its own refusal, "Replace all" kept), with a no-break space, CRLF or tab ahead
-of the text, and with no `lines` given. Observing the menu in the running app
-needs a right-click the agent can't make; the menu tests stand in for it.
+across a line join (issue #92).** The menu counts the selected occurrence over
+the paragraph's lines joined by single spaces. The edit now counts in the same
+way: `TranscriptCorrection.location(ofOccurrence:of:in:)` finds the n-th match
+over the joined text and maps it back to its line, live and saved. Before, the
+edit counted line by line, so "This occurrence" could rewrite a later match and
+report success. A match across a join lies in no one line, so the menu shows one
+disabled item, "Can't correct “…” — it spans two lines", and offers no "Replace
+all" either. Rejected: a correction across the two lines. Each line carries its
+own stamp, and a replacement has no correct split, so a word's spoken time could
+move. For this check, saved paragraphs now carry their lines
+(`TranscriptDoc.TimedBlock.texts`). The menu also says when a selection overlaps
+an earlier copy of itself (the second `aa` of `aaa`). Residual: "Replace all"
+still leaves any other copy that straddles a join, but the selected copy is
+always within a line, so success is not misreported. `ActionTextViewMenuTests`
+build the real menu, because an agent cannot right-click in the running app.
+Commit: `aa890db`.
 
 **The live note is renamed only through its writer (#85, 2026-10-18).**
-`renameSession` routed a rename through the writer when the note was the live
-one *and* `TranscriptWindowContext.writer` was set, else wrote the frontmatter
-on disk — so a live note with no writer published would be renamed on disk and
-the writer's next debounced rewrite (a research card finishing, post-stop too)
-would put the old name back, with `advisorSessionsChanged` reloading the
-reverted note as if nothing had been typed. The window the fallthrough left
-open cannot occur today: `writer` is published once, by `AppServices.start`
-from the Sessions window's `.task` at launch, and is never cleared — `releaseRecording`
-clears `liveFileURL` and releases the writer's note but keeps the handle — while
-`liveFileURL` is only set by the recording window's session start, which the
-Sessions window (or its ⌘N) opens, after the writer and in the same synchronous
-step as `writer.start`. The fallthrough was wrong all the same, so the branch
-now refuses: a live note with no writer is left untouched and nothing is posted,
-rather than saved-then-clobbered. The invariant lives in that one `guard` rather
-than in a reading of the launch order. `SessionRenameTests` cover the three
-states — live and unowned (left alone), live and owned (renamed through the
-writer, and still so after its next `flush`), saved (renamed on disk). Residual, not
-this issue: the live check is a raw `file.url == liveFileURL`, and the browser's
-rows come from `contentsOfDirectory`, which returns symlink-resolved paths,
-while the writer names its note under the configured folder as given — under a
-`sessionDir` that passes through a symlink (`/var` → `/private/var`; a linked
-`~/Dropbox`) the two differ, every live-note check in the browser misses, and
-this rename falls to the on-disk branch and is clobbered after all. The default
-archive under `~/Library` has no symlink. One resolved-URL comparison shared by
-those sites is the fix; the test builds its `SessionFile` from the writer's URL
-to stay on the routing.
+`renameSession` refuses to rename a live note when no writer is published.
+Before, it wrote the frontmatter on disk, and the writer's next debounced
+rewrite put the old name back. That state cannot occur today, but the invariant
+now lives in one `guard`, not in the launch order. Residual: the live check
+compares `file.url == liveFileURL` without symlink resolution, and the browser's
+rows come from `contentsOfDirectory`, which resolves symlinks. So under a
+`sessionDir` that passes through a symlink, every live-note check in the browser
+misses, and a rename is clobbered after all. The default folder under
+`~/Library` has no symlink. The fix is one resolved-URL comparison that those
+sites share. Commit: `7b66d74`.
 
-**A session start mid-card retires the lane (#86, 2026-10-18).** `LanePool.reset()`
-(the *Hardening batch* above) dropped every lane and rebuilt the pool at once,
-so a research lane caught mid-card fell out of `all` — where `cancel` and the
-stdin-close exit path look for lanes — while its name was re-minted for the new
-pool, and its `runCard` was still to run: its failure path forgets the name's
-transcript cursor, which the *new* lane now owned. The issue read this as a
-live race — the old card streaming into the new session, and its late `forget`
-wiping a cursor the new lane had already advanced, so its next card replayed
-the whole conversation. Checked against both backends, it is not reachable
-today: `Agent.reset()` resolves the pending task synchronously (the stream
-loop stops emitting for a settled task) and `CodexSession.reset()` →
-`active.stop()` → `finish()` does the same, so `runCard`'s `finally` runs in
-the microtasks straight after `research.reset()` — the cursor it forgets is
-the cleared transcript's, `currentCardId` is gone before any `cancel` could
-match it, and the session was reset at the drop. What was wrong is that the
-pool's correctness rested on that timing, which no backend contract promises,
-while the pool already had the rule that covers it — a shrink never re-mints a
-name still in use (*Hardening batch*). `reset()` now follows it: a busy lane is
-still aborted at the reset but moves to a `retired` list that `all` still
-exposes (after the live lanes, so `all[0]` stays the warm-up target) and that
-`nextName` counts as taken; `release()` — the pipeline's `finally`, after
-`runCard`'s own — delists it and frees the name. Keying cursors by lane
-instance instead would have touched `Transcript`, `runCard` and `main.ts`'s
-shed callback and left the lane unlisted all the same. Unit-tested in
-`lanes.test.ts` as invariants, not a reproduction: the listing and naming
-across one and two mid-card resets (and a drop that throws, which no longer
-stops the rebuild), and a `runCard` whose aborted turn is made
-to settle only after the new lane has been sent a delta — the cursor survives
-and the next prompt carries no replay. Not changed: the query lane is rebuilt
-the same way at session start (`queryLane = makeLane("query")`), with the same
-synchronous settle behind it and a `busy` flag rather than a name rule — the
-same hardening would apply if that ever changes. (It did, 2026-10-20: a busy
-query lane is now retired, not aborted, and lanes take `query<n>` names — see
-*Ask and Note from the toolbar*.)
+**A session start mid-card retires the lane (#86, 2026-10-18).**
+`LanePool.reset()` aborts a busy lane and moves it to a `retired` list. `all`
+still lists it, so `cancel` and the stdin-close exit find it, and `nextName`
+counts its name as taken until `release()`. Before, a new lane could take the
+name of a lane still mid-card, whose late failure path would forget the new
+lane's cursor. This is not reachable today, because both backends settle the
+pending task synchronously on reset. But no backend contract promises that
+timing, and the pool already never re-mints a name in use (the hardening batch
+above). Rejected: cursors keyed by lane instance, because that touches
+`Transcript`, `runCard` and `main.ts` and still leaves the lane unlisted. The
+query lane got the same rule later (see *Ask and Note from the toolbar*).
+Commit: `8584121`.
 
-**The connector gate keeps its read-verb-anywhere rule (#87, 2026-10-18).**
-The residual above — a word on neither action list ahead of a read verb passes
-on the read verb (`nuke_list`, `frobnicate_list`) — was assessed against a
-first-word rule: strip the `mcp__<server>__` prefix, skip a service prefix,
-and let the first remaining word decide, an unknown word denying. The service
-prefix is what defeats it. The only prefix a gate can skip without a list is
-the server's own name (`slack_` under `claude_ai_Slack`, `framebuffer_` under
-`Framebuffer`), and that rule denies reads the gate allows today:
-`ddsql_query` under `claude_ai_Datadog`, `jira_get_issue_comment` under its
-real server `claude_ai_Atlassian_Rovo`, `gdrive_read_file` under
-`Google_Drive`, and every entity-first name — `channels_list`, `logs_search`,
-`metrics_query`, the Slack Web API's own naming — two of them cases in
-`sandbox.test.ts`. A hard-coded prefix list (`slack|gmail|gcal|gdrive|ddsql|
-jira|…`) restores them but is the verb list again under another name, and
-with the worse failure mode: an unlisted verb today opens one
-adversarially-named tool, with actions off; an unlisted prefix would close
-every read of a connector the list has not met — the normal case for a new
-connector — and silently remove its sources from research. Nor does the
-first-word rule close the class: the read-noun rule that `conversations_history`,
-`atlassianUserInfo` and `users_info` need still passes `nuke_history`, and
-dropping it breaks those. The names actually seen from the user's connectors
-(`list_events`, `search_threads`, `list_issues`, `get_issue`, `getJiraIssue`,
-`typecheck-code`) are verb-first and unaffected either way, which is why the
-gain is confined to invented names. Kept as recorded: the lists are the
-defence and actions-off-by-default the backstop; a connector that ships such
-a name is added to the action list when met. No code changed.
+**The connector gate keeps its read-verb-anywhere rule (#87, 2026-10-18).** No
+code changed. A first-word rule was assessed against the residual (`nuke_list`
+passes) and rejected. It must skip a service prefix, and the only prefix that it
+can skip without a list is the server's name. That denies reads that pass today:
+`ddsql_query` under `claude_ai_Datadog`, `jira_get_issue_comment` under
+`claude_ai_Atlassian_Rovo`, and every entity-first name (`channels_list`,
+`logs_search`). A list of prefixes is the verb list again, with a worse failure
+mode: an unlisted verb opens one adversarially named tool, but an unlisted
+prefix closes every read of a new connector and silently removes its sources.
+The read-noun rule also still passes `nuke_history`. The user's connectors have
+verb-first names, so the gain is only on invented names. A connector that ships
+such a name goes on the action list when it is found. Commit: `14c06a9`.
 
 **The launcher denial reaches LaunchServices, not just the binaries (#88,
-2026-10-18).** The residual above — the `process-exec` denial of `osascript`,
-`open`, `launchctl` and `shortcuts` is by literal path, so a copied binary run
-from a writable root would bypass it, and `open` hands a program to
-LaunchServices over mach/XPC that `(deny appleevent-send)` does not cover — was
-prototyped under `sandbox-exec` on macOS 27. Two findings. The copied-binary
-bypass is closed by the OS already: a copy of any of the four launchers, run
-from `TMPDIR` or `~/.codex`, is killed with a `Launch Constraint Violation`
-(CODESIGNING) *before it executes*, sandboxed or not — macOS launch constraints
-pin those system binaries to their canonical path. The real gap is the library
-route: a process need not run `open` at all, it can call `LSOpenCFURLRef`
-directly (an ordinary compiled binary, or a scripting bridge with FFI), and a
-launch-free probe confirmed that under the old profile such a process still
-reached LaunchServices and resolved a handler. The profile now adds `(deny
-mach-lookup (global-name-regex "^com\.apple\.lsd"))`: denying the `com.apple.lsd`
-family — the LaunchServices daemon — makes it unreachable, so no handler can be
-resolved and nothing launched by either route. The family must be matched by
-regex, not a name list: an explicit `com.apple.lsd`/`launchservicesd` denial
-still resolves through the `lsd.*` sub-services; only `launchservicesd` itself
-left open the other way round. The rule costs nothing the backend needs — node
-spawns, DNS, `child_process`, file reads, `git` and HTTPS all work under it, and
-the real vendored CLI completes its turns (`codex.sdk.test.ts`); Codex's own
-browser-based login happens outside Advisor's turn-time sandbox. Pinned in the
-profile text and exercised live in `codexSandbox.test.ts` (a compiled probe
-resolves an `https` handler unsandboxed and is refused under the profile, where
-it can be built; it self-skips without the toolchain). The exec denial stays as
-defence in depth. Residual: a route to launchd that does not go through
-LaunchServices (a direct `bootstrap_look_up` of some other launching service) is
-still open under `(allow default)`.
+2026-10-18).** The Codex profile denies `(mach-lookup (global-name-regex
+"^com\.apple\.lsd"))`, so the LaunchServices daemon is unreachable and nothing
+can resolve a handler or launch through it. Found with a prototype under
+`sandbox-exec` on macOS 27: macOS already kills a copy of a launcher run from
+`TMPDIR` or `~/.codex` (`Launch Constraint Violation`), sandboxed or not, so the
+copied-binary bypass is closed. The real gap was a direct `LSOpenCFURLRef` call,
+which still resolved a handler under the old profile. The rule must be a regex,
+because a denial of the names `com.apple.lsd` and `launchservicesd` still
+resolves through the `lsd.*` sub-services. The backend needs none of it: node,
+DNS, `git` and HTTPS work, and the real CLI completes its turns.
+`codexSandbox.test.ts` proves the rule with a compiled probe. The exec denial
+stays as defence in depth. Residual: a route to launchd that does not go through
+LaunchServices stays open under `(allow default)`. Commit: `9b56576`.
 
-**Replace all reads a transcript line as `TranscriptDoc` does (#93, 2026-10-18).**
-The residual the #91 entry left: "All in session" on a saved note
-(`TranscriptCorrection.replacingAllInTranscript`) still read each line its own
-way. Its `splitMemberLine` looked for the `- ` bullet on the untrimmed line,
-where `TranscriptDoc.memberText` trims first, so an indented line in a
-hand-edited note — `  - 17:00:30 beta effect` — was all text to it:
-replacing `17` with `18` gave `  - 18:00:30 beta effect`, moving the stamp,
-and with it the margin time and the 2 s-gap grouping of the paragraph. Only a
-hand-edited note can hit it; Advisor never writes an indented line. It was the
-second half of the mirror #91 removed, and had drifted the same way. Replace
-all is now built on the paragraphs `TranscriptDoc.timedBlocks` reads — each
-paragraph's `lines` and `texts` — and splices a changed text back through
-`TranscriptDoc.replacingMemberText`, the one inverse of `memberText`, which
-`NoteEdit.correctingOccurrence` now uses too, so a transcript line has one
-reading and one splice. `isParagraphMemberLine`, `splitMemberLine` and
-`isStamp` are gone. Unchanged by design: a match across a line join is still
-left (issue #92), and frontmatter, cards and headings stay byte-identical.
-`TranscriptCorrectionTests` cover the indented stamped line beside a stampless
-indented bullet and an indented prose line, all keeping their indentation;
-`TranscriptDocTests` the splice itself — indentation, stamp and trailing
-whitespace kept, nil for a line with no text.
+**Replace all reads a transcript line as `TranscriptDoc` does (#93,
+2026-10-18).** "All in session" now works over `TranscriptDoc.timedBlocks` and
+splices through `TranscriptDoc.replacingMemberText`, which
+`NoteEdit.correctingOccurrence` also uses, so a transcript line has one reading
+and one splice. Before, an indented line in a hand-edited note read as all text,
+so a replacement could move its stamp. Advisor never writes an indented line.
+Unchanged by design: a match across a line join is still left (issue #92).
+Commit: `a08c113`.
 
-**Add note and Delete follow a moved note (#94, 2026-10-18).** The residual the
-#91 entry left: `SessionDetailPane.addNote` and `deleteBlock` wrote to the
-pane's `file` directly, while corrections, research cards, follow-ups, Ask and
-Summarise went through `SessionArchive.save(to:)`, which retries a failed save
-where the note is now (`relocated`). A move from inside the app never reached
-them — `fileSession` re-points the selection and the pane is rebuilt under the
-new URL (`.id(selected.id)`) — but a note moved in Finder, or by another tool,
-while its pane was open left them reading nothing at the old path and taking
-the edit-failed path: loud, but the typed note was gone. Both now go through
-`save(to:)` — `addNote` takes the archive as `correct` does, and the Delete
-body is a static `removeBlock(at:of:from:archive:)` beside it, so the closure
-hands `finishEdit` a result the tests can drive. Their expected-block checks
-(`NoteEdit.insertingNote`, `removingBlock`) run against the relocated note as
-they did against the old path, so a lookalike at the new path — a note of the
-same name that isn't this one — is refused, not edited.
-
-`rewrite` itself does not follow a move, on purpose. It is the file-level
-primitive — read this path, transform, write it back, never recreate (#41) —
-and following a move means scanning the archive (`relocated` is `list(in:)` by
-file name), which takes an archive to scan: `save(to:)` carries it as a
-parameter the tests redirect, where `rewrite` would have to reach for
-`SessionArchive.directory`, a hidden dependency in ten setters. It also keeps
-the policy in one place with its own tests (`SessionArchiveTests`): a setter
-says what it writes, `save(to:)` says where. The two setters still called
-without it, `setName` (`renameSession`) and `setTags` (`applyTags`), are
-synchronous, with a name or tag list to retype rather than a note: `applyTags`
-reports its failure ("Couldn't save tags to disk"); `renameSession` reloads
-either way, so a rename of a note moved outside the app is lost without a
-message. Both left as they are. Also left: after any reload that follows an outside move the selection's
-old URL is gone and the browser selects the first session instead —
-`SessionsView.reload` is the place, by the same file-name match, but it is a
-separate change with its own test and not this one.
-
-Residual, not this issue: `save(to:)` follows the *write*, and the actions
-that read the note before they write — Summarise, Ask, a research card's
-anchor and a follow-up all read `SessionArchive.contents(of: file)` up front —
-still read the old path, where a note moved outside the app reads as "". A
-research card then takes the edit-failed path (no anchor), but a Summarise or
-Ask is sent an empty transcript and its answer is saved, by `save(to:)`, into
-the real note. Reading through `relocated` at the start of those actions is
-the fix; it is a separate change. Also left, from #91: `relocated` takes the
-first note of the name it finds, so with a copy of the note in another folder
-an edit can follow the copy.
-
-`SessionDetailPaneTests` cover an Add note and a Delete on a note moved into a
-folder from outside — applied where it is now, the old path left empty —
-mirroring `aCorrectionFollowsAMovedNote`; both refusing a lookalike of the
-same name at the relocated path, left unchanged; and a Delete at an offset
-outside the blocks, not applied rather than trapped.
+**Add note and Delete follow a moved note (#94, 2026-10-18).**
+`SessionDetailPane.addNote` and Delete go through `SessionArchive.save(to:)`, as
+corrections, research cards, follow-ups, Ask and Summarise do. So a note moved
+in Finder while its pane is open is edited where it is now, and a typed note is
+not lost. The expected-block checks still apply, so a different note with the
+same name is refused. Rejected: a `rewrite` that follows a move. `rewrite` is
+the file-level primitive (read, transform, write back, never recreate), and a
+move needs an archive scan, which would hide a dependency on
+`SessionArchive.directory` in ten setters. A setter says what it writes, and
+`save(to:)` says where. Left as they are: a rename (`setName`) of a note moved
+outside the app is lost with no message, and after such a reload the browser
+selects the first session. Residual: Summarise, Ask, a research card's anchor
+and a follow-up read the note at the old path first. After an outside move, a
+Summarise or Ask gets an empty transcript, and its answer is saved into the real
+note. The fix is to read through `relocated` first. Also, `relocated` takes the
+first note with the name, so with a copy in another folder an edit can follow
+the copy. Commit: `10d017a`.
 
 ## Terms of use removed (2026-10-18)
 
-Advisor is open source under the MIT licence (*MIT licence*, 2026-10-04), so it
-no longer has terms of its own to accept. `TERMS.md` is deleted, and so are the
-first-run sheet (`TermsSheet`), `TermsAcceptance` with its three entry-point
-guards in the recording window, `AppResources.termsURL`, `package.sh`'s copy
-into the bundle and requirement F19. The app-side `acceptedTermsVersion` key
-goes too: an existing `config.json` that still has it decodes as before, since
-unknown keys are ignored, and the next save drops it. The terms'
-recording-consent and AI-accuracy disclaimers went with them. The earlier dated
-entries that mention the terms are kept as history.
+Advisor is open source under the MIT licence (*MIT licence*), so it has no
+terms of its own to accept. `TERMS.md`, the first-run sheet (`TermsSheet`),
+`TermsAcceptance` and requirement F19 are deleted. The recording-consent and
+AI-accuracy disclaimers went with the terms. An old `config.json` that has
+`acceptedTermsVersion` still decodes, because unknown keys are ignored, and the
+next save drops the key. Commit: `69bcd3c`.
 
 ## Card headings need not stand alone (2026-10-18)
 
-A `## Heading` line in a card body showed as plain text, hashes and all, unless
-blank lines set it apart (issue #96): `MarkdownText.blockLines` took a heading
-only when it was its block's single line, so a heading with text or a list
-straight under it, or a paragraph straight above, was joined into that
-paragraph. `lines(from:)` now cuts each blank-line block around its heading
-lines (`splittingAtHeadings`) before laying it out, so a heading lays out
-exactly as if blank lines set it apart: it ends the paragraph or list above
-it, as in CommonMark, and closes any open list.
+A `#` line at the margin is a heading, also when text, a list or a paragraph
+touches it (issue #96). `MarkdownText.lines(from:)` cuts each blank-line block
+around its heading lines (`splittingAtHeadings`). As in CommonMark, the heading
+ends the paragraph or list above it.
 
-Only a heading line that starts at the margin is cut out. An indented `#`
-line may belong to the list item above (CommonMark nests it there), so it
-stays joined on as before rather than ending the list and losing the nesting
-of the items after it; alone between blank lines it is still a heading, as
-before.
+These lines keep the earlier rendering:
 
-Two kinds of `#` line at the margin are not cut out either. One is a line
-inside a code fence, where a `# comment` in a shell snippet would otherwise
-become a heading. Fences follow CommonMark: three or more backticks or tildes
-indented at most three spaces, closed only by at least as many of the same
-mark, and a backtick line with a backtick after its marker ("```npm i``` …")
-is inline code, not a fence. The open fence carries across blank lines; an
-unclosed one keeps the rest of the card fenced, so `#` lines after it are cut
-out no more than they were before this change. The other is a header row
-starting with `#` directly above a table's delimiter row (`# | Task` over
-`--|--`), which stays a table, as it rendered before; whitespace-only lines are
-dropped first, as `blockLines` drops them, so the two agree on what follows
-the header. A body row starting `# ` does end a table and become a heading, as
-GitHub-Flavoured Markdown (GFM) has it.
+- An indented `#` line stays joined to the list item above, because CommonMark
+  nests it there. Alone between blank lines, it is still a heading.
+- A `#` header row directly above a table's delimiter row stays a table. A body
+  row that starts with `# ` ends the table, as in GitHub-Flavoured Markdown
+  (GFM).
+- Closing hashes (`## Heading ##`) stay text.
 
-The renderer still has no code blocks: fence tracking only decides headings,
-fenced lines still lay out as prose, as before (a fence without a blank line
-reads as one run of inline code), and a lone `#` line between blank lines
-inside a fence is still a heading, as it was. Closing hashes
-(`## Heading ##`) stay text, as before. (Superseded 2026-10-31: fences render
-as code blocks and may be indented any amount; see *Card code blocks and block
-quotes*.)
-
-`MarkdownTextTests` cover a heading with text under it (rendered larger than
-the body), with a list under it, and under a paragraph and a nested list (the
-same lines as the blank-separated form); `#` lines inside a fence, one across
-a blank line, and fences that close only on their own mark; a heading after a
-fence; inline code at a line start; an indented `#` line under an item
-keeping the list nested, and a tab-indented one in a snippet under an item
-staying text; and a `#` header cell over a delimiter row, with and without a
-whitespace-only line between.
+The entry also tracked code fences, so that a `# comment` in a fence did not
+become a heading. (Superseded 2026-10-31: see *Card code blocks and block
+quotes*.) Commit: `66f3eba`.
 
 ## Protocol contract test (2026-10-18)
 
-The NDJSON protocol was written down twice — `Inbound`/`Outbound` in
-`sidecar/src/protocol.ts`, string-keyed dictionaries in `SidecarManager` — with
-no test running one side against the other, and neither side checks shape at
-runtime (the sidecar casts `JSON.parse` to `Inbound`; the app reads fields with
-silent defaults). A field renamed on one side showed up as empty cards or
-ignored frames with both suites green (issue #97). A version handshake would
-not help: `package.sh` builds the sidecar into the .app from the same checkout,
-so a release never pairs mismatched halves; the drift is within a checkout.
+The NDJSON protocol has two definitions: `Inbound`/`Outbound` in
+`sidecar/src/protocol.ts`, and string-keyed dictionaries in `SidecarManager`.
+Neither side checks shape at runtime. A field renamed on one side gave empty
+cards or ignored frames while both test suites passed (issue #97).
 
-`protocol/examples.json` is now the one place both sides test against: one
-frame per message type in each direction, in full form (every optional field
-present), and per type the fields a frame may leave out (`optional`). Each
-suite holds its own side to it:
+`protocol/examples.json` is now the one contract. It holds one full-form frame
+for each message type in each direction, and for each type the fields that a
+frame may omit (`optional`).
 
-- `sidecar/src/protocol.test.ts`: per-type field descriptors (`Fields<Inbound>`,
-  `Fields<Outbound>`) that the compiler holds to the types — a field renamed,
-  added or dropped, a variant added or removed, or an optional field made
-  required, is a type error on the test — and that the test holds the examples
-  to: one example per type, exactly the type's field names, each of its
-  primitive kind, and `optional` naming exactly the type's `?` fields. The
-  descriptors live in the test, not `protocol.ts`: nothing at runtime uses
-  them. `main.ts`'s dispatcher gained an exhaustive `default` arm, so a variant
-  added to `Inbound` (and so to the examples) fails to compile until handled,
-  and an unknown type from the app is logged, then dropped.
-- `App/Tests/AdvisorTests/ProtocolContractTests.swift`: every `send*` of
-  `SidecarManager` runs against a shell child that records its stdin (the
-  authentication tests' harness), and each frame sent must carry every required
-  field of its example and none outside it, of the same JSON kind, with the
-  sends between them covering every field of every example — so a field the
-  app stops sending fails too, optional or not;
-  and each sidecar → app example is fed through `handle` (internal now, for
-  this), in full and without its optional fields, checking every field lands on
-  the `Card`, the document answer handler or the status line. The test pins
-  each example's field set to the fields it checks, so a field that joins an
-  example fails until its landing check is written (`hello.version` and
-  `error.fatal` are pinned as unread).
+`sidecar/src/protocol.test.ts` holds the types to the examples through field
+descriptors that the compiler checks. `ProtocolContractTests.swift` holds each
+`SidecarManager` send and each `handle` path to the examples. The dispatcher in
+`main.ts` is exhaustive, so a new `Inbound` variant does not compile until it
+is handled.
 
-Verified by renaming a field in each place: `text` on the Swift utterance send
-and `body` on the card read (both app tests fail), `text` on the `Inbound`
-utterance type (`tsc` fails), `body` in the card_update example (both runtime
-suites fail); and by dropping `ts` from the note send (the app test names it),
-adding an unhandled `Inbound` variant (`tsc` fails in `main.ts` and the test)
-and mis-declaring an optional field in the examples (the sidecar test fails).
+Rejected: a version handshake. `package.sh` builds the sidecar into the app from
+the same checkout, so a release never pairs mismatched halves. The drift occurs
+inside one checkout.
+
 Not covered: the values of the literal unions (`source`, `action`, `kind`,
-`state`), which both sides check only as strings. (The app also read
-`sources` and `verdict` on card frames, which no example carried and the
-sidecar never sent; removed 2026-10-18 — see *Card sources and verdict
-removed*.) The runtime cast itself is still open: a decoder built from
-the same descriptors could replace `as Inbound` and reject a malformed frame
-with a logged reason.
+`state`), which both sides check only as strings. Open: a decoder built from the
+same descriptors could replace the `as Inbound` cast and reject a malformed
+frame with a logged reason. Commit: `9a7a2c3`.
 
 ## Card sources and verdict removed (2026-10-18)
 
-Issue #89, from the 2026-10-17 code review. Since 2026-06 the app accepted
-optional `sources` (`[{label, url}]`) and `verdict`
-(`verified | needsContext | misleading`) on `card` and `card_update` frames and
-rendered them — a coloured verdict pill in place of the FACT-CHECK label, a
-source-links footer, links in the clipboard copy, `VERIFIED`/`NEEDS CONTEXT`/
-`MISLEADING` header labels and ` · `-joined links on the footer line of the
-saved note, and the parser to read both back. The sidecar never emitted either
-field: `protocol.ts` has no such fields, and no example in
-`protocol/examples.json` carries them.
+The app accepted optional `sources` and `verdict` fields on card frames and
+rendered them, but the sidecar never sent either (issue #89). Decision: delete
+the fields, do not implement them. The verdict and the citations already travel
+in the card body by prompt design. The fact-check task asks for a verdict first
+(`trigger.ts`), and the research prompt asks for inline Markdown links
+(`prompts.ts`).
 
-**Decision: delete rather than implement.** Both already travel in the card
-body by prompt design — the fact-check task asks for a verdict first
-(`true / false / mixed / couldn't verify`, `trigger.ts`), and the research core
-says to cite inline as markdown links (`prompts.ts`). A structured channel
-would duplicate that and would need both backends to produce structured fields
-alongside the streamed body, against the two-pass streaming design (the body
-starts before research ends, so a verdict couldn't be known at `card` time and
-the sources list would trail the text that cites them). Nothing was lost: the
-verdict still leads the body, the links are still in it. The Fact-check label
-keeps the grey (`Theme.textSecondary`) every fact-check card has in fact always
-shown — it was the no-verdict fallback, and it is now the kind's colour; the
-verdict's colour belongs in the body text, not the label. The `factGreen` /
-`factRed` tokens stay, under their old names, for the generic success and
-failure states that use them.
-
-Removed: `Verdict`, `Citation`, `Card.sources`/`Card.verdict` and their ingest
-in `SidecarManager`, the verdict/sources branches of `FeedCardView`
-(`kindName`, `kindColour`, footer, clipboard), `SessionMarkdown.label(for:)`'s
-verdict labels and the footer's link suffix, `SavedCard`'s verdict labels and
-link-footer parsing (`parseSources`, the link regex — the footer is now just
-the writer's italic note), the then-unused `linkCursor()` and
-`Theme.factAmber`. Safe for existing notes: the writer only persisted what a
-live card had, so no saved note ever carried a verdict label or a link footer
-— checked against the user's own transcripts folder (11 notes, 4 with
-`FACT-CHECK` headers, none with a verdict header or a `_note_ · [link]`
-footer) — and the parser tests for notes without those fields pass unchanged.
-If a structured verdict is ever wanted, it is a protocol change on both sides:
-add the field to `protocol.ts`, an example frame to `protocol/examples.json`
-(the contract tests fail until both sides handle it) and a `label(for:)`
-value the parser reads back.
+Rejected: a structured channel. Both backends would have to produce fields
+beside the streamed body. The body starts before research ends, so the verdict
+is not known when the card opens. No saved note carried the fields (checked
+against 11 real notes). A structured verdict later needs a field in
+`protocol.ts`, an example in `protocol/examples.json`, and a label that the
+note parser reads back. Commit: `3c1e083`.
 
 ## Saved-card footer: one shape, both ways (2026-10-19)
 
-Three latent drifts between `SessionMarkdown.cardBlock` and its inverse
-`SavedCard.card(from:id:)`, all found in the #89 review passes (#99, #100,
-#101):
+`SessionMarkdown.cardBlock` writes a card, and `SavedCard.card(from:id:)` reads
+it back. Three drifts between them are fixed (issues #99, #100 and #101):
 
-- **Question cards.** The parser read a `Q` header as kind `question`, but the
-  writer's `label(for:)` had no `question` case, so a question `Card` through
-  `cardBlock` came back as an `ANSWER` with the `Asked …` stamp stuck in the
-  body. `label(for:)` now writes `Q`, and `followUpBlock` is a `question` card
-  through `cardBlock` rather than a hand-built copy of its layout — one writer,
-  so the maps can't drift apart again (a round-trip test pins them).
-- **Newlines in the footer.** The body is split on newlines before `>`-prefixing
-  but the footer was appended whole, so a trigger quote containing a newline
-  broke out of the blockquote and ended the card early. The footer is one line
-  by contract: `cardBlock` collapses its newlines to spaces.
-- **Body text read as the footer.** The parser took any trailing italic `↳ …`
-  line as the trigger quote, including one that merely ended a body paragraph
-  (a common quoting form in model output), and a re-save then persisted the
-  drift. The writer only ever puts the footer after a blank line (or straight
-  after the header when the body is empty), so the parser now requires that
-  shape. An italic arrow line that is its own trailing paragraph remains
-  indistinguishable from a footer by text alone; matching it against the anchor
-  utterance would need the transcript at parse time and wasn't worth it for a
-  P3.
+- The writer had no `Q` label for a question card. `followUpBlock` now goes
+  through `cardBlock`, so one writer serves both, and a round-trip test pins the
+  label map.
+- The footer is one line by contract. `cardBlock` collapses the newlines in a
+  trigger quote, which otherwise broke out of the blockquote.
+- The parser reads an italic `↳ …` line as the footer only after a blank line,
+  or directly after the header. The writer puts it only there.
+
+Residual: an italic arrow line that is its own last paragraph still reads as a
+footer. A fix needs the transcript at parse time, which was not worth it for a
+P3. Commit: `9d104c3`.
 
 ## DMG published to GitHub Releases (2026-10-19)
 
-The DMG's new home, left open when the website went: `mise run release` now
-pushes `main` and the tag, then runs `gh release create` with the DMG attached
-and notes generated from the commits since the previous tag. It runs locally,
-not in CI, because signing and notarisation use the local keychain; moving it
-to Actions would mean putting those credentials into repository secrets.
-`--verify-tag` makes `gh` fail rather than create a missing tag from the remote
-default branch, which need not be the commit the task tagged. The repo is
-private, so the release is visible only to collaborators. If `gh` fails after
-the push, a re-run refuses the existing tag; finish by running the
-`gh release create` line by hand.
+`mise run release` pushes `main` and the tag, then runs `gh release create` with
+the DMG and notes generated from the commits since the previous tag. GitHub
+Releases replaces the website as the home of the DMG. The task runs locally, not
+in CI, because signing and notarisation use the local keychain. Rejected:
+GitHub Actions, which needs those credentials in repository secrets.
+`--verify-tag` makes `gh` fail, so that it does not create a missing tag from
+the remote default branch. The repository is private, so only collaborators see
+the release. Residual: if `gh` fails after the push, a re-run refuses the
+existing tag. To finish, run the `gh release create` line by hand.
+Commit: `a7ac0ec`.
 
 ## Tooltips while in the background (2026-10-19)
 
-Issue #105 ("Icons need hover tool tips"). The icon controls already carried
-`.help` text, and a scan of the live toolbar, cards and tags editor (asking
-the hosting view's tooltip manager for the string at each point) confirmed
-SwiftUI resolves it for each one. What hid them is AppKit's gate: SwiftUI's
-tooltips go through `NSViewDynamicToolTipManager`, whose `_canShowToolTip`
-asks the window's `_showToolTip`, and that refuses unless `NSApp.isActive` or
-the window's `allowsToolTipsWhenApplicationIsInactive` is set (read from the
-disassembly, then checked in a background-only probe app: false by default,
-true with the flag). The manager's hover tracking area is `.activeAlways`
-with or without the flag, so that gate is the only block. Advisor's usual
-place is floating over the meeting app, so a hover never showed anything
-until a click brought Advisor forward.
+Tooltips did not show while Advisor was in the background (issue #105). That is
+its usual state, over a meeting app. The `.help` texts were present. The cause
+was read from the disassembly and confirmed in a probe app: SwiftUI tooltips go
+through `NSViewDynamicToolTipManager`, which refuses unless `NSApp.isActive` or
+the window's `allowsToolTipsWhenApplicationIsInactive` is true. The flag is
+false by default.
 
-`showsToolTipsWhenInactive()` puts an empty view behind each scene's root
-(Sessions, Recording, Preferences) that sets the flag in
-`viewDidMoveToWindow`, so a reopened recording window's fresh `NSWindow` gets
-it too. Popovers are windows of their own but don't need it: SwiftUI's
-transient popovers close when the app resigns active (seen in a probe), so
-none is open while Advisor is in the background. Preferences sheets do stay
-open, but hold no icon tooltips. The tag picker's `+` rows were the one
-symbol icon without a tooltip; they now say "Add tag", matching the pill's
-"Remove tag". The tag colour swatches are plain circles with no tooltip, and
-stay that way.
+`showsToolTipsWhenInactive()` sets the flag on the window of each scene
+(Sessions, Recording, Preferences), and again on each new `NSWindow`. Popovers
+do not need it: SwiftUI transient popovers close when the app resigns active
+(seen in a probe). Commit: `5944ab4`.
 
 ## Ask and Note from the toolbar (2026-10-20)
 
-Issue #104 ("Create notes using the text box at the bottom"). Notes could
-only be added by right-clicking the transcript, which is missing when the
-transcript is hidden and awkward while the feed scrolls under the pointer, and
-the bottom Ask bar couldn't take a note. A `/note` prefix in the bar was
-considered and dropped: the bar's space and the right-click's modal prompt
-were both worth losing, and one popover could serve both ways in.
+A note needed a right-click on the transcript. That is not possible when the
+transcript is hidden, and it is awkward while the feed scrolls (issue #104).
+Toolbar **Ask** (⌘K) and **Note** (⇧⌘N) buttons now open popovers
+(`ComposerForm`) in both windows, and the bottom Ask bar is gone. Popovers, not
+sheets, keep the feed visible while the user types. Rejected: a `/note` prefix
+in the Ask bar. One popover serves both entry points, frees the space of the
+bar, and replaces the modal prompt of the right-click.
 
-- **Both windows lose their bottom field.** Toolbar **Ask** (⌘K) and **Note**
-  (⇧⌘N) buttons open popovers (`ComposerForm`): a field that grows with the
-  text, Return to submit, ⌥↵ for a new line. Popovers, not sheets, so the feed
-  stays visible and scrollable while typing. The drafts live in the window's
-  state, so a click away that closes the popover keeps them; a dot on the
-  button says one is waiting, and reopening puts the caret at the end (focusing
-  a field selects all of it, so the first key would have replaced the draft).
-  A draft clears only once its note is added (`NoteDraft.submit`): one a saved
-  session couldn't write stays in the popover, and one whose line has gone
-  loses its placement, to go at the end. Drafts last while the window shows
-  that session: closing the recording window drops them (the single-instance
-  `Window` keeps its state otherwise), as selecting another saved session does.
-  The draft dot is a badge on the icon, so it can't widen the toolbar into its
-  compact layout and close the popover mid-typing. One popover shows at a time.
-  In the Sessions detail the streaming answer panel and the error line stay at
-  the bottom, shown only while there is one; Ask and Note grey out while the
-  note is still being recorded, as the right-click edits do.
-- **One note editor.** "Add note here…" no longer runs a modal `NSAlert`: it
-  hands its offset to the window (`FeedActions.onAddNote`), which opens the
-  Note popover with a `NotePlacement` quoting the line the note goes under (✕
-  drops it, sending the note to the end). A saved session finds the placement's
-  paragraph again by its text and margin time
-  (`SessionDetailPane.paragraph(for:in:times:)`), as a research card saved
-  while the popover was open shifts block offsets. Live, a placement whose
-  lines have all gone (echo cleanup) is dropped, leaving the draft to go at the
-  end.
-- **Where a button note goes.** Live, at the moment it's added: after every
-  line heard so far, and lines still being transcribed then started earlier,
-  so they sort above it. Saved, after the transcript's last line, below the
-  cards and notes there and above any Follow-ups (`NoteEdit.appendingNote`).
-- **Notes and Asks before Listen.** They wait in the store and open the
-  transcript. Starting a session used to clear the store's notes and cards,
-  and `session_start` clears the sidecar's transcript, so
-  `TranscriptStore.beginSession` now keeps both and returns the notes, and
-  `SidecarManager.sendSessionStart` sends each after `session_start` — they
-  can trigger research as recording starts. A note is also sent as it's
-  typed, so a question asked before Listen reads it; the classifier ignores it
-  until the session starts. `session_start` also used to abort the query lane,
-  cutting off an answer still being written; it now retires a busy one instead
-  (`QueryLanes`, as the research pool retires a lane mid-card, #86, but
-  without aborting it), drops it once its card is over, and gives the session a
-  fresh lane under a new name (`query<n>`: names key the transcript cursors).
-  The one-query-at-a-time gate is the current lane's, so the session's own
-  questions aren't held up by the retired answer. Keeping those cards needed
-  two more boundaries: `session_end` now clears the sidecar's transcript and
-  resets the query lane, so a question asked before the next Listen isn't
-  answered from the last conversation and saved into the next note; and a
-  Listen that replaces the sidecar (a login change) fails the cards the old
-  one was answering, as a crash does (#49), rather than leaving them spinning. An
-  idle window's notes are all pre-session ones: closing the window clears the
-  store, so a note isn't taken while a close is still finishing. Export waits for the session's note
-  file (`SessionWriter.hasExportContent`): before it, there was nothing to copy.
-- **Menu commands.** File ▸ Ask… (⌘K) and Add Note… (⇧⌘N) reach the front
-  window through a focused scene value (`ComposerCommands`); each window
-  publishes its own, so the shortcuts work in whichever is in front and grey
-  out where they can't apply. ⌘N stays New Recording.
-- **A More menu for a narrow window.** Ask and Note widened the recording
-  toolbar: its icon-only layout needed about 735pt before it clipped, 820pt
-  while recording. Hide transcript, Summarise, Float and Export now fold into a
-  More (…) menu before the chips lose their labels, and the icon-only layout
-  keeps the menu, so the toolbar fits about 600pt (690pt while recording) with
-  the "Default input" label and no folder; a microphone's name adds about
-  75pt, and the folder chip 50pt.
-  Folding first keeps the labels on the controls used most, and the four
-  buttons don't come back out when the labels go, so narrowing the window only
-  ever takes things away (`ListeningToolbar.Layout.narrowing`). More takes the
-  accent while the transcript is hidden or the window floats, as those buttons
-  do, so folding them doesn't hide that either is on. The Sessions window's
-  toolbar is the system one, which overflows into its own menu.
-- **The recording window's minimum width rose from 420pt to 850pt**
-  (`Theme.Metric.recordingWindowMinWidth`), so the toolbar never clips: 850pt
-  is its narrowest layout at its widest, a stopped session filed into a folder
-  with a microphone's name and a name, context and tags set. Text widths vary
-  a little between macOS releases (850.5pt on CI's macOS 26), so the test
-  allows 2pt over: too little to show. Folding Name,
-  Context and Tags as well would have kept the window nearer 700pt, but their
-  popovers would need a new anchor; a wider window was chosen instead. A test
-  holds the toolbar to the minimum, so a control that widens it fails there.
+- **Drafts.** A draft survives a click away, and clears only when its note is
+  added (`NoteDraft.submit`). The draft dot is a badge, so it cannot widen the
+  toolbar and close the popover.
+- **One note editor.** "Add note here…" opens the same popover with a
+  `NotePlacement`. A saved session finds the paragraph again by its text and
+  margin time, because a card saved meanwhile shifts the block offsets.
+- **Notes and Asks before Listen.** `TranscriptStore.beginSession` keeps them,
+  and `SidecarManager.sendSessionStart` sends each note after `session_start`.
+  `session_start` no longer aborts a busy query lane: `QueryLanes` retires it
+  and gives the session a new lane, `query<n>`, because names key the transcript
+  cursors. `session_end` clears the transcript of the sidecar and resets the
+  query lane, so a question before the next Listen does not use the last
+  conversation.
+- **Narrow window.** Hide transcript, Summarise, Float and Export fold into a
+  More (…) menu before the chips lose their labels
+  (`ListeningToolbar.Layout.narrowing`). The minimum width of the recording
+  window rose from 420 pt to 850 pt (`Theme.Metric.recordingWindowMinWidth`),
+  and a test holds the toolbar to it. Rejected: fold Name, Context and Tags too,
+  which needed a new anchor for their popovers.
 
-No protocol change: a button note is the same `note` frame.
+No protocol change: a button note is the same `note` frame. Commit: `176c70b`.
 
 ## Utterance text and decision time in the sidecar log (2026-10-20)
 
-The sidecar logged each utterance as `utterance(them): 28 chars` even with
-**Include transcript text in the log** on: the switch covered only the app's
-`apple(...)` line, so the line the classifier actually received couldn't be
-read. The sidecar's line now follows the same switch (`utteranceLogLine`): the
-length by default, the text when on, JSON-quoted so a quote or newline in it
-can't break the line. The sidecar reads `logTranscriptText` from
-config.json at launch and at every `session_start`; a mid-session change
-arrives in a `config` frame, which the recording window sends from its
-`advisorConfigChanged` observer on every preference edit, and the sidecar acts
-(and logs) only on a change. The app keeps no copy of what it sent: the
-sidecar also reloads the value at `session_start`, so a copy would go stale
-(code review). With no sidecar running nothing is sent, and the value is not
-replayed on restart, since a new sidecar reads config.json. With no recording
-window open nothing is sent either, but there are no utterances to log until
-the next Listen, whose `session_start` reloads it. Notes are still logged as
-lengths.
+The utterance line of the sidecar follows **Include transcript text in the
+log** (`utteranceLogLine`). By default it logs the length. With the switch on,
+it logs the text, JSON-quoted. Before, the switch covered only the app's
+`apple(...)` line, so the log did not show the text that the classifier
+received. The sidecar reads `logTranscriptText` from `config.json` at launch and
+at each `session_start`, and a mid-session change arrives in a `config` frame.
+The app keeps no copy of the value, because the sidecar reloads it at
+`session_start` and a copy goes stale. Notes are still logged as lengths.
 
-The classify line also gives the delay as the user experiences it:
-`classify 984ms → 0 trigger(s), decided 2486ms after the last line`. The first
-figure times the classifier call alone. The second runs from the sidecar
-receiving the window's last line to the verdict, so it includes the 1.5 s
-pause and any wait behind a classify already running. It is measured from
-receipt, not from the frame's `ts`, so speech recognition and the app's hold
-on mic lines are not counted. A re-run classify (`rerunWanted`) reschedules
-without counting as a new line heard. `AutoPipeline` takes `log` and `now`
-deps so that tests read the line against a clock they drive by hand.
+The classify line also gives the delay that the user sees:
+`classify 984ms → 0 trigger(s), decided 2486ms after the last line`. The second
+figure runs from the receipt of the last line of the window to the verdict. It
+includes the 1.5 s pause and any wait behind a classify that runs. It excludes
+speech recognition and the app's hold on mic lines. Commit: `2362eda`.
 
 ## Token usage and time to card in the log (2026-10-20)
 
-Classify calls ranged from 1 s to 8 s in a live session, nearly all of it
-before the first text, and the log couldn't say whether that was the model
-thinking. Each Claude run's `run done` line now carries the turn's tokens
-(`tokens in=… out=… cache_read=… cache_write=…`). The result message's `usage`
-is per turn, while its cost and API time add up over the session (checked
-against the SDK). `out` includes thinking, so `{"triggers":[]}` costing
-hundreds of output tokens means the classifier thought first. Codex runs log no
-usage yet.
+Classify calls took 1–8 s in a live session, nearly all before the first text.
+The log did not show whether the model thought in that time. Each Claude
+`run done` line now carries the tokens of the turn
+(`tokens in=… out=… cache_read=… cache_write=…`). The `usage` of the result is
+for one turn, but its cost and API time accumulate over the session (checked
+against the SDK). `out` includes thinking, so a `{"triggers":[]}` that costs
+hundreds of output tokens means that the classifier thought first. Codex runs
+log no usage yet.
 
-Each auto card also logs when it reached the user, from the same reference as
-`decided`: `card "Cedar" shown 3457ms, text 7074ms after the last line`.
-"Shown" is the dispatch to a lane, where `runCard` sends the pending card at
-once; a card queued for a lane shows later than it was decided. "Text" is the
-first frame carrying an answer (streaming or done), reported by `runCard`
-through a `textSent` hook on its frame builder, which `AutoPipeline` passes to
-its `research` dep. A card that fails before any text logs no line; the
-`research "…" Nms` line still records it. Manual cards (Ask, right-click) have
-no line to measure from and log nothing new.
+Each automatic card also logs when it reached the user, from the same reference
+as `decided`: `card "Cedar" shown 3457ms, text 7074ms after the last line`.
+"Shown" is the dispatch to a lane, and "text" is the first frame with answer
+text. Manual cards have no reference line, and log nothing new.
+Commit: `2362eda`.
 
 ## Xcode pinned (2026-10-20)
 
-CI built the app with the `macos-26` image's default Xcode (26.6, Swift
-6.3.3) while releases were built locally with whatever Xcode was selected
-(27.0, Swift 6.4, on macOS 27), so CI wasn't testing the toolchain that
-shipped, and nothing in the repo said which one it should be. The macOS
-versions still differ (CI has no macOS 27 image), and so can text metrics.
+CI built with the default Xcode of the `macos-26` image (26.6, Swift 6.3.3), but
+releases used the Xcode selected locally (27.0, Swift 6.4). Thus CI did not test
+the toolchain that shipped. `.xcode-version` now pins 26.6, the newest Xcode 26
+on the CI image. Every swift step (commit check, `package.sh`, `install.sh`, CI)
+runs through `App/xcode.sh`. The script finds the Xcode in
+`/Applications/Xcode*.app` whose `CFBundleShortVersionString` equals the pin. It
+sets `DEVELOPER_DIR` for the one command, and refuses to run without that Xcode.
+A lookup by version, not by path, works with the CI layout and the local
+layout, and leaves `xcode-select` alone for other projects.
 
-`.xcode-version` now pins 26.6, the newest Xcode 26 on the CI image. Every
-swift step runs through `App/xcode.sh`: commit-check, `package.sh`,
-`install.sh` and CI's build and test. It finds the Xcode whose
-`CFBundleShortVersionString` equals the pin among `/Applications/Xcode*.app`,
-sets `DEVELOPER_DIR` to it for the one command, and refuses to run the command
-without it. Finding it by version, not by a fixed path, copes with both
-layouts (`Xcode_26.6.app` plus symlinks on CI, `Xcode-26.6.app` beside a newer
-`Xcode.app` locally) and leaves `xcode-select` alone for other projects. The
-selection is the check: `/usr/bin/swift` follows `DEVELOPER_DIR`, so the swift
-steps run under the pinned Xcode or not at all. A `swift` earlier on `PATH`
-(swiftly) or `TOOLCHAINS` set would bypass it; neither is the case here or on
-CI. Matching the short version can't tell a 26.6 beta from the release.
-`XcodePinTests` runs the script over fake Xcode apps. A plain `swift build`
-outside the script still uses the selected Xcode.
+Residuals: the macOS versions still differ (CI has no macOS 27 image), so text
+metrics can differ. A `swift` earlier on `PATH` or a `TOOLCHAINS` setting
+bypasses the pin. The short version cannot tell a 26.6 beta from the release.
+A plain `swift build` outside the script uses the selected Xcode.
+Commit: `fe419fb`.
 
 ## About panel (2026-10-29)
 
-The About panel was AppKit's default: the icon, the name and the version
-(issue #106). It now shows credits, with a copyright line below them.
+The About panel shows credits and a copyright line, in addition to the default
+icon, name and version of AppKit (issue #106). `AboutCredits` builds the
+credits: one sentence on what Advisor does, then Node.js (MIT), the Claude Agent
+SDK and the Codex SDK (Apache-2.0). The Claude Agent SDK declares "SEE LICENSE
+IN README.md", so its line links to the legal agreements of Anthropic. Each run
+of text carries a system colour, because text with no colour draws black on the
+dark panel.
 
-- **Credits.** `AboutCredits` (`AboutCredits.swift`) builds them: one sentence
-  on what Advisor does, then the main components with their licences. These
-  are Node.js (MIT), the Claude Agent SDK and the Codex SDK (Apache-2.0). The
-  Claude Agent SDK's package declares "SEE LICENSE IN README.md", so its line
-  shows "Anthropic terms" as a link to Anthropic's legal agreements.
-  `AboutCommands` replaces the menu's About item with one that gives the
-  credits to `orderFrontStandardAboutPanel`. Each run of text carries a system
-  colour, because text with no colour draws black on the dark panel.
-- **Three lines, not a hundred.** The app ships about 100 npm packages. A full
-  list, generated from the shipped `node_modules`, was rejected: it buried the
-  rest of the panel. The list stops at the runtime and the sidecar's direct
-  dependencies.
-- **Held to the sources.** The list is written by hand, so tests hold it to
-  `sidecar/package.json` (the list names each direct dependency) and to the
-  lock file (an open-source licence shows as the identifier that its package
-  declares). The copyright line, `NSHumanReadableCopyright` in Info.plist, is
-  held to the holder and year in LICENSE. A new dependency or a changed
-  licence fails a test.
-- **No repository link.** The repository is private, so a link would give
-  anyone else a 404.
+Rejected: a full list of the about 100 bundled npm packages, because it buried
+the rest of the panel. The hand-written list stops at the runtime and the direct
+dependencies of the sidecar. Tests hold it to `sidecar/package.json` and the
+lock file, and the copyright line to LICENSE. There is no repository link,
+because the repository is private. Commit: `d839682`.
 
 ## Licence texts in the bundle (2026-10-29)
 
-The app redistributes Node and about 100 npm packages, and their licences
-(MIT, Apache-2.0 and others) ask that copies carry the licence text. Release
-0.4.12 did not carry all of them. `package.sh` copied the Node binary without
-its `LICENSE`. Three packages ship with no licence file: `@openai/codex`,
-`@openai/codex-darwin-arm64` (the Codex CLI binary) and `standardwebhooks`.
-Advisor's own MIT `LICENSE` was not in the bundle either.
+The app redistributes Node and about 100 npm packages, and their licences ask
+that copies carry the licence text. Release 0.4.12 did not carry all of them.
+Node's `LICENSE` and Advisor's own `LICENSE` were missing. Three packages ship
+with no licence file: `@openai/codex`, `@openai/codex-darwin-arm64` and
+`standardwebhooks`.
 
-- **In place, not one notices file.** `package.sh` copies Advisor's `LICENSE`
-  and Node's (from the Node install folder, next to `bin/`) into
-  `Contents/Resources`. Each package's licence stays in its own folder, where
-  npm puts it. A single generated `THIRD-PARTY-NOTICES.txt` would be easier to
-  read, but needs more code, and nothing in the app links to it.
-- **Supplied texts.** `sidecar/licences/<package>/` holds the upstream text
-  for each package that ships without one, unchanged and pinned to a tag or
-  commit (its `README.md` lists the sources). The two Codex packages also get
-  upstream's `NOTICE`, which Apache-2.0 §4(d) asks a redistribution to carry.
-  The Codex binary package also bundles ripgrep 15.1.0 (`codex-path/rg`) and
-  zsh 5.9 (`codex-resources/zsh/bin/zsh`) with no licence text, so it gets
-  `ripgrep.LICENSE` and `zsh.LICENSE` too. Advisor's own code runs neither.
-  Codex's shell commands can probably run `rg`, and only its experimental
-  `shell_zsh_fork` feature uses the zsh, which Advisor does not turn on (both
-  read from the strings in the binary, not from a run). Whether they run does
-  not matter: the licences apply to the copies that the app ships.
-- **The check.** `App/licences.sh`, run by `package.sh` after the prune,
-  copies the supplied texts in. Then it fails the build and names each bundled
-  package (scoped and nested ones too) that still has no `LICENSE`, `LICENCE`,
-  `COPYING` or `UNLICENSE` file. A dependency bump that adds such a package
-  therefore stops the release, not the licence. A bundled program's text is
-  named `<program>.LICENSE`, so the check does not take it for the package's
-  own licence. A supplied text that is no longer needed (the package now ships
-  its own, or is no longer bundled) only warns, because it changes no text
-  that ships. A file that the package ships is never overwritten, and a
-  program's text is still copied when the package has its own licence. `BundledLicencesTests` runs the script over fake
-  `node_modules` folders, and holds `sidecar/licences/` to the packages that
-  the lock file locks.
-- **Residual.** The check looks for one licence file per package folder, so it
-  cannot see another program that a package bundles, as with `rg` and `zsh`;
-  a Codex bump that adds one needs a look at `vendor/`. The Codex binary also
-  links Rust crates in, and upstream ships no licence texts for them. The
-  bundle carries what upstream distributes (`LICENSE` and `NOTICE`), no more.
+- **In place.** `package.sh` copies Advisor's `LICENSE` and Node's into
+  `Contents/Resources`, and each package keeps its licence in its own folder.
+  Rejected: one generated `THIRD-PARTY-NOTICES.txt`, which needs more code that
+  nothing uses.
+- **Supplied texts.** `sidecar/licences/` holds the upstream texts, with their
+  sources in its `README.md`. The Codex packages also get the `NOTICE` that
+  Apache-2.0 §4(d) asks for, and the texts for the ripgrep and zsh that the
+  Codex binary package bundles. The licences apply to the shipped copies,
+  whether or not those programs run.
+- **The check.** `App/licences.sh` fails the build for each bundled package
+  that still has no licence file, so a dependency bump that adds one stops the
+  release. A supplied text that is no longer necessary only gives a warning.
+- **Residual.** The check cannot see another program that a package bundles,
+  as with `rg` and `zsh`. A Codex bump that adds one needs a manual look at
+  `vendor/`. The Codex binary links Rust crates, and upstream ships no texts for
+  them. The bundle carries what upstream distributes, and no more.
+
+Commit: `84c608c`.
 
 ## Card code blocks and block quotes (2026-10-31)
 
-Card bodies now render fenced code blocks and block quotes (issue #107).
-Before, a fence's lines laid out as prose: line breaks and indentation were
-lost, a blank line in a fence split it into paragraphs, and the inline parser
-showed the fence markers or read the whole fence as one run of inline code.
+Card bodies render fenced code blocks and block quotes (issue #107). Before, a
+fence laid out as prose, and lost its line breaks and indentation.
+`MarkdownText.lines(from:)` first cuts the card into prose, fences and quotes
+(`segments`), so no fence line reaches the prose rules.
 
-`MarkdownText.lines(from:)` first cuts the card into prose, code fences and
-block quotes (`segments`). No fence line reaches the prose rules, so
-`splittingAtHeadings` no longer tracks fences.
+- **Fences.** A fence follows CommonMark: three or more backticks or tildes,
+  closed only by at least as many of the same mark. These rules differ:
+  - A fence may be indented any amount, so a fence under a list item is still a
+    fence. Cards have no indented code blocks.
+  - A fence ends only at its closing line, so a line indented less than the
+    fence stays code. Model output often indents code less than its fence.
+  - An unclosed fence runs to the end of the card, also in a list item, so a
+    code block that streams in shows as code. Rules that ended the fence with
+    the item were tried and dropped. Each one broke a more common case: a closed
+    fence with under-indented diff or YAML lines, or a streaming fence with an
+    under-indented `# comment`. GitHub renders an unclosed fence the same way.
+- **Code block layout.** One `NSTextBlock`. The corners are square, because
+  TextKit 1 has no rounded blocks. TextKit ignores text block margins, so a
+  spacer line follows a code block or a quote, as it follows a table.
+- **Block quotes.** A run of lines that start with `>`, laid out as a card body
+  of its own. Unlike CommonMark, a line without `>` ends the quote (no lazy
+  continuation).
 
-- **Fences.** Three or more backticks or tildes, closed only by at least as
-  many of the same mark, indented at most three columns past the fence (as in
-  CommonMark), so a deeper fence line in a Markdown example stays code.
-  Indentation counts a tab to the next multiple of four columns, for list items
-  too. A fence may be indented any amount, so a fence under a
-  list item is still a fence; cards have no indented code blocks. A fence on an
-  item's own line (`1. ```bash`) is that item's code. The code keeps its line
-  breaks, its indentation (less the fence's own) and its blank lines, and is
-  not parsed. A fence ends only at its closing line, so a line indented less
-  than the fence stays code; model output often indents code less than its
-  fence. A fence that is not closed runs to the end of the card, so a code block
-  that is still streaming in shows as code and keeps its shape when the closing
-  line arrives; a trailing newline in it is not yet a blank line. Unlike
-  CommonMark, an unclosed fence in a list item does not end with the item. Rules
-  that ended it there were tried and dropped: each one broke a commoner case, a
-  closed fence with under-indented diff or YAML lines, or a streaming fence with
-  an under-indented `# comment`. An unclosed fence in a finished reply is rare,
-  and GitHub renders it the same way.
-- **Code block layout.** One paragraph per line, all in one `NSTextBlock`: the
-  monospaced font in the body colour, the table's hairline border and the
-  `nsSurfaceCardSubtle` fill, across the card. Long lines wrap. The corners are
-  square, because TextKit 1 has no rounded blocks. An indented fence belongs to
-  the deepest open list item it is indented past. Its block starts at that
-  item's text column, and the list goes on after it. TextKit fills a block's
-  margin too, so the indent is the padding of an unfilled outer block.
-- **Block quotes.** A run of lines that start with `>`. The content is laid out
-  as a card body of its own, so it can hold lists, code and nested quotes.
-  Unlike CommonMark, a line without `>` ends the quote (no lazy continuation).
-  Each quote is an `NSTextBlock` with a 3 pt left bar in the table border
-  colour, and its text is `nsTextSecondary`. A quote indented under a list
-  item belongs to that item, as a fence does.
-- **Item continuations.** A paragraph indented under an open list item, after
-  the item's code block, its quote or a blank line, continues that item: it
-  hangs at the item's text, and the list goes on after it. Before, such a
-  paragraph rendered at the margin and closed the list.
-- **Italic colour.** An italic run now takes the colour of the text around it
-  (a quote's, or a heading's) unless the style sets an emphasis colour, as the
-  saved-card style does.
-- **Spacing.** TextKit ignores text block margins, so a spacer line one block
-  spacing tall follows a code block or a quote, as it follows a table. A
-  quote's last paragraph loses its paragraph spacing, which would lengthen the
-  bar; a nested quote that closes inside its parent gets a spacer inside the
-  parent.
+Rejected: the Textual library (0.5.0) in place of `MarkdownText`. The evidence
+is in a comment on issue #107. Textual broke tables with an empty first header
+cell, laid out about four times slower, and added a 7.1 MB math-font bundle
+that `package.sh` does not package. Its parser, Foundation's, does not nest the
+two-space sub-lists that model output uses.
 
-A trial of the Textual library (0.5.0) in place of `MarkdownText` was
-rejected; the evidence is in a comment on #107. Textual broke tables with an
-empty first header cell, laid out about four times slower, and added a 7.1 MB
-math-font bundle that `package.sh` does not package. Its parser, Foundation's,
-also does not nest the two-space sub-lists that model output uses.
-
-Not supported: strikethrough has no style, a task list item shows `[ ]` as
-text, and images do not render. A character that the monospaced font lacks,
-such as `∘`, shows as a blank in inline code (issue #108).
-
-`MarkdownTextTests` cover the "Scala type lambdas" card from #107; Markdown in
-a fence staying source; a fence splitting a paragraph; an unclosed, a
-streaming, an indented and a tab-indented fence; an empty fence; fences under
-items and on an item's line, and one at the margin closing a list; an
-unclosed fence in an item running to the end, and a closed or a streaming one
-keeping lines indented less than itself, a diff among them; a fence line
-indented deeper than its fence's closing limit; a tab partly inside a fence's
-indent; text after
-an item's code block staying in the item; a code block under an item filled
-from its border only (drawn and sampled); a code
-block's single filled block, its width and its indent under an item; quotes
-holding Markdown, quotes apart and nested, a line without `>` ending a quote,
-and `>` in a fence or mid-line; the quote bar, colour and spacing, a nested
-quote closing inside its parent, a quote under an item lining up with it and
-staying inside the card, a list in a quote
-leaving the outer item's column alone, a table in a quote staying inside the
-card, and italic taking a heading's colour.
+Not supported: strikethrough, task-list check boxes and images. A character
+that the monospaced font does not have, such as `∘`, shows as a blank in inline
+code (issue #108). Commit: `6b56428`.
 
 ## Revisit as it grows
 
-Echo suppression approach; markdown vs SQLite once history is large; exposing an MCP server over past sessions (the hybrid from REQUIREMENTS).
+- The approach to echo suppression.
+- Markdown or SQLite, when the history is large.
+- An MCP server over past sessions (the hybrid in REQUIREMENTS.md).

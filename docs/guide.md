@@ -2,8 +2,7 @@
 
 The everyday guide: recording, the Sessions browser, preferences, providers,
 safety and logs. For the short version see
-[Getting started](../README.md#getting-started); for every feature in one list,
-[FEATURES.md](../FEATURES.md).
+[Getting started](../README.md#getting-started).
 
 ## Recording
 

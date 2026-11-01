@@ -113,6 +113,18 @@ The bundle carries the licence texts of what it ships:
   package that still has no licence file. To fix it, add the package's text
   under `sidecar/licences/` as its `README.md` describes.
 
+**App icon.** The source is `App/Resources/icon-master.html`, a
+self-contained page that documents its palette, waveform and squircle tokens
+inline. `App/Resources/AppIcon-1024.png` is the master export, and
+`App/Resources/AppIcon.iconset/` holds the sizes, with the Apple names
+(`icon_16x16.png` … `icon_512x512@2x.png`). `package.sh` compiles the set to
+`AppIcon.icns` with `iconutil`, and `Info.plist` names it through
+`CFBundleIconFile` and `CFBundleIconName`. To change the icon:
+
+1. Edit `icon-master.html`.
+2. Export the PNG sizes into `AppIcon.iconset/`.
+3. Run `package.sh`. No code change is necessary.
+
 To clean-build **and** install over your own copy in one step:
 
 ```sh

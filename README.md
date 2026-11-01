@@ -57,7 +57,6 @@ Packaging, signing and releases are in
   preferences, providers, safety, logs
 - [docs/development.md](docs/development.md) — architecture, building,
   packaging, releasing
-- [FEATURES.md](FEATURES.md) — the feature list, in plain language
 - [REQUIREMENTS.md](REQUIREMENTS.md) — what it must do, decisions made
 - [DESIGN.md](DESIGN.md) — architecture, protocol, milestones, tuning history
 
