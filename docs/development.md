@@ -48,7 +48,7 @@ Tests: `cd App && sh xcode.sh swift test` and `cd sidecar && npm test`. The side
 includes the `*.sdk.test.ts` files, which check the tool sandbox, the tools the
 classifier is offered, effort, streaming and the logged-out failure shape
 against the real bundled Claude CLI (a local fake model or no credentials at
-all; no network). `mise run commit-check`
+all; no network). The `commit-check` task
 (below) runs the same clean build and tests as CI. To watch the trigger
 classifier on a real transcript, `sh sidecar/test/replay.sh` feeds
 `sidecar/test/fragments.txt` through the built sidecar and prints the triggers
@@ -58,22 +58,23 @@ makes the README GIF from a scripted conversation that plays as system audio.
 Requires: macOS 26+ (Apple Silicon), Xcode 26.6 (pinned in `.xcode-version`;
 install it from https://developer.apple.com/download/all/ alongside any other
 Xcode, as `/Applications/Xcode-26.6.app`), Node 26.11.1 (pinned in
-`.tool-versions`; `mise install` fetches it), a logged-in
+`.tool-versions`, which most Node version managers read), a logged-in
 Claude Code or Codex CLI. First run prompts for Microphone and Screen & System
 Audio Recording permissions. A packaged app prompts as Advisor; a bare
 `.build/debug/Advisor` dev run may be attributed to the launching terminal.
 
 ## Developer shortcuts
 
-If `mise` is installed, common tasks are available from the repo root:
+`mise.toml` at the repo root defines tasks for common jobs. Run a task with
+mise (`mise run <task>`), or run the commands that the task lists in
+`mise.toml`:
 
-```sh
-mise run commit-check   # clean build and test both sides; Swift warnings fail it (alias: mise run cc)
-mise run run            # run the debug build
-mise run dmg            # create App/dist/Advisor-<version>.dmg
-mise run release        # dmg + tag vVERSION + push + GitHub release
-mise run install        # install to ~/Applications/Advisor.app
-```
+- `commit-check` (alias `cc`): a clean build and test of both sides. Swift
+  warnings fail it.
+- `run`: run the debug build.
+- `dmg`: create `App/dist/Advisor-<version>.dmg`.
+- `release`: the DMG, the `vVERSION` tag, a push and a GitHub release.
+- `install`: install to `~/Applications/Advisor.app`.
 
 ## Packaging
 
@@ -190,14 +191,10 @@ the bundled Node sidecar and `$HOME` reads.)
 The repo-root `VERSION` file is the single source of truth. `package.sh` stamps
 it into the bundle as `CFBundleShortVersionString`, with `CFBundleVersion` set
 from the commit count, and `dmg.sh` names its output `Advisor-<version>.dmg`. To
-release: bump `VERSION` and commit the bump, then
-
-```sh
-mise run release
-```
-
-which builds the DMG, tags `vVERSION` at `HEAD`, pushes `main` and the tag, and
-creates a GitHub release for the tag with the DMG attached and notes generated
+release: bump `VERSION` and commit the bump, then run the `release` task
+(see [Developer shortcuts](#developer-shortcuts)). The task builds the DMG,
+tags `vVERSION` at `HEAD`, pushes `main` and the tag, and creates a GitHub
+release for the tag with the DMG attached and notes generated
 from the commits since the previous tag. It refuses to run if the tag already
 exists (bump `VERSION` first) or if `VERSION` has uncommitted changes (the tag
 must point at a commit carrying the version it names). It needs `gh` logged in

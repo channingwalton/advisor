@@ -47,7 +47,7 @@ cd ../App && sh xcode.sh swift build && .build/debug/Advisor
 
 Requires macOS 26+ on Apple Silicon, Xcode 26.6 (pinned in `.xcode-version`;
 `App/xcode.sh` runs the build under it) and Node 26.11.1 (pinned in
-`.tool-versions`; `mise install` fetches it).
+`.tool-versions`, which most Node version managers read).
 Packaging, signing and releases are in
 [docs/development.md](docs/development.md).
 
@@ -57,7 +57,7 @@ Packaging, signing and releases are in
   preferences, providers, safety, logs
 - [docs/development.md](docs/development.md) — architecture, building,
   packaging, releasing
-- [REQUIREMENTS.md](REQUIREMENTS.md) — what it must do, decisions made
+- [REQUIREMENTS.md](REQUIREMENTS.md) — what it must do
 - [DESIGN.md](DESIGN.md) — architecture, protocol, milestones, tuning history
 
 ## Licence
