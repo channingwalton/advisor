@@ -55,6 +55,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 ### Interface
 - F13. Live recording window: compact; updates as the conversation flows without stealing focus; can be kept on top of other windows on request (Float).
 - F14. On-demand query: Ask (a toolbar popover, ⌘K) about the current conversation or anything else, with conversation transcript as context.
+  - An Ask or a right-click action while another runs gets its own card at once, within a cap on busy query lanes (three, plus a fresh lane after a session start); one past the cap gets a failed card that holds the question, never a silent refusal (issue #110). `#query-busy`
 - F14a. In-situ actions: right-click selected transcript text to run an action (Answer / Context / Fact check) on it — the same kinds the auto-classifier detects, gated by the same per-kind toggles; the resulting card is anchored under the originating line.
 - F14b. Editorial notes (issue #34): right-click a transcript line to inject the user's own context as a distinct green NOTE card anchored at that line; the agents read it as part of the transcript (so it can inform or trigger research). Deletable; persisted with the session.
   - The toolbar's Note (⇧⌘N) adds one at the current point in the conversation, or at the end of a saved transcript; right-click opens the same popover placed at its line (issue #104).

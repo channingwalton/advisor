@@ -45,7 +45,10 @@ controls then lose their labels.
   note before the save.
 - **Ask** (⌘K) opens a box for a question about the conversation, or about
   anything else. The answer comes as a card. **Return** sends it, and **⌥↵**
-  starts a new line.
+  starts a new line. You can ask again while an answer is in progress, and the
+  answers come at the same time. When too many are in progress (normally
+  three), or a question cannot start, it shows as a failed card with your
+  question and the reason, so that you can ask it again later.
 - **Note** (⇧⌘N) opens a box for your own context, such as a name that the
   audio misheard, or what "the migration" means. It shows as a green **Note**
   card at this point in the conversation, and the assistant reads it as part of

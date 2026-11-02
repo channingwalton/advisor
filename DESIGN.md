@@ -86,10 +86,10 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Card lanes** (`lanes.ts`). Every card-answering session takes `cardLaneOptions`: one system prompt (`buildResearchSystem()`: persona plus fixed operating rules — lead with the answer, notes first then web, no narration, cite, say "couldn't verify", never ask), the tools `WebSearch`, `WebFetch`, `Read`, `Grep`, `Glob` plus the user's own connectors, and the effort preference. The per-task instruction comes from `researchTask` (answer / context / fact-check), `replyTask`, `summaryTask`, `documentQuestionTask` or `documentResearchTask`. Two kinds of lane:
 
-- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and one query lane (`QueryLanes`; a session start retires one still answering rather than aborting it — see *Ask and Note from the toolbar*). `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation. A turn that loses the conversation with no error (`TaskResult.contextLost`, a cancelled Codex turn) forgets the cursor with no reset (#112).
+- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and the query lane (`QueryLanes`; a session start retires one still answering rather than aborting it — see *Ask and Note from the toolbar*; a query while it answers gets an extra lane — see *A second Ask runs beside the first*). `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation. A turn that loses the conversation with no error (`TaskResult.contextLost`, a cancelled Codex turn) forgets the cursor with no reset (#112).
 - *Transient, one-shot* — card follow-ups (≤3 at once), the live summary, and saved-session tasks (ask, research, follow-up, summarise; ≤2 at once). Created per request, disposed after, never holding a pool slot.
 
-**Query lane.** The Ask box (a `query` card with no anchor, so it sorts in at the time of asking) and right-click actions (the action's kind, anchored under the clicked line). One at a time — a second gets an `error` frame. Gets its conversation through its own cursor, like a research lane.
+**Query lane.** The Ask box (a `query` card with no anchor, so it sorts in at the time of asking) and right-click actions (the action's kind, anchored under the clicked line). One at a time on the lane. A query that comes while it answers runs on an extra lane (`QueryLanes.take`), up to three busy query lanes; past that it gets a failed card that holds the question (#110). Gets its conversation through its own cursor, like a research lane.
 
 **guardedRun / cancel** (`guardedRun.ts`, `cancel.ts`). One run skeleton for every card, reply, summary and document task: stream, then a terminal frame, all suppressed once the id is cancelled. Streaming frames go out at most every 150 ms (`throttle.ts`); before any text a card stays `pending` and carries the agent's current `activity` (see *Card text streams as it is written*). `cancel` interrupts whichever lane holds the id and answers on the right channel (`card_update` or `document_answer`).
 
@@ -207,7 +207,7 @@ Commit: `b208cfb`.
   merge before classification.
 - The brief is explicitly proactive: "trigger every minute or two in
   substantive conversation".
-- Research runs in 3 persistent lanes, plus one query lane.
+- Research runs in 3 persistent lanes, plus the query lane (and extra query lanes while it answers, #110).
 - `sidecar/test/replay.sh` and `fragments.txt` replay real transcripts for
   tuning.
 
@@ -614,7 +614,8 @@ lists notes by their `yyyy-MM-dd-HHmmss.md` name). (Changed 2026-06-19: see
   surfaced cards from questions (`Q ·`).
 - **Ask on its own path.** The query lane holds live-session state (cursor,
   session prompt, `busy` gate). A question about a saved note through it would
-  pollute the live context and wait behind live queries. `ask_document` carries
+  pollute the live context and wait behind live queries (since #110, it would
+  take an extra lane instead). `ask_document` carries
   the whole note to a transient one-shot session, and `document_answer` returns
   by request id. A crash, a spawn failure or a stop fails every outstanding
   request. Two document questions can run at once. A finished answer is
@@ -2278,6 +2279,36 @@ Follow-ups:
   the outer wrapper changed. The 0.166.0 binary names a
   `permissions.filesystem.deny_read` setting among its managed requirements,
   but whether a user config can set it was not checked.
+
+## A second Ask runs beside the first (2026-11-02)
+
+Decision: a query (Ask or a right-click action) that comes while the query
+lane answers runs at once on an extra lane, `query<n>`, beside the current one
+(issue #110). The extra lane has its own session and transcript cursor, so its
+first task carries the whole conversation. It is dropped when its card is over,
+as a retired lane is. When three query lanes are busy (lanes that a session
+start retired included), or when the extra lane cannot be made, the query gets
+a card in the `failed` state, with the question as its title and the reason as
+its body (`claimQueryLane`). The current lane runs whenever it is free, so the
+questions of a new session run while lanes that its start retired still answer
+(#104). So a session start can add one busy lane past the cap.
+
+Reason: the sidecar refused the second query with a non-fatal `error` frame,
+and the app hid it, because the status line shows only some words. The Ask box
+had already cleared and closed, so the question was lost with no message. A
+card cannot be hidden. The cap, three as for follow-ups, stops a burst from
+starting unbounded agent processes.
+
+Rejected:
+- A queue on the one lane. The second answer then waits for the first, which
+  can take a minute in a live meeting, and a queued question needs its own
+  card and cancel path before it starts.
+- A refusal in the app (disable Ask, or keep the text and show the error). The
+  app does not know when the sidecar's lane is busy, and the user still does
+  not get the answer.
+
+Cost: an extra lane starts a new agent session, and sends the whole
+conversation once.
 
 ## Revisit as it grows
 

@@ -2,7 +2,7 @@ import { Agent, type AgentSessionOptions } from "./agent.js";
 import { AdvisorConfig, effortArg, modelArg } from "./config.js";
 import { cardUpdateFrame, guardedRun, type Frame } from "./guardedRun.js";
 import { buildResearchSystem, sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
-import { log, Outbound } from "./protocol.js";
+import { log, Outbound, type Inbound } from "./protocol.js";
 
 const CARD_TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
 
@@ -174,23 +174,53 @@ export async function runCard(
 }
 
 /// The user's query lane (Ask and right-click actions), one query at a time. A
-/// session start gives the session a fresh lane, but one still answering then
-/// is retired rather than aborted, so a question asked before Listen gets its
-/// answer (issue #104), while the new session's own questions run on the fresh
-/// lane meanwhile; the retired lane's session is dropped once its card is
-/// over. Names (`query<n>`) key the transcript cursors, so a fresh lane never
-/// takes a retired one's — its card's failure path forgets that cursor (#86) —
-/// and a lane is shed (its cursor forgotten) when dropped, so one minted later
-/// under its name starts afresh.
+/// query that comes while it answers gets an extra lane beside it, up to
+/// `max` busy lanes (issue #110); the extra lane's session is dropped once its
+/// card is over. A session start gives the session a fresh lane, but one still
+/// answering then is retired rather than aborted, so a question asked before
+/// Listen gets its answer (issue #104), while the new session's own questions
+/// run on the fresh lane meanwhile; the retired lane's session is dropped once
+/// its card is over. Names (`query<n>`) key the transcript cursors, so a fresh
+/// lane never takes a retired one's — its card's failure path forgets that
+/// cursor (#86) — and a lane is shed (its cursor forgotten) when dropped, so
+/// one minted later under its name starts afresh.
 export class QueryLanes {
   private current: Lane;
-  private retired: Lane[] = [];
+  /// Lanes dropped when their card is over: lanes that a session start
+  /// retired, and extra lanes.
+  private transient: Lane[] = [];
 
   constructor(
     private readonly make: (name: string) => Lane,
-    private readonly shed: (lane: Lane) => void = () => {}
+    private readonly shed: (lane: Lane) => void = () => {},
+    private readonly max = 3
   ) {
     this.current = make("query0");
+  }
+
+  /// Claim a lane for a new query, and mark it busy: the current lane when it
+  /// is free, so a session's own questions run while lanes that its start
+  /// retired still answer (#104). Else an extra lane, which gets its own
+  /// session and cursor, while fewer than `max` query lanes are busy, retired
+  /// lanes included. Undefined past the cap. A `make` that throws changes
+  /// nothing.
+  take(): Lane | undefined {
+    let lane = this.current;
+    if (lane.busy) {
+      if (this.all.filter((l) => l.busy).length >= this.max) return undefined;
+      lane = this.make(QueryLanes.freeName(this.all));
+      this.transient.push(lane);
+    }
+    lane.busy = true;
+    return lane;
+  }
+
+  /// The lowest `query<n>` that none of `lanes` holds.
+  private static freeName(lanes: readonly Lane[]): string {
+    const taken = new Set(lanes.map((l) => l.name));
+    let n = 0;
+    while (taken.has(`query${n}`)) n++;
+    return `query${n}`;
   }
 
   /// The lane new queries run on.
@@ -198,10 +228,10 @@ export class QueryLanes {
     return this.current;
   }
 
-  /// Every query lane, retired ones still answering included — where cancel
-  /// and the exit path look.
+  /// Every query lane, retired and extra ones still answering included —
+  /// where cancel and the exit path look.
   get all(): readonly Lane[] {
-    return [this.current, ...this.retired];
+    return [this.current, ...this.transient];
   }
 
   /// A new session: a fresh lane; the old one dropped, or retired while busy.
@@ -209,21 +239,18 @@ export class QueryLanes {
   /// and a drop that throws still leaves the session its fresh lane.
   reset(): void {
     const old = this.current;
-    const taken = new Set([...this.retired, ...(old.busy ? [old] : [])].map((l) => l.name));
-    let n = 0;
-    while (taken.has(`query${n}`)) n++;
-    const fresh = this.make(`query${n}`);
-    if (old.busy) this.retired.push(old);
+    const fresh = this.make(QueryLanes.freeName([...this.transient, ...(old.busy ? [old] : [])]));
+    if (old.busy) this.transient.push(old);
     else this.drop(old);
     this.current = fresh;
   }
 
-  /// `lane`'s card is over. A retired lane's session is dropped now; the
-  /// current one stays warm for the next query.
+  /// `lane`'s card is over. A retired or extra lane's session is dropped now;
+  /// the current one stays warm for the next query.
   release(lane: Lane): void {
     lane.busy = false;
-    if (!this.retired.includes(lane)) return;
-    this.retired = this.retired.filter((l) => l !== lane);
+    if (!this.transient.includes(lane)) return;
+    this.transient = this.transient.filter((l) => l !== lane);
     this.drop(lane);
   }
 
@@ -237,6 +264,35 @@ export class QueryLanes {
     }
     this.shed(lane);
   }
+}
+
+/// A claimed query lane, or the failed card for a query that gets none: past
+/// the cap, or when an extra lane can't be made (#110). The card holds the
+/// question and the reason, so a refused query is never lost without a word.
+export function claimQueryLane(
+  queries: QueryLanes,
+  query: Pick<Extract<Inbound, { type: "query" }>, "text" | "action" | "triggerId">,
+  nextCardId: () => string
+): { lane: Lane } | { refusal: Outbound } {
+  let reason = "too many questions in flight — wait for one to finish";
+  try {
+    const lane = queries.take();
+    if (lane) return { lane };
+  } catch (err) {
+    reason = `couldn't start an agent: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  log(`query refused: ${reason}`);
+  return {
+    refusal: {
+      type: "card",
+      id: nextCardId(),
+      trigger: query.triggerId,
+      kind: query.action ?? "query",
+      title: query.text,
+      body: `failed: ${reason}`,
+      state: "failed",
+    },
+  };
 }
 
 /// The research pool: persistent lanes, `research0…`, grown to a size the app

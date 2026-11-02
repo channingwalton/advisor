@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TaskResult } from "./agent.js";
 import type { Outbound } from "./protocol.js";
-import { cardLaneOptions, LanePool, LiveSession, QueryLanes, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, claimQueryLane, LanePool, LiveSession, QueryLanes, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
 import { mergeConfig } from "./config.js";
 
 /// A session that records each prompt and answers from a script; `reset()` is
@@ -463,4 +463,96 @@ test("#query-lane a fresh lane that can't be made leaves the lanes as they were"
   assert.throws(() => queries.reset());
   assert.deepEqual(queries.all, [lane], "not retired as well as current");
   assert.equal(lane.resets, 0);
+});
+
+test("#query-busy take claims the current lane when it is free", () => {
+  const { queries, made } = queryLanes();
+  const lane = queries.take();
+  assert.equal(lane, made[0]);
+  assert.equal(lane!.busy, true);
+  assert.equal(made.length, 1, "no extra lane");
+});
+
+test("#query-busy a query while the current lane answers gets an extra lane, dropped when its card is over", () => {
+  // Issue #110: a second Ask, or a right-click action, while one runs was
+  // refused with an error frame that the app did not show.
+  const { queries, made, shed } = queryLanes();
+  const first = queries.take()!;
+  const second = queries.take()!;
+  assert.notEqual(second, first);
+  assert.equal(second.busy, true);
+  assert.equal(second.name, "query1", "its own transcript cursor");
+  assert.equal(queries.lane, first, "new queries still go to the current lane first");
+  assert.deepEqual(queries.all, [first, second], "where cancel and the exit path look");
+  queries.release(second);
+  assert.equal(made[1]!.resets, 1, "its session is dropped once its card is over");
+  assert.deepEqual(shed, ["query1"], "and its cursor is forgotten");
+  assert.deepEqual(queries.all, [first]);
+  queries.release(first);
+  assert.equal(made[0]!.resets, 0, "the current lane stays warm");
+});
+
+test("#query-busy no lane past the cap of busy query lanes", () => {
+  const { queries, made } = queryLanes();
+  const taken = [queries.take(), queries.take(), queries.take()];
+  assert.ok(taken.every((l) => l !== undefined));
+  assert.equal(queries.take(), undefined);
+  assert.equal(made.length, 3);
+  queries.release(taken[1]!);
+  assert.equal(queries.take()!.name, "query1", "a free slot and name again");
+});
+
+test("#query-busy a session start keeps an extra lane that still answers", () => {
+  const { queries, made } = queryLanes();
+  queries.take();
+  const extra = queries.take()!;
+  queries.reset();
+  assert.equal(made[1]!.resets, 0, "its answer is not cut off");
+  assert.ok(queries.all.includes(extra));
+  assert.ok(![made[0]!.name, extra.name].includes(queries.lane.name), "the fresh lane takes a free name");
+  queries.release(extra);
+  assert.equal(made[1]!.resets, 1);
+});
+
+test("#query-busy after a session start, its own lane runs, and the cap counts retired lanes", () => {
+  const { queries } = queryLanes();
+  queries.take();
+  queries.take();
+  queries.take();
+  queries.reset();
+  const own = queries.lane;
+  assert.equal(queries.take(), own, "the session's own lane runs while retired lanes answer (#104)");
+  assert.equal(queries.take(), undefined, "but no extra lane past the cap");
+});
+
+test("#query-busy a query past the cap gets a failed card that holds it", () => {
+  const { queries } = queryLanes();
+  queries.take();
+  queries.take();
+  queries.take();
+  const claim = claimQueryLane(queries, { text: "a selected line", action: "factcheck", triggerId: "u1" }, () => "c9");
+  assert.deepEqual(claim, {
+    refusal: {
+      type: "card", id: "c9", trigger: "u1", kind: "factcheck", title: "a selected line",
+      body: "failed: too many questions in flight — wait for one to finish", state: "failed",
+    },
+  });
+});
+
+test("#query-busy a query whose extra lane can't be made gets a failed card with the reason", () => {
+  const first = scriptedLane([]);
+  first.name = "query0";
+  const queries = new QueryLanes((name) => {
+    if (name !== "query0") throw new Error("no agent");
+    return first;
+  });
+  const claimed = claimQueryLane(queries, { text: "first" }, () => "c1");
+  assert.deepEqual(claimed, { lane: first });
+  const refused = claimQueryLane(queries, { text: "second" }, () => "c2");
+  assert.ok("refusal" in refused);
+  assert.deepEqual(refused.refusal, {
+    type: "card", id: "c2", trigger: undefined, kind: "query", title: "second",
+    body: "failed: couldn't start an agent: no agent", state: "failed",
+  });
+  assert.deepEqual(queries.all, [first], "no lane added");
 });

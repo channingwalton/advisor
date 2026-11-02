@@ -10,7 +10,7 @@ import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, logSync, send, utteranceLogLine } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
-import { cardLaneOptions, Lane, LanePool, LiveSession, QueryLanes, runCard as runCardWith, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, claimQueryLane, Lane, LanePool, LiveSession, QueryLanes, runCard as runCardWith, type RunCardDeps } from "./lanes.js";
 import { AutoPipeline } from "./autoPipeline.js";
 import {
   cardKind,
@@ -79,7 +79,10 @@ const transcript = live.transcript;
 /// a lane re-created under its name is sent the whole conversation.
 const research = new LanePool(makeLane, 3, (lane) => transcript.forget(lane.name));
 
-const queries = new QueryLanes(makeLane, (lane) => transcript.forget(lane.name));
+/// Busy query lanes at most: the current lane and extra lanes (#110). Three,
+/// as for follow-ups (MAX_CONCURRENT_REPLIES).
+const MAX_QUERY_LANES = 3;
+const queries = new QueryLanes(makeLane, (lane) => transcript.forget(lane.name), MAX_QUERY_LANES);
 
 const cardIDs = new ProcessCardIDs();
 
@@ -305,14 +308,15 @@ function handle(msg: Inbound): void {
       pipeline.heard();
       break;
     case "query": {
-      // One query at a time on the session's lane; a retired lane still
-      // answering a question from before Listen doesn't hold it up.
-      if (queries.lane.busy) {
-        send({ type: "error", fatal: false, message: "already answering — wait for the current card" });
+      // The session's query lane, or an extra lane while it answers (#110); a
+      // retired lane still answering a question from before Listen doesn't
+      // hold it up. A query with no lane gets a failed card that says why.
+      const claim = claimQueryLane(queries, msg, cardDeps.nextCardId);
+      if ("refusal" in claim) {
+        send(claim.refusal);
         return;
       }
-      const lane = queries.lane;
-      lane.busy = true;
+      const { lane } = claim;
       const done = () => queries.release(lane);
       if (msg.action) {
         // Right-click action on selected text: route to the same kind/template

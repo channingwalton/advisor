@@ -139,7 +139,7 @@
       {
         "type": "error",
         "fatal": false,
-        "message": "already answering — wait for the current card"
+        "message": "a non-fatal sidecar error"
       }
     ],
     "optional": {
