@@ -821,6 +821,10 @@ struct MarkdownText: NSViewRepresentable {
                 ns.addAttributes([.font: fonts.italic, .foregroundColor: style.emphasis ?? colour ?? style.body], range: range)
             }
         }
+        // The runs now have their fonts. The text view gives no fallback font
+        // to a run with the code intent, so a character that the monospaced
+        // font lacks (such as `∘`) drew blank (issue #108).
+        ns.removeAttribute(.inlinePresentationIntent, range: full)
         return ns
     }
 

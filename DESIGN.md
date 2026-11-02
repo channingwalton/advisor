@@ -2068,9 +2068,14 @@ cell, laid out about four times slower, and added a 7.1 MB math-font bundle
 that `package.sh` does not package. Its parser, Foundation's, does not nest the
 two-space sub-lists that model output uses.
 
-Not supported: strikethrough, task-list check boxes and images. A character
-that the monospaced font does not have, such as `∘`, shows as a blank in inline
-code (issue #108). Commit: `6b56428`.
+Not supported: strikethrough, task-list check boxes and images. Commit:
+`6b56428`.
+
+Inline code and the fallback font (2026-11-02, issue #108): `inline` removes
+the parser's `inlinePresentationIntent` after it sets the fonts of the runs.
+The text view gives no fallback font to a run that has the code intent, so a
+character that the monospaced font does not have, such as `∘`, showed as a
+blank in inline code. Fenced code blocks never had the intent.
 
 ## A cancelled Codex turn resends the conversation (2026-11-02)
 

@@ -322,6 +322,30 @@ private let code = Line.Kind.code(level: nil)
     #expect(font.isFixedPitch)
 }
 
+/// Whether `font` has a glyph for `character`.
+private func hasGlyph(_ font: NSFont, for character: String) -> Bool {
+    var units = Array(character.utf16)
+    var glyphs = [CGGlyph](repeating: 0, count: units.count)
+    return CTFontGetGlyphsForCharacters(font as CTFont, &units, &glyphs, units.count)
+}
+
+// Issue #108: the code intent from the Markdown parser stopped the text
+// system's font fallback, so `∘` in inline code rendered blank.
+@MainActor
+@Test func inlineCodeFallsBackToAFontThatHasTheCharacter() throws {
+    let mono = NSFont.monospacedSystemFont(ofSize: Theme.Metric.cardBodySize - 2, weight: .regular)
+    try #require(!hasGlyph(mono, for: "∘"), "pick a character that the monospaced font lacks")
+    // Inline code, inline code in a table header, and a fenced code block.
+    for markdown in ["Use `F ∘ F` here.", "| `F ∘ F` |\n|---|\n| x |", "```\nF ∘ F\n```"] {
+        let (lm, _, ns) = laidOut(markdown, width: 360)
+        let index = ns.range(of: "∘").location
+        let storage = try #require(lm.textStorage)
+        let font = try #require(storage.attribute(.font, at: index, effectiveRange: nil) as? NSFont)
+        #expect(hasGlyph(font, for: "∘"), "\(markdown)")
+        #expect(lm.cgGlyph(at: lm.glyphIndexForCharacter(at: index)) != 0, "\(markdown)")
+    }
+}
+
 @Test func aFenceUnderAnItemBelongsToItAndTheListGoesOn() {
     let lines = MarkdownText.lines(from: """
         1. Install:
