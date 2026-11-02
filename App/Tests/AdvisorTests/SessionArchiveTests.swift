@@ -273,13 +273,16 @@ private func makeFolderedArchive(
     let file = try #require(SessionArchive.list(in: dir).first)
     let filed = try #require(SessionArchive.setFolder("Work", for: file, root: dir))
     #expect(filed.folder == "Work")
-    #expect(filed.url == dir.appendingPathComponent("Work/2026-06-18-170000.md"))
+    #expect(SessionArchive.isSameNote(filed.url, dir.appendingPathComponent("Work/2026-06-18-170000.md")))
+    // The URL as `list` names it, so the browser keeps the selection (issue #114).
+    #expect(filed.url == SessionArchive.list(in: dir).first?.url)
     #expect(FileManager.default.fileExists(atPath: filed.url.path))
     #expect(!FileManager.default.fileExists(atPath: file.url.path)) // moved, not copied
 
     let unfiled = try #require(SessionArchive.setFolder(nil, for: filed, root: dir))
     #expect(unfiled.folder == nil)
-    #expect(unfiled.url == dir.appendingPathComponent("2026-06-18-170000.md"))
+    #expect(SessionArchive.isSameNote(unfiled.url, dir.appendingPathComponent("2026-06-18-170000.md")))
+    #expect(unfiled.url == SessionArchive.list(in: dir).first?.url)
     #expect(SessionArchive.list(in: dir).first?.folder == nil)
 }
 
@@ -411,6 +414,187 @@ private func makeFolderedArchive(
     #expect(moved.first { $0.url.lastPathComponent == "2026-06-18-090000.md" }?.folder == nil)
     #expect(moved.first { $0.url.lastPathComponent == "2026-06-18-170000.md" }?.folder == "Work")
     #expect(SessionArchive.folders(in: dest) == ["Work"])
+}
+
+// MARK: - A session folder under a symlink (issue #114)
+
+/// A throwaway archive at `<top>/real/sessions`, with a note in the root and
+/// one in `Work`, and two symlinks to it: `<top>/link` to `<top>/real`, so
+/// `<top>/link/sessions` goes through a symlink, and `<top>/leaf` to the
+/// session folder itself. Remove `top` on teardown.
+private func symlinkedArchive() throws -> (top: URL, viaParent: URL, viaLeaf: URL) {
+    let fm = FileManager.default
+    let top = fm.temporaryDirectory.appendingPathComponent("advisor-symlink-test-\(UUID().uuidString)")
+    let real = top.appendingPathComponent("real/sessions", isDirectory: true)
+    try fm.createDirectory(at: real.appendingPathComponent("Work"), withIntermediateDirectories: true)
+    try "---\ntags: work\n---\n\n# Transcript\n"
+        .write(to: real.appendingPathComponent("2026-06-18-090000.md"), atomically: true, encoding: .utf8)
+    try "---\ntags: work\n---\n\n# Transcript\n"
+        .write(to: real.appendingPathComponent("Work/2026-06-18-170000.md"), atomically: true, encoding: .utf8)
+    try fm.createSymbolicLink(
+        at: top.appendingPathComponent("link"), withDestinationURL: top.appendingPathComponent("real"))
+    try fm.createSymbolicLink(at: top.appendingPathComponent("leaf"), withDestinationURL: real)
+    return (top, top.appendingPathComponent("link/sessions", isDirectory: true),
+        top.appendingPathComponent("leaf", isDirectory: true))
+}
+
+/// The writer names its note through `sessionDir`, but a row from `list` names
+/// it by its resolved path. The raw and standardised URLs differ, so each
+/// live-note check missed the live note; the shared comparison matches them.
+@Test func aRowUnderASymlinkedSessionFolderIsTheSameNoteAsTheWritersURL() throws {
+    let (top, sessions, _) = try symlinkedArchive()
+    defer { try? FileManager.default.removeItem(at: top) }
+    let writerURL = sessions.appendingPathComponent("Work/2026-06-18-170000.md")
+    let rows = SessionArchive.list(in: sessions)
+    let row = try #require(rows.first { $0.url.lastPathComponent == "2026-06-18-170000.md" })
+    let other = try #require(rows.first { $0.url.lastPathComponent == "2026-06-18-090000.md" })
+
+    #expect(row.url.standardizedFileURL != writerURL.standardizedFileURL)
+    #expect(SessionArchive.isSameNote(row.url, writerURL))
+    #expect(SessionArchive.isSameNote(writerURL, row.url))
+    #expect(!SessionArchive.isSameNote(other.url, writerURL))
+    #expect(!SessionArchive.isSameNote(row.url, nil))
+    #expect(!SessionArchive.isSameNote(nil, nil))
+    // A note that is not on disk yet: its folder is still resolved.
+    #expect(SessionArchive.isSameNote(
+        sessions.appendingPathComponent("2026-06-18-180000.md"),
+        top.appendingPathComponent("real/sessions/2026-06-18-180000.md")))
+}
+
+/// A session folder that is itself a symlink lists its notes and folders.
+/// `contentsOfDirectory` refuses such a folder with "Not a directory", so the
+/// browser showed nothing.
+@Test func listAndFoldersReadASessionFolderThatIsASymlink() throws {
+    let (top, _, leaf) = try symlinkedArchive()
+    defer { try? FileManager.default.removeItem(at: top) }
+
+    let files = SessionArchive.list(in: leaf)
+    #expect(files.map(\.url.lastPathComponent).sorted() == ["2026-06-18-090000.md", "2026-06-18-170000.md"])
+    #expect(files.first { $0.url.lastPathComponent == "2026-06-18-170000.md" }?.folder == "Work")
+    #expect(SessionArchive.folders(in: leaf) == ["Work"])
+    let row = try #require(files.first { $0.folder == "Work" })
+    #expect(SessionArchive.isSameNote(row.url, leaf.appendingPathComponent("Work/2026-06-18-170000.md")))
+}
+
+/// A tag rename and the storage move skip the live note under a symlinked
+/// session folder too, and still change every other note.
+@Test func renameTagAndMoveSkipTheLiveNoteUnderASymlinkedSessionFolder() throws {
+    let (top, sessions, _) = try symlinkedArchive()
+    defer { try? FileManager.default.removeItem(at: top) }
+    let live = sessions.appendingPathComponent("Work/2026-06-18-170000.md")
+    let other = sessions.appendingPathComponent("2026-06-18-090000.md")
+    func tags(_ url: URL) throws -> String? {
+        SessionArchive.frontmatter(try String(contentsOf: url, encoding: .utf8))["tags"]
+    }
+
+    #expect(SessionArchive.renameTag(from: "work", to: "Project X", in: sessions, excluding: live) == 1)
+    #expect(try tags(live) == "work")
+    #expect(try tags(other) == "Project X")
+
+    let dest = top.appendingPathComponent("moved", isDirectory: true)
+    #expect(SessionArchive.move(from: sessions, to: dest, excluding: live) == (moved: 1, skipped: 0))
+    #expect(FileManager.default.fileExists(atPath: live.path))
+    #expect(SessionArchive.list(in: dest).map(\.url.lastPathComponent) == ["2026-06-18-090000.md"])
+}
+
+/// `sessionDir` is a symlink, and the open panel in Preferences gives the
+/// folder it points to. That is the same folder, so there is nothing to move,
+/// and Preferences switches the path. Before, the move found each note already
+/// at its target, skipped them all, and kept the old path.
+@Test func choosingTheTargetOfASymlinkedSessionFolderMovesNothing() throws {
+    let (top, viaParent, leaf) = try symlinkedArchive()
+    defer { try? FileManager.default.removeItem(at: top) }
+    let real = top.appendingPathComponent("real/sessions", isDirectory: true)
+    let oldDir = SessionArchive.directory(for: leaf.path)
+
+    #expect(SessionArchive.isSameFolder(oldDir, real))
+    #expect(SessionArchive.isSameFolder(viaParent, leaf))
+    #expect(SessionArchive.notesToMove(from: oldDir, to: real).isEmpty)
+    #expect(SessionArchive.notesToMove(from: viaParent, to: real).isEmpty)
+    #expect(SessionArchive.move(from: oldDir, to: real) == (moved: 0, skipped: 0))
+    #expect(SessionArchive.list(in: real).count == 2)
+
+    // Another folder is not the same one, so both notes are offered.
+    let other = top.appendingPathComponent("other", isDirectory: true)
+    #expect(!SessionArchive.isSameFolder(oldDir, other))
+    #expect(SessionArchive.notesToMove(from: oldDir, to: other).count == 2)
+}
+
+/// Move to Folder under a symlinked session folder returns the URL that `list`
+/// gives after the move, so the browser keeps the note selected. A move into
+/// the note's own folder changes nothing and does not fail.
+@Test func filingANoteUnderASymlinkedSessionFolderKeepsItsListedURL() throws {
+    let (top, viaParent, leaf) = try symlinkedArchive()
+    defer { try? FileManager.default.removeItem(at: top) }
+
+    for root in [viaParent, leaf] {
+        let row = try #require(SessionArchive.list(in: root).first { $0.folder == nil })
+        let moved = try #require(SessionArchive.setFolder("Work", for: row, root: root))
+        let listed = try #require(
+            SessionArchive.list(in: root).first { $0.url.lastPathComponent == row.url.lastPathComponent })
+        #expect(listed.folder == "Work")
+        #expect(moved.url == listed.url)
+
+        let again = try #require(SessionArchive.setFolder("Work", for: listed, root: root))
+        #expect(again.url == listed.url)
+        #expect(FileManager.default.fileExists(atPath: listed.url.path))
+
+        // A URL built from the session folder as `SessionArchive.directory`
+        // resolves it, as the writer's note is, equals the listed URL.
+        let built = SessionArchive.resolvedFolder(SessionArchive.directory(for: root.path))
+            .appendingPathComponent("Work", isDirectory: true)
+            .appendingPathComponent(row.url.lastPathComponent)
+        #expect(built == listed.url)
+
+        _ = try #require(SessionArchive.setFolder(nil, for: listed, root: root))
+    }
+}
+
+/// A session folder that does not exist yet, under a symlinked parent. The
+/// writer resolves it, as `SessionArchive.directory` does, before it creates
+/// it. The live note's URL still equals the row that `list` gives once the
+/// folder exists.
+@MainActor
+@Test func aSessionFolderNotYetCreatedUnderASymlinkGivesTheWriterTheListedURL() throws {
+    let fm = FileManager.default
+    let top = fm.temporaryDirectory.appendingPathComponent("advisor-symlink-new-\(UUID().uuidString)")
+    defer { try? fm.removeItem(at: top) }
+    try fm.createDirectory(at: top.appendingPathComponent("real"), withIntermediateDirectories: true)
+    try fm.createSymbolicLink(
+        at: top.appendingPathComponent("link"), withDestinationURL: top.appendingPathComponent("real"))
+    let sessionDir = top.appendingPathComponent("link/sessions").path
+    try #require(!fm.fileExists(atPath: sessionDir))
+
+    let writer = SessionWriter(store: TranscriptStore(), resolveDirectory: {
+        SessionArchive.resolvedFolder(SessionArchive.directory(for: sessionDir))
+    })
+    writer.start()
+    let live = try #require(writer.currentFileURL)
+    let row = try #require(SessionArchive.list(in: SessionArchive.directory(for: sessionDir)).first)
+    #expect(live == row.url)
+    writer.releaseNote()
+}
+
+/// A folder that does not exist resolves the part of its path that does. Under
+/// the `/var` symlink of the temporary folder it reads `/private/var/…`, as its
+/// existing siblings do. So a note's resolved URL stays the same after its
+/// folder is deleted.
+@Test func aMissingFolderResolvesThePartOfItsPathThatExists() throws {
+    let fm = FileManager.default
+    let dir = fm.temporaryDirectory.appendingPathComponent("advisor-missing-folder-\(UUID().uuidString)")
+    try fm.createDirectory(at: dir.appendingPathComponent("Work"), withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: dir) }
+    let resolvedDir = SessionArchive.resolvedFolder(dir)
+    try #require(resolvedDir.path != dir.standardizedFileURL.path) // the temporary folder is under a symlink
+
+    #expect(SessionArchive.resolvedFolder(dir.appendingPathComponent("Gone/Deeper")).path
+        == resolvedDir.path + "/Gone/Deeper")
+
+    let note = SessionArchive.resolvedFolder(dir.appendingPathComponent("Work"))
+        .appendingPathComponent("2026-06-18-090000.md")
+    try fm.removeItem(at: dir.appendingPathComponent("Work"))
+    #expect(SessionArchive.resolvedNoteURL(note) == note)
+    #expect(SessionArchive.isSameNote(note, dir.appendingPathComponent("Work/2026-06-18-090000.md")))
 }
 
 // MARK: - Folder context (issue #36)

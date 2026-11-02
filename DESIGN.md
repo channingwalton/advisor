@@ -1774,13 +1774,13 @@ Commit: `aa890db`.
 `renameSession` refuses to rename a live note when no writer is published.
 Before, it wrote the frontmatter on disk, and the writer's next debounced
 rewrite put the old name back. That state cannot occur today, but the invariant
-now lives in one `guard`, not in the launch order. Residual: the live check
-compares `file.url == liveFileURL` without symlink resolution, and the browser's
-rows come from `contentsOfDirectory`, which resolves symlinks. So under a
-`sessionDir` that passes through a symlink, every live-note check in the browser
-misses, and a rename is clobbered after all. The default folder under
-`~/Library` has no symlink. The fix is one resolved-URL comparison that those
-sites share. Commit: `7b66d74`.
+now lives in one `guard`, not in the launch order. Residual, closed by #114
+(see *Live-note checks see through symlinks*): the live check compared
+`file.url == liveFileURL` without symlink resolution, and the browser's rows
+come from `contentsOfDirectory`, which resolves symlinks. So under a
+`sessionDir` that went through a symlink, every live-note check in the browser
+missed, and a rename was clobbered after all. The default folder under
+`~/Library` has no symlink. Commit: `7b66d74`.
 
 **A session start mid-card retires the lane (#86, 2026-10-18).**
 `LanePool.reset()` aborts a busy lane and moves it to a `retired` list. `all`
@@ -2309,6 +2309,70 @@ Rejected:
 
 Cost: an extra lane starts a new agent session, and sends the whole
 conversation once.
+
+## Live-note checks see through symlinks (2026-11-02)
+
+Decision: the app names each session folder and note as `contentsOfDirectory`
+does, with its symlinks resolved (issue #114).
+
+- `SessionArchive.resolvedFolder` resolves a folder with `realpath`.
+  `SessionArchive.directory` returns the session folder resolved, so the
+  writer's note, a note filed into a folder and each row of `list` share one
+  URL, and plain `==` holds between them.
+- `isSameNote` compares two note URLs with their folders resolved
+  (`resolvedNoteURL`). Each live-note check uses it, for URLs that do not come
+  from `directory`: the detail pane's `isLive` (the gate for Ask, Note,
+  Summarise, Delete and the feed edits, and the route of a tag change through
+  the writer), the drag, Delete and Move to Folder of a list row, the move
+  guard, the rename through the writer (#85), the tag rename across notes, and
+  the storage move. `folderContains` resolves through the same two functions.
+- `isSameFolder` compares two folders resolved. The storage move and its offer
+  in Preferences (`notesToMove`) treat one folder by two paths as the same
+  folder, so there is nothing to move.
+- `setFolder` builds the new URL from the resolved root, so Move to Folder
+  keeps the selection after the reload, and a move into the note's own folder
+  changes nothing.
+
+Reason: `contentsOfDirectory` returns resolved paths. So under a `sessionDir`
+that went through a symlink, a row and the writer's URL named the live note by
+two paths. `standardizedFileURL` does not resolve a symlink. It only drops a
+`/private` prefix, so the temporary folder of the tests never showed the
+fault. Each check missed, and the browser allowed a delete, a move and a
+rename on disk while the writer still owned the note.
+
+- `realpath`, not `resolvingSymlinksInPath`: the second drops `/private`, as
+  `standardizedFileURL` does, so its `/var/…` does not equal a listed
+  `/private/var/…`.
+- `realpath` fails on a folder that does not exist, so `resolvedFolder`
+  resolves the longest part of the path that exists and appends the missing
+  names. The writer resolves the session folder before it creates it, so a
+  new folder under a symlinked parent still gives its note the listed URL.
+  And a note whose folder was just deleted keeps its resolved URL, also under
+  the `/var` symlink. (Code review, 2026-11-02: the first fixup fell back to
+  the unresolved path, and both missed.)
+- Only a note's folder is resolved. The writer's note is a plain file, so its
+  name needs no resolution.
+- Two file names are two notes, so then `isSameNote` makes no file system
+  call. The detail pane reads `isLive` many times in each redraw while an
+  answer streams, and for a note that is not live this costs nothing.
+
+Also fixed: a `sessionDir` that is itself a symlink to a folder listed no notes
+and no folders. On macOS 27, `contentsOfDirectory(at:)` fails on such a URL
+with "Not a directory" (POSIX 20), also with a trailing slash, and
+`contentsOfDirectory(atPath:)` does not. `list` and `folders` now resolve the
+folder first. Once such a folder listed its notes, two faults showed (code
+review, 2026-11-02). A choice in Preferences of the folder that the symlink
+points to offered to move each note onto itself, skipped them all, and kept
+the old path. Move to Folder selected the first session after the reload. The
+`isSameFolder` and `setFolder` changes above fix both.
+
+Tests: `SessionArchiveTests` cover a session folder under a symlink and one
+that is a symlink: the live-note comparison, the list, the tag rename and the
+storage move past the live note, a choice of the symlink's target in
+Preferences, and Move to Folder. They also cover a new session folder under a
+symlinked parent and a missing folder under `/var`. `SessionRenameTests` cover
+a rename of the live note under a symlinked folder. Not verified in the
+running app.
 
 ## Revisit as it grows
 

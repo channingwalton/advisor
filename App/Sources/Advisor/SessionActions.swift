@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 /// reaches the refusal today.
 @MainActor func renameSession(_ file: SessionFile, to name: String, ctx: TranscriptWindowContext) {
     let new = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    if file.url == ctx.liveFileURL {
+    if SessionArchive.isSameNote(file.url, ctx.liveFileURL) {
         guard let writer = ctx.writer else { return }
         writer.renameOwnedNote(new)
     } else {

@@ -72,6 +72,32 @@ struct SessionRenameTests {
         writer.releaseNote()
     }
 
+    // Issue #114: under a `sessionDir` that goes through a symlink, the
+    // browser's row names the live note by its resolved path, and the writer by
+    // the symlink. The rename still goes through the writer, so the writer's
+    // next rewrite keeps the new name.
+    @Test func liveNoteUnderASymlinkedFolderIsRenamedThroughItsWriter() throws {
+        let fm = FileManager.default
+        let top = fm.temporaryDirectory.appendingPathComponent("advisor-rename-symlink-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: top) }
+        try fm.createDirectory(at: top.appendingPathComponent("real"), withIntermediateDirectories: true)
+        try fm.createSymbolicLink(
+            at: top.appendingPathComponent("link"), withDestinationURL: top.appendingPathComponent("real"))
+        let root = top.appendingPathComponent("link/sessions", isDirectory: true)
+        let writer = SessionWriter(store: TranscriptStore(), resolveDirectory: { root })
+        writer.start(name: "Original")
+        let url = try #require(writer.currentFileURL)
+        let row = try #require(SessionArchive.list(in: root).first)
+        try #require(row.url.standardizedFileURL != url.standardizedFileURL)
+
+        withContext(live: url, writer: writer) { ctx in
+            renameSession(row, to: "Renamed", ctx: ctx)
+        }
+        writer.flush()
+        #expect(try nameOnDisk(url) == "Renamed")
+        writer.releaseNote()
+    }
+
     @Test func savedNoteIsRenamedOnDisk() throws {
         let (file, dir) = try savedNote()
         defer { try? FileManager.default.removeItem(at: dir) }

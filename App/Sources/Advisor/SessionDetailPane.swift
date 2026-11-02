@@ -99,7 +99,7 @@ struct SessionDetailPane: View {
     private var isAsking: Bool { answerState == "pending" || answerState == "streaming" }
     /// Asking the still-being-written live note is disabled (the writer's
     /// debounced rewrite would clobber an appended follow-up).
-    private var isLive: Bool { file.url == ctx.liveFileURL }
+    private var isLive: Bool { SessionArchive.isSameNote(file.url, ctx.liveFileURL) }
 
     var body: some View {
         // A centred reading column; a streaming answer or an error floats over

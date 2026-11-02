@@ -38,8 +38,41 @@ enum SessionArchive {
 
     /// Where session notes are stored: the folder chosen in Preferences
     /// (`AdvisorConfig.sessionDir`) or the built-in default. Read fresh from
-    /// config so a folder change applies without an app relaunch.
-    static var directory: URL { directory(for: AdvisorConfig.load().sessionDir) }
+    /// config so a folder change applies without an app relaunch. Resolved
+    /// (`resolvedFolder`), so a URL built from it, such as the writer's note or
+    /// a note filed into a folder, equals the URL that `list` gives for that
+    /// note (issue #114).
+    static var directory: URL { resolvedFolder(directory(for: AdvisorConfig.load().sessionDir)) }
+
+    /// `url` as `contentsOfDirectory` names a folder: every symlink resolved by
+    /// `realpath`, so `/var` reads as `/private/var` (issue #114).
+    /// `resolvingSymlinksInPath` drops that `/private`, so it does not match a
+    /// listed URL. `realpath` fails on a folder that does not exist, so the
+    /// longest part of the path that exists is resolved, and the missing names
+    /// follow it. The writer resolves the session folder before it creates it,
+    /// so its note then has the URL that `list` gives once the folder exists.
+    static func resolvedFolder(_ url: URL) -> URL {
+        var existing = url.standardizedFileURL
+        var missing: [String] = []
+        while true {
+            if let real = realpath(existing.path, nil) {
+                defer { free(real) }
+                return missing.reversed().reduce(URL(fileURLWithPath: String(cString: real), isDirectory: true)) {
+                    $0.appendingPathComponent($1, isDirectory: true)
+                }
+            }
+            // `realpath` always resolves "/", so this stops there at the latest.
+            guard existing.pathComponents.count > 1 else { return url.standardizedFileURL }
+            missing.append(existing.lastPathComponent)
+            existing = existing.deletingLastPathComponent()
+        }
+    }
+
+    /// True when `a` and `b` are one folder on disk, also by two paths through
+    /// a symlink (issue #114).
+    static func isSameFolder(_ a: URL, _ b: URL) -> Bool {
+        resolvedFolder(a).path == resolvedFolder(b).path
+    }
 
     /// `yyyy-MM-dd-HHmmss` with calendar/locale pinned, so a session filename is
     /// always Gregorian regardless of the user's system calendar. Used to both
@@ -69,11 +102,12 @@ enum SessionArchive {
     /// Descends one level into sub-directories (issue #25): a note in `<dir>/Work`
     /// is returned with `folder == "Work"`, a note directly in `dir` with `folder
     /// == nil`. Only one level is scanned — deeper nesting and dot-directories are
-    /// ignored.
+    /// ignored. The folder is resolved first: `contentsOfDirectory` fails with
+    /// "Not a directory" when the folder itself is a symlink (issue #114).
     static func list(in directory: URL = SessionArchive.directory) -> [SessionFile] {
         let fm = FileManager.default
         let entries = (try? fm.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            at: resolvedFolder(directory), includingPropertiesForKeys: [.isDirectoryKey])) ?? []
         var files: [SessionFile] = []
         for entry in entries {
             let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
@@ -98,10 +132,11 @@ enum SessionArchive {
     /// dot-directories excluded, case-insensitively sorted. Empty folders are
     /// included — the folder list is derived from disk, so an empty folder simply
     /// persists as an empty directory (no separate config registry, unlike tags).
+    /// The folder is resolved first, as in `list`.
     static func folders(in directory: URL = SessionArchive.directory) -> [String] {
         let fm = FileManager.default
         let entries = (try? fm.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            at: resolvedFolder(directory), includingPropertiesForKeys: [.isDirectoryKey])) ?? []
         return entries
             .compactMap { entry -> String? in
                 let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
@@ -296,8 +331,7 @@ enum SessionArchive {
     ) -> Int {
         var changed = 0
         for file in list(in: directory) {
-            if let excluding,
-                file.url.standardizedFileURL == excluding.standardizedFileURL { continue }
+            if isSameNote(file.url, excluding) { continue }
             let original = contents(of: file)
             let updated = renamingTag(from: old, to: new, in: original)
             if updated != original,
@@ -340,6 +374,16 @@ enum SessionArchive {
         return changed
     }
 
+    /// The notes that a change of the session folder from `source` to `dest`
+    /// offers to move: each note in `source` except the live one
+    /// (`excluding`). None when the two are one folder by two paths, such as
+    /// `sessionDir` through a symlink and the folder it points to, so
+    /// Preferences switches the path with no move (issue #114).
+    static func notesToMove(from source: URL, to dest: URL, excluding: URL? = nil) -> [SessionFile] {
+        guard !isSameFolder(source, dest) else { return [] }
+        return list(in: source).filter { !isSameNote($0.url, excluding) }
+    }
+
     /// Move every session note from `source` to `dest`, creating `dest` if
     /// needed (issue #16: relocating transcripts when the storage folder
     /// changes). Skips the `excluding` note (the live one, still owned by its
@@ -349,12 +393,11 @@ enum SessionArchive {
     /// file I/O — fine for a personal archive of this size, like `renameTag`.
     @discardableResult
     static func move(from source: URL, to dest: URL, excluding: URL? = nil) -> (moved: Int, skipped: Int) {
-        guard source.standardizedFileURL != dest.standardizedFileURL else { return (0, 0) }
+        guard !isSameFolder(source, dest) else { return (0, 0) }
         try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
         var moved = 0, skipped = 0
         for file in list(in: source) {
-            if let excluding,
-                file.url.standardizedFileURL == excluding.standardizedFileURL { continue }
+            if isSameNote(file.url, excluding) { continue }
             // Preserve folder structure (issue #25): a note in `source/Work` lands
             // in `dest/Work`, an un-foldered note directly in `dest`.
             let targetDir = file.folder.map {
@@ -508,9 +551,12 @@ enum SessionArchive {
         // Un-filing the last note leaves its source folder behind empty by design:
         // empty folders persist (see `folders`), so the folder doesn't vanish from
         // the sidebar just because its final session moved out.
-        let targetDir = folderName.map { root.appendingPathComponent($0, isDirectory: true) } ?? root
+        // Built from the resolved root, so the new URL equals the one that `list`
+        // gives after the move, and the browser keeps its selection (issue #114).
+        let base = resolvedFolder(root)
+        let targetDir = folderName.map { base.appendingPathComponent($0, isDirectory: true) } ?? base
         let dest = targetDir.appendingPathComponent(file.url.lastPathComponent)
-        if dest.standardizedFileURL == file.url.standardizedFileURL {
+        if isSameNote(dest, file.url) {
             return SessionFile(url: file.url, date: file.date, folder: folderName)
         }
         if fm.fileExists(atPath: dest.path) { return nil }
@@ -523,15 +569,38 @@ enum SessionArchive {
         }
     }
 
+    /// `url` as the file system names it: standardised, with its folder
+    /// resolved (`resolvedFolder`; issue #114). `contentsOfDirectory` returns
+    /// resolved paths, so a row from `list` and a URL built from an unresolved
+    /// `sessionDir` can name one note by two paths. Only the folder is
+    /// resolved: the writer's note is a plain file, so its name needs no
+    /// resolution, and a note that does not exist yet keeps its name.
+    static func resolvedNoteURL(_ url: URL) -> URL {
+        let standard = url.standardizedFileURL
+        return resolvedFolder(standard.deletingLastPathComponent())
+            .appendingPathComponent(standard.lastPathComponent)
+    }
+
+    /// True when `a` and `b` name the same note on disk (issue #114). Every
+    /// check for the live note uses it, so a browser row and the writer's URL
+    /// match through a symlinked `sessionDir`. Two file names are two notes,
+    /// and then the check makes no file system call, so it stays cheap in a
+    /// view that redraws as an answer streams.
+    static func isSameNote(_ a: URL?, _ b: URL?) -> Bool {
+        guard let a, let b else { return false }
+        let (x, y) = (a.standardizedFileURL, b.standardizedFileURL)
+        guard x.lastPathComponent == y.lastPathComponent else { return false }
+        return resolvedNoteURL(x).path == resolvedNoteURL(y).path
+    }
+
     /// A folder mutation must not move a note still owned by the live writer.
     /// Resolve aliases and include the separator so `Workshops` is not `Work`.
     static func folderContains(
         _ note: URL?, folder: String, in directory: URL = SessionArchive.directory
     ) -> Bool {
         guard let note, let safe = sanitiseFolderName(folder) else { return false }
-        let parent = directory.appendingPathComponent(safe, isDirectory: true)
-            .resolvingSymlinksInPath().standardizedFileURL.path.lowercased()
-        let path = note.resolvingSymlinksInPath().standardizedFileURL.path.lowercased()
+        let parent = resolvedFolder(directory.appendingPathComponent(safe, isDirectory: true)).path.lowercased()
+        let path = resolvedNoteURL(note).path.lowercased()
         return path.hasPrefix(parent + "/")
     }
 

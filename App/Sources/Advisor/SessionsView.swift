@@ -501,7 +501,7 @@ struct SessionsView: View {
         // `.onDrag`/`NSItemProvider`, not `.draggable`: inside a `List` the new
         // API never starts the drag from these rows (issue #28), the old one
         // does; it pairs with the `.onDrop` on the folder headers.
-        if session.file.url == ctx.liveFileURL {
+        if SessionArchive.isSameNote(session.file.url, ctx.liveFileURL) {
             sessionRowBody(session)
         } else {
             sessionRowBody(session)
@@ -566,7 +566,7 @@ struct SessionsView: View {
         Divider()
         // The live note is exempt: its writer would just recreate the deleted file.
         Button("Delete…", role: .destructive) { deleting = session }
-            .disabled(session.file.url == ctx.liveFileURL)
+            .disabled(SessionArchive.isSameNote(session.file.url, ctx.liveFileURL))
     }
 
     /// "Move to Folder" submenu (issue #25): existing folders, "No Folder" to
@@ -590,7 +590,7 @@ struct SessionsView: View {
                 creatingFolder = true
             }
         }
-        .disabled(session.file.url == ctx.liveFileURL)
+        .disabled(SessionArchive.isSameNote(session.file.url, ctx.liveFileURL))
     }
 
     /// A coloured dot per tag on a row, named in the tooltip. Only tags still in
@@ -664,7 +664,7 @@ struct SessionsView: View {
     /// when the moved note was selected, since its URL — the selection key —
     /// changes, then reloads from disk.
     private func fileSession(_ session: LoadedSession, to folder: String?) {
-        guard session.file.url != ctx.liveFileURL else { return }
+        guard !SessionArchive.isSameNote(session.file.url, ctx.liveFileURL) else { return }
         if let moved = SessionArchive.setFolder(folder, for: session.file) {
             if selection == session.file.url { selection = moved.url }
         }

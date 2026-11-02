@@ -76,7 +76,8 @@ final class TranscriptWindowContext: ObservableObject {
     /// The note the live `SessionWriter` currently owns (from session start until
     /// the next session starts). Asking about it is disabled: the writer's
     /// debounced full rewrite — which still fires post-stop as late research cards
-    /// finish — would clobber an appended follow-up.
+    /// finish — would clobber an appended follow-up. Compare a note with it
+    /// through `SessionArchive.isSameNote`, not `==` (issue #114).
     @Published var liveFileURL: URL?
 
     /// The folder a not-yet-started recording should be filed into (issue #35),

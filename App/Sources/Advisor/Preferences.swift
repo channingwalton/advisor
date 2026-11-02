@@ -833,7 +833,9 @@ private struct GeneralSettingsView: View {
     /// Pick a new transcript folder (issue #16). When the current folder holds
     /// transcripts, offer to move them across (the live note, still owned by its
     /// writer, is left behind). Cancelling the move-prompt leaves the folder
-    /// unchanged. Writing `sessionDir` fires the parent form's `onChange` →
+    /// unchanged. The same folder by another path, through a symlink, has
+    /// nothing to move, so the path switches with no prompt (issue #114).
+    /// Writing `sessionDir` fires the parent form's `onChange` →
     /// `save()` + `advisorConfigChanged`, which the Sessions browser reloads on.
     private func chooseSessionFolder() {
         let panel = NSOpenPanel()
@@ -850,9 +852,7 @@ private struct GeneralSettingsView: View {
         guard chosen.standardizedFileURL != oldDir.standardizedFileURL else { return }
 
         let live = TranscriptWindowContext.shared.liveFileURL
-        let movable = SessionArchive.list(in: oldDir).filter {
-            $0.url.standardizedFileURL != live?.standardizedFileURL
-        }
+        let movable = SessionArchive.notesToMove(from: oldDir, to: chosen, excluding: live)
         if !movable.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Move existing transcripts?"
