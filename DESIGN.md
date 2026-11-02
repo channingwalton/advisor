@@ -2079,8 +2079,10 @@ cursor stayed. The next card started a new thread with only the newest lines,
 and an Ask such as "who owns it?" lost its referent. A Claude cancel does not
 have this fault. A real interrupted Claude turn resolves as
 `error_during_execution`, so `runCard` already resets that lane. But a cancel
-can stop a different turn. From the code, a Claude card queued behind the
-warm-up still runs to success in the session, which keeps the conversation.
+can stop a different turn. On the real CLI, a task queued behind an
+interrupted Claude turn still runs to success, and the session keeps it
+(checked 2026-11-02). So a Claude card queued behind the warm-up keeps the
+conversation.
 
 Rejected:
 - Forget the cursor on every cancelled card. It resends the conversation into
