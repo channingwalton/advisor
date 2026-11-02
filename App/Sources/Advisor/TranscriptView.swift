@@ -61,6 +61,8 @@ struct TranscriptView: View {
     /// session resumable. Nil while recording or idle.
     private var stoppedAt: Date? { recordingControl.stoppedAt }
     @State private var spaceMonitor: Any?
+    /// The recording window, for the Space key monitor (issue #111).
+    @State private var hostWindow = HostWindow()
     /// True while a "Wait"-to-close is draining the session's in-flight agents.
     /// Covers the window with a blocking overlay so the about-to-close UI can't
     /// be driven (e.g. Space starting a fresh session). Cleared by the close.
@@ -101,6 +103,7 @@ struct TranscriptView: View {
             guard !Task.isCancelled else { return }
             setup()
         }
+        .background(HostWindow.Reader(host: hostWindow))
         .onAppear(perform: installSpaceMonitor)
         .onDisappear {
             if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
@@ -393,7 +396,8 @@ struct TranscriptView: View {
     /// True when an editable text field holds focus in the key window. A focused
     /// `NSTextField` (the Ask or Note popover's) edits through a field-editor `NSTextView`; the
     /// selectable transcript is a non-editable `NSTextView`, so `isEditable`
-    /// distinguishes them — same test the space monitor uses (issue #37).
+    /// distinguishes them (issue #37). `RecordingSpaceKey` makes the same test,
+    /// but in the window of the key event.
     private var isEditingTextField: Bool {
         guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
         return tv.isEditable
@@ -553,19 +557,17 @@ struct TranscriptView: View {
         }
     }
 
-    /// Space toggles start/stop/resume globally, except while editing a text
-    /// field (where space must type a space). SwiftUI's `.keyboardShortcut`
-    /// can't express that exception, so use a local key monitor instead.
+    /// Space toggles start/stop/resume in the recording window, except while
+    /// editing a text field (where space must type a space). SwiftUI's
+    /// `.keyboardShortcut` can't express that exception, so use a local key
+    /// monitor instead. It gets the key events of every Advisor window, so
+    /// `RecordingSpaceKey` lets through Space in any other window (issue #111).
     private func installSpaceMonitor() {
         guard spaceMonitor == nil else { return }
         spaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard !services.isClosingRecording else { return event }
-            guard event.keyCode == 49, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+            guard !services.isClosingRecording,
+                  RecordingSpaceKey.toggles(event, recordingWindow: hostWindow.window)
             else { return event }
-            // Don't steal space from a focused *editable* text field (the Ask
-            // or Note popover's). The selectable transcript is a non-editable NSTextView and
-            // must still toggle recording when it holds focus.
-            if let tv = event.window?.firstResponder as? NSTextView, tv.isEditable { return event }
             switch recordingControl.state {
             case .recording: stopRecording()
             case .stopped: resumeRecording()

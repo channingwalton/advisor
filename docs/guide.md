@@ -84,7 +84,8 @@ controls then lose their labels.
 ### Keyboard shortcuts
 
 - **⌘N**: New Recording, or bring the recording window forward.
-- **Space**: Listen, Stop or Resume (not while you type in a field).
+- **Space**: Listen, Stop or Resume, in the recording window (not while you
+  type in a field).
 - **Esc**: Stop.
 - **⌘K**: Ask.
 - **⇧⌘N**: Add Note.
