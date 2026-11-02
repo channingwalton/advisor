@@ -24,10 +24,10 @@ const cardFrame = (id: string) => cardUpdateFrame(id);
 
 test("guardedRun streams then sends the terminal outcome (issue #66)", async () => {
   const deps = makeDeps();
-  const failed = await guardedRun(
+  const result = await guardedRun(
     fakeSession(["a", "b"], { text: "ab" }), "c1", "task", cardFrame("c1"), "err", deps
   );
-  assert.equal(failed, false);
+  assert.deepEqual(result, { text: "ab" });
   assert.deepEqual(deps.sent, [
     { type: "card_update", id: "c1", body: "a", state: "streaming" },
     // "ab" arrived within the interval, so the terminal frame carries it.
@@ -37,10 +37,10 @@ test("guardedRun streams then sends the terminal outcome (issue #66)", async () 
 
 test("guardedRun reports a failed turn and its state (issue #66)", async () => {
   const deps = makeDeps();
-  const failed = await guardedRun(
+  const result = await guardedRun(
     fakeSession([], { text: "", error: "timed out" }), "c1", "task", cardFrame("c1"), "err", deps
   );
-  assert.equal(failed, true);
+  assert.equal(result.error, "timed out");
   assert.deepEqual(deps.sent, [
     { type: "card_update", id: "c1", body: "failed: timed out", state: "failed" },
   ]);
@@ -60,8 +60,8 @@ test("guardedRun suppresses sends for a cancelled card (issue #66)", async (t) =
       return { text: "final" };            // terminal must be suppressed too
     },
   };
-  const failed = await guardedRun(session, "c1", "task", cardFrame("c1"), "err", deps);
-  assert.equal(failed, false);
+  const result = await guardedRun(session, "c1", "task", cardFrame("c1"), "err", deps);
+  assert.equal(result.error, undefined);
   assert.deepEqual(deps.sent, [
     { type: "card_update", id: "c1", body: "partial", state: "streaming" },
   ]);
@@ -71,8 +71,8 @@ test("guardedRun suppresses sends for a cancelled card (issue #66)", async (t) =
 test("guardedRun catches a thrown run and frames the error (issue #66)", async () => {
   const deps = makeDeps();
   const session = { run: async (): Promise<TaskResult> => { throw new Error("boom"); } };
-  const failed = await guardedRun(session, "c1", "task", cardFrame("c1"), "err", deps);
-  assert.equal(failed, true);
+  const result = await guardedRun(session, "c1", "task", cardFrame("c1"), "err", deps);
+  assert.deepEqual(result, { text: "", error: "boom" });
   assert.deepEqual(deps.sent, [
     { type: "card_update", id: "c1", body: "error: boom", state: "failed" },
   ]);

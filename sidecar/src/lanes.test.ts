@@ -98,6 +98,41 @@ test("#context-lane-recycle a warm lane is sent only what it hasn't seen", async
   assert.match(lane.prompts[1], /Who owns it\?/);
 });
 
+test("#context-lane-recycle a lane whose session lost the conversation without a failure is sent it again, with no reset", async () => {
+  // A cancelled Codex turn discards its thread but resolves with no error (#112).
+  const transcript = new Transcript();
+  const lane = scriptedLane([{ text: "", contextLost: true }, { text: "Priya" }]);
+  const d = deps(transcript);
+
+  say(transcript, "u1", "Our migration is named Cedar");
+  await runCard(lane, "query", "Cedar", "Question: what is Cedar?", undefined, d);
+  say(transcript, "u2", "Who owns it?");
+  await runCard(lane, "query", "owner", "Question: who owns it?", undefined, d);
+
+  assert.equal(lane.resets, 0, "a lost conversation alone does not recycle the session");
+  assert.match(lane.prompts[1], /Cedar/);
+  assert.match(lane.prompts[1], /Who owns it\?/);
+});
+
+test("#context-lane-recycle a cancelled card whose session kept the conversation keeps the cursor", async () => {
+  // A Claude card queued behind the warm-up: the cancel stops the warm-up, and
+  // the card's own turn still completes in the session.
+  const transcript = new Transcript();
+  const lane = scriptedLane([{ text: "a project" }, { text: "Priya" }]);
+  const d = deps(transcript);
+
+  say(transcript, "u1", "Our migration is named Cedar");
+  const cancelled = runCard(lane, "query", "Cedar", "Question: what is Cedar?", undefined, d);
+  d.cancelledCards.add("c1");
+  await cancelled;
+  say(transcript, "u2", "Who owns it?");
+  await runCard(lane, "query", "owner", "Question: who owns it?", undefined, d);
+
+  assert.equal(lane.resets, 0);
+  assert.doesNotMatch(lane.prompts[1], /Cedar/);
+  assert.match(lane.prompts[1], /Who owns it\?/);
+});
+
 test("#session-prompt-end a question after the session ends carries neither its prompt nor its conversation", async () => {
   const live = new LiveSession();
   const lane = scriptedLane([{ text: "a migration" }, { text: "no idea" }]);

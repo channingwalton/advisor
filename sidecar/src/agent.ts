@@ -163,6 +163,10 @@ export interface TaskResult {
   /// Set when the turn failed/timed out/ended without a clean answer, so the
   /// caller can surface the reason instead of a generic "no answer" message.
   error?: string;
+  /// Set when the session discarded its conversation without an error (a
+  /// stopped Codex turn drops its thread, #112), so the caller resends what
+  /// that conversation held. An error already means the session starts again.
+  contextLost?: boolean;
 }
 
 /// What a running task reports as it goes.

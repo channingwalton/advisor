@@ -174,9 +174,10 @@ export class CodexAgentSession implements Agent {
     // A lane assigns its card before run(), so that card can still be queued
     // behind a warm-up. Explicit cancellation must discard that queued work,
     // whereas an internal warm-up timeout may advance it.
+    // Queued work never reached the thread, and the stop drops the thread.
     const pending = this.pending.splice(0);
     this.active?.stop();
-    for (const task of pending) task.resolve({ text: "" });
+    for (const task of pending) task.resolve({ text: "", contextLost: true });
   }
 
   private async newThread(): Promise<Thread> {
@@ -212,12 +213,12 @@ export class CodexAgentSession implements Agent {
     const joined = (): string => [...messages.values()].join("\n\n");
     let settled = false;
     let timeoutHandle: NodeJS.Timeout | undefined;
-    const finish = (error?: string): void => {
+    const finish = (error?: string, contextLost = false): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutHandle);
       this.active = undefined;
-      task.resolve({ text: joined(), error });
+      task.resolve({ text: joined(), error, ...(contextLost ? { contextLost } : {}) });
       this.drain();
     };
     const dropThread = (): void => {
@@ -229,8 +230,10 @@ export class CodexAgentSession implements Agent {
         controller.abort();
         // An aborted CLI may still yield events or persist its last input.
         // Never resume that thread while the abandoned stream is draining.
+        // A stop with no error (a cancel) must say that the conversation went
+        // with the thread, or the lane keeps its transcript cursor (#112).
         dropThread();
-        finish(error);
+        finish(error, error === undefined);
       },
     };
     timeoutHandle = setTimeout(() => {

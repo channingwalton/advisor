@@ -86,7 +86,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Card lanes** (`lanes.ts`). Every card-answering session takes `cardLaneOptions`: one system prompt (`buildResearchSystem()`: persona plus fixed operating rules — lead with the answer, notes first then web, no narration, cite, say "couldn't verify", never ask), the tools `WebSearch`, `WebFetch`, `Read`, `Grep`, `Glob` plus the user's own connectors, and the effort preference. The per-task instruction comes from `researchTask` (answer / context / fact-check), `replyTask`, `summaryTask`, `documentQuestionTask` or `documentResearchTask`. Two kinds of lane:
 
-- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and one query lane (`QueryLanes`; a session start retires one still answering rather than aborting it — see *Ask and Note from the toolbar*). `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation.
+- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and one query lane (`QueryLanes`; a session start retires one still answering rather than aborting it — see *Ask and Note from the toolbar*). `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation. A turn that loses the conversation with no error (`TaskResult.contextLost`, a cancelled Codex turn) forgets the cursor with no reset (#112).
 - *Transient, one-shot* — card follow-ups (≤3 at once), the live summary, and saved-session tasks (ask, research, follow-up, summarise; ≤2 at once). Created per request, disposed after, never holding a pool slot.
 
 **Query lane.** The Ask box (a `query` card with no anchor, so it sorts in at the time of asking) and right-click actions (the action's kind, anchored under the clicked line). One at a time — a second gets an `error` frame. Gets its conversation through its own cursor, like a research lane.
@@ -2066,6 +2066,35 @@ two-space sub-lists that model output uses.
 Not supported: strikethrough, task-list check boxes and images. A character
 that the monospaced font does not have, such as `∘`, shows as a blank in inline
 code (issue #108). Commit: `6b56428`.
+
+## A cancelled Codex turn resends the conversation (2026-11-02)
+
+Decision: a session that discards its conversation with no error says so in
+`TaskResult.contextLost`, and `runCard` then forgets the lane's cursor without
+a reset (issue #112). The Codex session sets it when a stop with no error (a
+cancel) drops the thread, and on queued work that a cancel discards.
+
+Reason: a Codex cancel discarded the thread but resolved with no error, so the
+cursor stayed. The next card started a new thread with only the newest lines,
+and an Ask such as "who owns it?" lost its referent. A Claude cancel does not
+have this fault. A real interrupted Claude turn resolves as
+`error_during_execution`, so `runCard` already resets that lane. But a cancel
+can stop a different turn. From the code, a Claude card queued behind the
+warm-up still runs to success in the session, which keeps the conversation.
+
+Rejected:
+- Forget the cursor on every cancelled card. It resends the conversation into
+  a Claude session that already has it, as in the queued case above.
+- An error from the Codex `interrupt()`. The lane then resets, and the next
+  card lists the MCP servers again.
+- A method on `Agent` that reports a fresh session. It changes the interface
+  and every fake. An optional result field changes neither.
+
+Cost: one larger prompt for the card after each cancelled Codex card, as for a
+failed card (*Recycled lanes replay the conversation*). Not verified against
+the real Codex CLI: the pinned CLI (0.139.0) rejects the model in the user's
+Codex configuration. The test drives the SDK's `Thread` with a controlled
+event stream.
 
 ## Revisit as it grows
 

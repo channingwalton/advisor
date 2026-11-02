@@ -146,9 +146,12 @@ export async function runCard(
     return update(body, state, activity);
   };
   let failed = false;
+  let contextLost = false;
   try {
     const prompt = sessionContextPrefix(deps.sessionContext()) + deps.transcript.delta(lane.name) + task;
-    failed = await guardedRun(lane.session, cardId, prompt, frame, "agent error", deps);
+    const result = await guardedRun(lane.session, cardId, prompt, frame, "agent error", deps);
+    failed = Boolean(result.error);
+    contextLost = Boolean(result.contextLost);
   } finally {
     // Recycle a pooled (research/query) lane after any failure — timeout/error.
     // Unlike the transient reply/summary/document lanes (disposed every turn),
@@ -160,10 +163,11 @@ export async function runCard(
     // `lane.busy`, so the re-dispatch always sees a fresh session. The warm session is kept on
     // the success path (failed === false). The fresh session has seen none of
     // the conversation, so forget the lane's cursor: its next card replays it all.
-    if (failed) {
-      lane.session.reset();
-      deps.transcript.forget(lane.name);
-    }
+    // A session can also lose the conversation with no failure: a cancelled
+    // Codex turn discards its thread (#112). It needs no reset, but its next
+    // card replays the conversation too.
+    if (failed) lane.session.reset();
+    if (failed || contextLost) deps.transcript.forget(lane.name);
     lane.currentCardId = undefined;
     deps.cancelledCards.delete(cardId);
   }

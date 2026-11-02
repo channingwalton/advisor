@@ -1,4 +1,4 @@
-import { Agent } from "./agent.js";
+import { Agent, type TaskResult } from "./agent.js";
 import { cardOutcome } from "./cards.js";
 import { CardState, Outbound, log } from "./protocol.js";
 import { throttle } from "./throttle.js";
@@ -31,7 +31,8 @@ export function cardUpdateFrame(id: string, prefix = ""): Frame {
 /// further frame is sent, so the app's "cancelled" state stands. Until text
 /// arrives the card stays pending, showing what the agent is doing. Streaming
 /// frames are rate-limited; the terminal frame always carries the whole answer.
-/// Returns whether the turn failed (so a pooled lane can decide to recycle).
+/// Returns the turn's result, a thrown run as an error, so a pooled lane can
+/// decide to recycle or to resend the conversation.
 /// This is the shared skeleton behind every card / reply / summary / document
 /// runner — they differ only in the `frame` they build (issue #66).
 export async function guardedRun(
@@ -41,7 +42,7 @@ export async function guardedRun(
   frame: Frame,
   errorLabel: string,
   deps: GuardedRunDeps
-): Promise<boolean> {
+): Promise<TaskResult> {
   let text = "";
   let activity: string | undefined;
   const live = throttle(() => {
@@ -64,13 +65,14 @@ export async function guardedRun(
       const outcome = cardOutcome(result.text, result.error);
       deps.send(frame(outcome.body, outcome.state));
     }
-    return Boolean(result.error);
+    return result;
   } catch (err) {
     log(`${errorLabel}: ${err}`);
+    const message = err instanceof Error ? err.message : String(err);
     if (!deps.cancelledCards.has(cardId)) {
-      deps.send(frame(`error: ${err instanceof Error ? err.message : String(err)}`, "failed"));
+      deps.send(frame(`error: ${message}`, "failed"));
     }
-    return true;
+    return { text: "", error: message };
   } finally {
     // The terminal frame went out synchronously above; nothing may follow it.
     live.cancel();

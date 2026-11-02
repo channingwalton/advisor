@@ -15,6 +15,7 @@ import {
 import { AsyncQueue } from "./agent.js";
 import { handleCancel } from "./cancel.js";
 import { guardedRun } from "./guardedRun.js";
+import { runCard, Transcript, type Lane } from "./lanes.js";
 import type { Outbound } from "./protocol.js";
 
 const base = { name: "x", systemPrompt: "sp", allowedTools: [] as string[] };
@@ -138,7 +139,8 @@ test("#codex-session-cancel cancelling a card queued behind warm-up prevents its
   await setImmediate();
   assert.equal(calls.length, 1, "a cancelled queued card must never reach the provider");
   assert.equal(lane.busy, false, "cancellation must settle the queued request immediately");
-  await Promise.all([warm, card]);
+  const [, queued] = await Promise.all([warm, card]);
+  assert.equal(queued.contextLost, true, "the queued card's prompt never reached a thread");
   assert.equal(calls[0].signal.aborted, true);
   assert.deepEqual(sent, [{ type: "card_update", id: "c1", body: "cancelled", state: "cancelled" }]);
 
@@ -149,6 +151,36 @@ test("#codex-session-cancel cancelling a card queued behind warm-up prevents its
   complete(calls[0], "stale warm-up");
   complete(calls[1], "next answer", "next");
   assert.equal((await fresh).text, "next answer");
+});
+
+test("#context-lane-recycle the card after a cancelled Codex card is sent the whole conversation again", async () => {
+  const { calls, factory } = controlledThreads();
+  const session = new CodexAgentSession(base, factory);
+  const transcript = new Transcript();
+  const lane: Lane = { name: "query0", session, busy: true };
+  let n = 0;
+  const cancelledCards = new Set<string>();
+  const send = (_message: Outbound) => {};
+  const deps = { transcript, nextCardId: () => `c${++n}`, sessionContext: () => "", cancelledCards, send };
+  const say = (id: string, text: string) => transcript.push({ id, source: "them", text, ts: 0 });
+
+  say("u1", "Our migration is named Cedar");
+  const cancelled = runCard(lane, "query", "Cedar", "Question: what is Cedar?", undefined, deps);
+  await setImmediate();
+  assert.match(calls[0].input, /Cedar/);
+  handleCancel("c1", { cancelledCards, cardLanes: [lane], documentLanes: [], send });
+  await cancelled;
+  calls[0].events.end(); // the aborted CLI's stream closes
+
+  say("u2", "Who owns it?");
+  const next = runCard(lane, "query", "owner", "Question: who owns it?", undefined, deps);
+  await setImmediate();
+  assert.equal(calls[1].threadId, null, "the cancel discarded the thread");
+  // The new thread never saw u1, so the prompt must carry it again.
+  assert.match(calls[1].input, /Cedar/);
+  assert.match(calls[1].input, /Who owns it\?/);
+  complete(calls[1], "Priya", "next");
+  await next;
 });
 
 test("timed-out warm-up retires its thread and releases queued requests", async (t) => {
