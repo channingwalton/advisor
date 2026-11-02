@@ -22,6 +22,10 @@ The recording window and the Sessions detail show the same feed: the
 conversation as plain text, with the time of each paragraph in the margin, and
 cards and notes in place on a faint fill. A past session reads as it did live.
 
+In the recording window, the feed follows new content: new lines, notes and
+cards, and the text of a card as its answer arrives. Scroll up to stop it, for
+example to read a card. Scroll back to the bottom to follow again.
+
 ### Toolbar
 
 The left side holds the record cluster (waveform, timer, mic mute, stop) and

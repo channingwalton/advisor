@@ -384,10 +384,10 @@ struct TranscriptView: View {
         paragraph.lines.compactMap { UUID(uuidString: $0.id) }
     }
 
-    /// Changes whenever a final line or card is added — the tail-follow trigger
-    /// (a growing paragraph keeps its id, so id-based scrolling alone misses it).
-    private var scrollKey: String {
-        "\(store.utterances.count)|\(store.cards.count)|\(store.notes.count)"
+    /// The trigger to follow the tail: new lines, notes and cards, and a card
+    /// that streams in place (issue #109).
+    private var feedContent: TranscriptAutoScroll.Content {
+        TranscriptAutoScroll.Content(utterances: store.utterances, notes: store.notes, cards: store.cards)
     }
 
     /// True when an editable text field holds focus in the key window. A focused
@@ -439,16 +439,16 @@ struct TranscriptView: View {
             } action: { previous, current in
                 transcriptAutoScroll.viewportChanged(from: previous, to: current)
             }
-            .onChange(of: scrollKey) { _, _ in
+            .onChange(of: feedContent) { _, _ in
                 // Don't auto-scroll while the user is typing in an editable text
                 // field (the Ask or Note popover, a card reply). Scrolling the
                 // transcript yanks focus away mid-keystroke, and a stray space then
                 // toggles recording (issue #37). The non-editable selectable
                 // transcript NSTextView is fine to scroll past.
-                guard transcriptAutoScroll.followsTail, !isEditingTextField else { return }
-                if !feedItems.isEmpty {
-                    withAnimation { proxy.scrollTo(ScrollTarget.bottom, anchor: .bottom) }
-                }
+                guard transcriptAutoScroll.scrollsOnContentChange(editingText: isEditingTextField) else { return }
+                // No animation: two animated scrolls that overlap moved the
+                // visible bottom back up, which read as a user scroll (#109).
+                proxy.scrollTo(ScrollTarget.bottom, anchor: .bottom)
             }
         }
     }

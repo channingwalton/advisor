@@ -1191,6 +1191,60 @@ of the bottom starts it again. It stops only when the visible bottom moves up
 while the container size stays the same. Thus it does not depend on the
 delivery of SwiftUI scroll phases, and content growth alone never stops it.
 
+Change (2026-11-02, issue #109): the trigger for the scroll is a change of
+the content that the speech engine and the sidecar supply
+(`TranscriptAutoScroll.Content`): the lines, the notes, and the text, state and
+activity of each card. Before, it was the count of lines, cards and notes. So a
+card that streams in place, which adds no item, grew below the visible area,
+and the feed did not follow it. The scroll has no animation now: two animated
+scrolls that overlapped moved the visible bottom back up, which read as a user
+scroll.
+
+A probe in the dev build showed both faults. Streamed cards grew the content
+to 1595 pt below the visible bottom, and an animated scroll moved the visible
+bottom up by 54 pt with no input. With the change, each content change scrolls
+to the bottom, a mouse-wheel or trackpad-like scroll up stops the follow while
+cards stream, and a scroll back to the bottom starts it again.
+
+- **The follow pins the bottom.** While the feed follows, each content change
+  keeps the bottom of the feed at the bottom of the view. A streamed card is
+  content, also a card above the bottom, such as a follow-up answer: its new
+  text stays where it is on the screen, and the text above it moves up. To
+  read a card in place, scroll up, which stops the follow.
+- **An expand does not scroll by itself.** An expand, a collapse or a window
+  resize changes no content. So the feed stays on a card that the user opened
+  until the next content change, which scrolls as a new line did before. While
+  a card streams, that is less than a second. Rejected: a trigger on any
+  growth of the content height. It scrolled on an expand also when no content
+  came.
+- **No scroll animation**, also for a new line or card, which now moves into
+  place at once. Each new item can come while an earlier scroll still
+  animates, so an animation only for new items did not prevent the overlap.
+- **The interim line is not a trigger**, as before. It changes several times a
+  second, and the feed then scrolled away from a card that the user opened
+  almost at once.
+- **No scroll while the user types** in an editable field (#37). The scroll
+  that was skipped is not made later: the feed follows again at the next
+  content change.
+- **A user scroll is a move up with fixed sizes.** The visible bottom moves up
+  while the container and the content keep their sizes, from a visible bottom
+  inside the content. Such a move stops the follow at once, also within the
+  24 pt tolerance. While cards stream, each update scrolls the feed back to the
+  bottom, so a slow trackpad scroll (3 pt a step) never left the tolerance in
+  the probe. A layout change is no user scroll: a card that gets shorter, or a
+  correction of the lazy stack's height estimates, changes the content size.
+  The scroll view then clamps the visible bottom to the new end in a later
+  update, from a visible bottom past the end, which the probe also showed.
+- **Only a move down starts the follow again**, to within the tolerance. Growth
+  alone does not: after a scroll up of a few points, the next card update can
+  leave the view within the tolerance.
+- **Residual:** a user scroll in the same update as a content change is not
+  seen. The next update of the scroll is. If the lazy stack changes its height
+  estimates in each update of a fast scroll, the scroll is not seen; the probes
+  scrolled only through rows that were laid out. SwiftUI scroll phases
+  (`onScrollPhaseChange`) can tell a user scroll from a layout change, but the
+  #70 decision does not depend on them.
+
 ## Transcript disfluency cleanup (2026-07-13, issue #40)
 
 `Recorder.cleanedTranscript` removes `um`/`uh`/`er`/`erm` and collapses
