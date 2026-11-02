@@ -1476,7 +1476,8 @@ servers and no apps. The sub-agent tools that it was offered are now off too,
 verified on the fake endpoint only. That run had no control run, so it does not
 prove that apps would otherwise appear. The turn itself was refused: CLI
 0.139.0 cannot use the `gpt-6.1-sol` model of the user's config on a ChatGPT
-login. The Codex backend needs a newer CLI before it runs here.
+login. The Codex backend needs a newer CLI before it runs here. (Resolved
+2026-11-02, with changes to the classifier settings: see *Codex CLI 0.166.0*.)
 
 Limits:
 
@@ -2096,7 +2097,59 @@ Cost: one larger prompt for the card after each cancelled Codex card, as for a
 failed card (*Recycled lanes replay the conversation*). Not verified against
 the real Codex CLI: the pinned CLI (0.139.0) rejects the model in the user's
 Codex configuration. The test drives the SDK's `Thread` with a controlled
-event stream.
+event stream. (The CLI is now 0.166.0, which accepts that model: see *Codex
+CLI 0.166.0*. The cancel is still not verified on it.)
+
+## Codex CLI 0.166.0 (2026-11-02)
+
+Decision: `@openai/codex-sdk` goes from 0.139.0 to 0.166.0, which bundles
+Codex CLI 0.166.0 (issue #117). The classifier also sets
+`[agents] enabled = false`, `features.multi_agent_v2 = false` and
+`features.sleep_tool = false`.
+
+Reason: CLI 0.139.0 refused the current models. The catalogue of the new CLI
+gives `gpt-6-astra` a `minimal_client_version` of 0.153.0. With 0.166.0, a
+real card turn and a real classifier turn on the user's ChatGPT login and
+`gpt-6-astra` succeeded through `CodexAgentSession` and the Seatbelt wrapper.
+
+Changes in the CLI that the tests found:
+
+- **Tools move into the input.** A request has no `tools` field for current
+  models. The tools are namespaces in an `additional_tools` input item.
+  `codex.sdk.test.ts` read only `tools`, so the classifier tests passed with
+  no check. It now reads both.
+- **Code mode.** Each model in the catalogue except `gpt-5.5` has
+  `tool_mode: "code_mode_only"`. The model gets `exec`, which runs JavaScript
+  in a V8 isolate (`codex-code-mode-host`, a new binary) with no file system
+  or network. Most tools, the shell included, are reachable only from inside
+  that JavaScript. The isolate runs under the Seatbelt profile.
+- **MCP tools are always deferred.** No request lists them. So the fake model
+  in `codex.sdk.test.ts` now probes. In code mode, it calls `exec` to list
+  `ALL_TOOLS`. In both modes, it reads a resource from the stub server: a
+  disabled server fails as "unknown MCP server", and an enabled one is asked.
+  The tests run on a code-mode model (`gpt-6.1-sol`) and on the one classic
+  model (`gpt-5.5`).
+- **Sub-agents come from the model.** A model with
+  `multi_agent_version: "v2"` gets the `collaboration` tools, and
+  `features.multi_agent = false` does not remove them. Only
+  `[agents] enabled = false` does, and `features.multi_agent_v2 = true` in the
+  user's config would win over it, so the classifier sets both. Without them,
+  the classifier was offered `spawn_agent`.
+- **New inert tools for the classifier.** `exec`, `wait`,
+  `request_user_input_async` (it only posts its questions as a message),
+  `clock__curr_time`, and the MCP resource tools, which reach no server when
+  each server is disabled. `clock.sleep` has a setting, so it is off.
+
+Bundle: the binary package adds `codex-code-mode-host` (81 MB) and a voice
+runtime (20 MB), and drops `zsh`. The voice runtime ships its own licence
+texts. `sidecar/licences` drops `zsh.LICENSE` and cites ripgrep 15.2.0.
+
+Found and not fixed (issue #118, also on 0.139.0): under the Seatbelt
+wrapper, each shell command of the CLI fails with
+`sandbox-exec: sandbox_apply: Operation not permitted`. The CLI applies its
+own Seatbelt profile to the command, and a process in a sandbox cannot apply
+another one. The fault fails closed. But a Codex card cannot read notes
+through the shell, which the user guide says it can.
 
 ## Revisit as it grows
 

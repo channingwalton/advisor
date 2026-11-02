@@ -12,10 +12,13 @@ count a file with that name as the package's own licence:
 
 | Package | Licence | Source |
 |---|---|---|
-| `@openai/codex` | Apache-2.0 | [`LICENSE`](https://github.com/openai/codex/blob/rust-v0.139.0/LICENSE) and [`NOTICE`](https://github.com/openai/codex/blob/rust-v0.139.0/NOTICE) at tag `rust-v0.139.0` |
-| `@openai/codex-darwin-arm64` | Apache-2.0 | The same files: this package holds the Codex CLI binary |
-| `@openai/codex-darwin-arm64`: its `rg` | Unlicense OR MIT | `ripgrep.LICENSE`: [`LICENSE-MIT`](https://github.com/BurntSushi/ripgrep/blob/15.1.0/LICENSE-MIT) at tag `15.1.0`, the version bundled |
-| `@openai/codex-darwin-arm64`: its `zsh` | zsh licence | `zsh.LICENSE`: [`LICENCE`](https://github.com/zsh-users/zsh/blob/zsh-5.9/LICENCE) at tag `zsh-5.9`, the version bundled |
+| `@openai/codex` | Apache-2.0 | [`LICENSE`](https://github.com/openai/codex/blob/rust-v0.166.0/LICENSE) and [`NOTICE`](https://github.com/openai/codex/blob/rust-v0.166.0/NOTICE) at tag `rust-v0.166.0` |
+| `@openai/codex-darwin-arm64` | Apache-2.0 | The same files: this package holds the Codex CLI binaries (`codex` and `codex-code-mode-host`) |
+| `@openai/codex-darwin-arm64`: its `rg` | Unlicense OR MIT | `ripgrep.LICENSE`: [`LICENSE-MIT`](https://github.com/BurntSushi/ripgrep/blob/15.2.0/LICENSE-MIT) at tag `15.2.0`, the version bundled |
+
+The Codex binary package also bundles a voice runtime
+(`codex-resources/voice`: GStreamer, GLib and their libraries). It ships its
+own texts in `voice/licenses` and `voice/NOTICE.md`, so it needs none here.
 | `standardwebhooks` | MIT | [`libraries/LICENSE`](https://github.com/standard-webhooks/standard-webhooks/blob/c7cd8a9eadf9879d6dca345e168dc8d15d19e487/libraries/LICENSE) |
 
 When the build names a package with no licence file, add a folder for it here

@@ -26,34 +26,106 @@ import { classifierOptions } from "./trigger.js";
 // provider also guards the rest of the user's config: a session that dropped it
 // would lose their model too, and never reach the fake. ChatGPT apps come with a
 // ChatGPT login, so they can't show up here.
+//
+// Since CLI 0.166.0 a request does not list every tool. MCP tools are always
+// deferred, and a code-mode model reaches most tools only from inside the
+// JavaScript of its `exec` tool. So the fake model also probes: in code mode it
+// calls `exec` to list `ALL_TOOLS`, and in either mode it tries to read a
+// resource from the stub server, which reaches it only while it is enabled.
 
 /// Seatbelt and the vendored darwin binary; CI runs the sidecar on Linux.
 const darwin = { skip: process.platform !== "darwin" ? "requires macOS and the darwin Codex CLI" : false };
 
 let home: string;
 let server: http.Server;
-/// The tool names each request offered, by the prompt that sent it.
-const offered = new Map<string, string[]>();
+/// What a session could use, by the prompt that sent it: the names of the tools
+/// it was offered, and what a read from the stub server's resources returned
+/// (undefined when no tool could try).
+interface Offered {
+  tools: string[];
+  stub?: string;
+}
+const offered = new Map<string, Offered>();
 
-/// Answer a Responses API request with one finished message.
-function respond(res: http.ServerResponse, text: string): void {
+/// The call id of the fake model's probe, so its output is found in the next request.
+const PROBE = "probe";
+const STUB_READ = { server: "stub", uri: "stub://probe" };
+/// Run by code mode's `exec`: the nested tools, and a read from the stub server.
+const CODE_PROBE = `let stub;
+try { stub = JSON.stringify(await tools.read_mcp_resource(${JSON.stringify(STUB_READ)})); } catch (e) { stub = String(e); }
+text(JSON.stringify({ tools: ALL_TOOLS.map((t) => t.name), stub }));`;
+
+type Tool = { name?: string; type: string; tools?: Tool[] };
+type InputItem = { type?: string; call_id?: string; output?: unknown; tools?: Tool[] };
+
+/// The tools a request offers, by bare name: its `tools`, and the namespaced
+/// tools of its `additional_tools` input item.
+function requestTools(body: { input?: InputItem[]; tools?: Tool[] }): string[] {
+  const extra = (body.input ?? []).filter((i) => i.type === "additional_tools").flatMap((i) => i.tools ?? []);
+  return [...(body.tools ?? []), ...extra].flatMap((t) => t.tools ?? [t]).map((t) => t.name ?? t.type);
+}
+
+/// The text of a tool output: a string, or a list of text items.
+function outputText(output: unknown): string {
+  if (typeof output === "string") return output;
+  return Array.isArray(output) ? output.map((o: { text?: string }) => o.text ?? "").join("\n") : "";
+}
+
+/// Answer a Responses API request with one finished item.
+function respond(res: http.ServerResponse, item: object): void {
   const id = "resp_test";
-  const message = {
-    type: "message", id: "msg_test", role: "assistant", status: "completed",
-    content: [{ type: "output_text", text, annotations: [] }],
-  };
   const usage = {
     input_tokens: 1, input_tokens_details: { cached_tokens: 0 },
     output_tokens: 1, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 2,
   };
   const events = [
     { type: "response.created", response: { id } },
-    { type: "response.output_item.done", output_index: 0, item: message },
+    { type: "response.output_item.done", output_index: 0, item },
     { type: "response.completed", response: { id, usage } },
   ];
   res.writeHead(200, { "content-type": "text/event-stream" });
   for (const e of events) res.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
   res.end();
+}
+
+const message = (text: string) => ({
+  type: "message", id: "msg_test", role: "assistant", status: "completed",
+  content: [{ type: "output_text", text, annotations: [] }],
+});
+
+/// Record what a request offers and, on the first request of a prompt, probe:
+/// code mode lists its nested tools through `exec`; otherwise, a session with
+/// `read_mcp_resource` reads from the stub. The probe's output arrives in the
+/// next request, and the turn then ends.
+function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: Tool[] }): void {
+  const prompt = JSON.stringify(body.input).match(/PROMPT:(\w+)/)?.[1];
+  const done = message('{"triggers":[]}');
+  if (!prompt) return respond(res, done);
+  const result = (body.input ?? []).find((i) => i.type?.endsWith("_output") && i.call_id === PROBE);
+  const entry = offered.get(prompt);
+  if (result && entry) {
+    const text = outputText(result.output);
+    const json = text.split("\n").find((line) => line.startsWith("{\"tools\""));
+    if (json) {
+      const probe = JSON.parse(json) as { tools: string[]; stub?: string };
+      entry.tools.push(...probe.tools);
+      entry.stub = probe.stub;
+    } else {
+      entry.stub = text;
+    }
+    return respond(res, done);
+  }
+  if (entry) return respond(res, done);
+  const tools = requestTools(body);
+  offered.set(prompt, { tools });
+  if (tools.includes("exec")) {
+    return respond(res, { type: "custom_tool_call", id: "ctc_probe", call_id: PROBE, name: "exec", input: CODE_PROBE, status: "completed" });
+  }
+  if (tools.includes("read_mcp_resource")) {
+    const args = JSON.stringify(STUB_READ);
+    return respond(res, { type: "function_call", id: "fc_probe", call_id: PROBE, name: "read_mcp_resource", arguments: args, status: "completed" });
+  }
+  respond(res, done);
 }
 
 before(async () => {
@@ -73,10 +145,7 @@ before(async () => {
         res.end();
         return;
       }
-      const body = JSON.parse(raw) as { input?: unknown; tools?: { name?: string; type: string }[] };
-      const prompt = JSON.stringify(body.input).match(/PROMPT:(\w+)/)?.[1];
-      if (prompt && !offered.has(prompt)) offered.set(prompt, (body.tools ?? []).map((t) => t.name ?? t.type));
-      respond(res, '{"triggers":[]}');
+      answer(res, JSON.parse(raw) as { input?: InputItem[]; tools?: Tool[] });
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -108,8 +177,8 @@ after(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-/// Run one turn with `opts` and return the tool names its request offered.
-async function offeredTools(prompt: string, opts: AgentSessionOptions): Promise<string[]> {
+/// Run one turn with `opts` and return what it could use.
+async function offeredTools(prompt: string, opts: AgentSessionOptions): Promise<Offered> {
   const env = {
     PATH: process.env.PATH ?? "",
     TMPDIR: os.tmpdir(),
@@ -131,10 +200,10 @@ async function offeredTools(prompt: string, opts: AgentSessionOptions): Promise<
   return tools;
 }
 
-/// Ask the built sidecar one question on Codex, as the app does, and return the
-/// tools its request offered. This is the app's own path to a Codex client —
-/// the session sets it up — where offeredTools builds the client itself.
-async function sidecarTools(prompt: string, allowMcpActions: boolean): Promise<string[]> {
+/// Ask the built sidecar one question on Codex, as the app does, and return what
+/// it could use. This is the app's own path to a Codex client — the session sets
+/// it up — where offeredTools builds the client itself.
+async function sidecarTools(prompt: string, allowMcpActions: boolean): Promise<Offered> {
   const advisor = path.join(home, "Library", "Application Support", "Advisor");
   fs.mkdirSync(advisor, { recursive: true });
   fs.writeFileSync(path.join(advisor, "config.json"), JSON.stringify({ provider: "codex", allowMcpActions }));
@@ -161,52 +230,76 @@ async function sidecarTools(prompt: string, allowMcpActions: boolean): Promise<s
   return tools;
 }
 
-const isConnector = (t: string): boolean => t.startsWith("mcp__") || t.includes("mcp_resource");
+/// A model that reaches its tools through code mode's `exec`, as current models do.
+const CODE_MODE_MODEL = "gpt-6.1-sol";
+/// A model offered its tools directly (`tool_mode` null in the CLI's catalogue).
+const CLASSIC_MODEL = "gpt-5.5";
+const MODELS = [CODE_MODE_MODEL, CLASSIC_MODEL];
+
+/// Whether the stub server answered the probe's read: the CLI fails a read from
+/// a disabled server before it asks the server.
+const reachesStub = (o: Offered): boolean => o.stub !== undefined && !/unknown MCP server 'stub'/.test(o.stub);
+
+/// The connectors a session could use: tools of an MCP server, and the stub
+/// server through the resource tools.
+const connectors = (o: Offered): string[] => [
+  ...o.tools.filter((t) => t.startsWith("mcp__")),
+  ...(reachesStub(o) ? [`stub resource read: ${o.stub}`] : []),
+];
+
+const show = (o: Offered): string => `tools: ${o.tools.join(", ")}; stub read: ${o.stub}`;
 
 test("#codex-connectors a card lane allowed connector actions is offered the stub connector and the shell", darwin, async () => {
   // The control: without it, the absences below could mean the stub never loaded.
-  const tools = await offeredTools("actions", cardLaneOptions(mergeConfig({ allowMcpActions: true }), "research0"));
-  assert.ok(tools.includes("mcp__stub"), `card lane tools: ${tools.join(", ")}`);
-  assert.ok(tools.includes("exec_command"), `card lane tools: ${tools.join(", ")}`);
+  const o = await offeredTools("actions", cardLaneOptions(mergeConfig({ allowMcpActions: true, model: CODE_MODE_MODEL }), "research0"));
+  assert.ok(o.tools.includes("mcp__stub__lookup"), show(o));
+  assert.ok(o.tools.includes("exec_command"), show(o));
+  assert.ok(reachesStub(o), show(o));
+  // A classic model is offered MCP tools through tool_search, and the resource tools directly.
+  const classic = await offeredTools("actionsClassic", cardLaneOptions(mergeConfig({ allowMcpActions: true, model: CLASSIC_MODEL }), "research0"));
+  assert.ok(reachesStub(classic), show(classic));
 });
 
 test("#codex-connectors a card lane without connector actions is offered no connectors", darwin, async () => {
-  const tools = await offeredTools("card", cardLaneOptions(mergeConfig({}), "research0"));
-  assert.deepEqual(tools.filter(isConnector), [], `card lane tools: ${tools.join(", ")}`);
-  // It still reads local notes through the shell, as the Claude lanes do with Read/Grep.
-  assert.ok(tools.includes("exec_command"), `card lane tools: ${tools.join(", ")}`);
+  for (const [i, model] of MODELS.entries()) {
+    const o = await offeredTools(`card${i}`, cardLaneOptions(mergeConfig({ model }), "research0"));
+    assert.deepEqual(connectors(o), [], `${model}: ${show(o)}`);
+    // It still reads local notes through the shell, as the Claude lanes do with Read/Grep.
+    assert.ok(o.tools.includes("exec_command"), `${model}: ${show(o)}`);
+  }
 });
 
 test("#codex-connectors the sidecar's own Codex lanes follow the connector-actions toggle", { ...darwin, timeout: 60_000 }, async () => {
   const allowed = await sidecarTools("sidecarActions", true);
-  assert.ok(allowed.includes("mcp__stub"), `query lane tools: ${allowed.join(", ")}`);
-  const tools = await sidecarTools("sidecar", false);
-  assert.deepEqual(tools.filter(isConnector), [], `query lane tools: ${tools.join(", ")}`);
+  assert.ok(allowed.tools.includes("mcp__stub__lookup"), show(allowed));
+  const o = await sidecarTools("sidecar", false);
+  assert.deepEqual(connectors(o), [], show(o));
 });
 
-/// What no setting removes, each inert here: update_plan has no effect,
-/// request_user_input fails in exec mode, apply_patch is refused by read-only
-/// mode and the Seatbelt profile, view_image reads what the profile allows, and
-/// tool_search has no connectors to find. A CLI upgrade that offers anything
-/// else fails the classifier tests.
-const INERT = ["apply_patch", "request_user_input", "tool_search", "update_plan", "view_image"];
-
-/// A model whose tools include sub-agents (`multi_agent_v1`); the CLI's default
-/// for an API key has none.
-const AGENT_MODEL = "gpt-6.1-sol";
-
-test("#classifier-no-tools the Codex classifier is offered no shell, connectors or goals", darwin, async () => {
-  const tools = await offeredTools("classify", classifierOptions(mergeConfig({})));
-  assert.deepEqual(tools.filter((t) => !INERT.includes(t)), [], `classifier tools: ${tools.join(", ")}`);
-});
+/// What no setting removes, each inert here: code mode's `exec` runs JavaScript
+/// with no file system or network, and reaches only the tools in this list;
+/// `wait` waits for an `exec`; `update_plan` has no effect;
+/// `request_user_input` fails in exec mode; `request_user_input_async` only
+/// posts its questions as a message; `apply_patch` is refused by read-only mode
+/// and the Seatbelt profile; `view_image` reads what the profile allows;
+/// `clock__curr_time` reads the clock; and `tool_search` and the MCP resource
+/// tools have no connectors to reach (each test checks the stub). A CLI upgrade
+/// that offers anything else fails the classifier test.
+const INERT = [
+  "apply_patch", "clock__curr_time", "exec", "list_mcp_resource_templates", "list_mcp_resources", "read_mcp_resource",
+  "request_user_input", "request_user_input_async", "tool_search", "update_plan", "view_image", "wait",
+];
 
 test("#classifier-no-tools a card lane on a sub-agent model is offered sub-agents", darwin, async () => {
-  // The control for the next test: the model, not the setting, decides this.
-  const tools = await offeredTools("agents", cardLaneOptions(mergeConfig({ model: AGENT_MODEL }), "research0"));
-  assert.ok(tools.includes("multi_agent_v1"), `card lane tools: ${tools.join(", ")}`);
+  // The control for the next test: the model, not the features, turns these on.
+  const o = await offeredTools("agents", cardLaneOptions(mergeConfig({ model: CODE_MODE_MODEL }), "research0"));
+  assert.ok(o.tools.includes("spawn_agent"), show(o));
 });
 
-test("#classifier-no-tools the Codex classifier on a sub-agent model is offered no sub-agents", darwin, async () => {
-  const tools = await offeredTools("classifyAgents", classifierOptions(mergeConfig({ model: AGENT_MODEL })));
-  assert.deepEqual(tools.filter((t) => !INERT.includes(t)), [], `classifier tools: ${tools.join(", ")}`);
+test("#classifier-no-tools the Codex classifier is offered no shell, connectors, goals or sub-agents", darwin, async () => {
+  for (const [i, model] of MODELS.entries()) {
+    const o = await offeredTools(`classify${i}`, classifierOptions(mergeConfig({ model })));
+    assert.deepEqual(o.tools.filter((t) => !INERT.includes(t)), [], `${model}: ${show(o)}`);
+    assert.deepEqual(connectors(o), [], `${model}: ${show(o)}`);
+  }
 });

@@ -62,10 +62,10 @@ export function codexThreadOptions(opts: AgentSessionOptions): ThreadOptions {
 /// everything is allowed, as on Claude.
 ///
 /// `noTools` (the classifier) also switches off the shell, goals, image
-/// generation and sub-agents. What no setting removes stays offered, and which
-/// of it depends on the model (`update_plan`, `request_user_input`,
-/// `view_image`, and for some `apply_patch` and `tool_search`); each is inert
-/// here — see codex.sdk.test.ts.
+/// generation, sleep and sub-agents. What no setting removes stays offered, and
+/// which of it depends on the model (for example `request_user_input`,
+/// `view_image`, `apply_patch`, the MCP resource tools, and code mode's `exec`);
+/// each is inert here — see codex.sdk.test.ts.
 export async function codexClientOptions(
   opts: AgentSessionOptions,
   env: NodeJS.ProcessEnv,
@@ -75,19 +75,25 @@ export async function codexClientOptions(
   const client = codexConstructorOptions(env, codexPath);
   if (opts.allowMcpActions === true && !opts.noTools) return client;
   const features: Record<string, boolean> = { apps: false, plugins: false };
+  const config: NonNullable<CodexOptions["config"]> = { features };
   if (opts.noTools) {
     Object.assign(features, {
-      shell_tool: false, unified_exec: false, goals: false, image_generation: false, multi_agent: false,
+      shell_tool: false, unified_exec: false, goals: false, image_generation: false, sleep_tool: false,
+      multi_agent: false, multi_agent_v2: false,
     });
+    // A model's catalogue entry can turn sub-agents on (`multi_agent_version`),
+    // whatever the features say. Only `[agents] enabled = false` overrides it.
+    config.agents = { enabled: false };
   }
   const servers = await listServers(codexPath, opts.cwd ?? homedir());
   // The SDK writes each override as a dotted path, so a name with any other
   // character would disable some other key and leave this server running.
   const unsafe = servers.find((name) => !/^[A-Za-z0-9_-]+$/.test(name));
   if (unsafe !== undefined) throw new Error(`can't disable the Codex MCP server "${unsafe}": rename it`);
-  if (servers.length === 0) return { ...client, config: { features } };
-  const mcp_servers = Object.fromEntries(servers.map((name) => [name, { enabled: false }]));
-  return { ...client, config: { features, mcp_servers } };
+  if (servers.length > 0) {
+    config.mcp_servers = Object.fromEntries(servers.map((name) => [name, { enabled: false }]));
+  }
+  return { ...client, config };
 }
 
 /// The MCP servers the user's Codex config defines, by name: ~/.codex/config.toml

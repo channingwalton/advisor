@@ -250,6 +250,13 @@ Every agent lane uses one backend: **Claude** (the Agent SDK) by default, or
 **Codex** (`@openai/codex-sdk`). Choose it in Preferences. Codex uses your
 Codex CLI login, so log in to the `codex` CLI first.
 
+Preferences has no Codex model of its own: Codex uses the `model` in
+`~/.codex/config.toml`. Advisor runs the Codex CLI that it bundles, not the one
+on your `PATH`, so the model must be one that the bundled CLI supports. If a
+Codex card fails with "requires a newer version of Codex", the model is newer
+than the bundled CLI. Choose an older model in `~/.codex/config.toml`, or
+update Advisor.
+
 **Authentication** uses your CLI subscription login by default (Claude Code or
 Codex). On a Mac with no CLI login, set **Authentication** to *API key* and
 paste an Anthropic or OpenAI key, to match the provider. Preferences checks the

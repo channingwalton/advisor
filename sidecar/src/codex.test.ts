@@ -53,7 +53,13 @@ function complete(call: Invocation, text: string, threadId = "conversation"): vo
   });
   emit(call, {
     type: "turn.completed",
-    usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    usage: {
+      input_tokens: 1,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      output_tokens: 1,
+      reasoning_output_tokens: 0,
+    },
   });
   call.events.end();
 }
@@ -436,15 +442,18 @@ test("#codex-connectors a server name that can't be a config key fails the sessi
   await assert.rejects(codexClientOptions(base, {}, "/w/codex", servers(["a.b"]).list), /a\.b/);
 });
 
-test("#classifier-no-tools a Codex session with no tools also drops the shell, goals, image generation and sub-agents", async () => {
+test("#classifier-no-tools a Codex session with no tools also drops the shell, goals, image generation, sleep and sub-agents", async () => {
+  const features = {
+    ...NO_CONNECTORS, shell_tool: false, unified_exec: false, goals: false, image_generation: false, sleep_tool: false,
+    multi_agent: false, multi_agent_v2: false,
+  };
+  // A model can turn sub-agents on by itself; only `[agents] enabled` turns them off.
+  const agents = { enabled: false };
   // noTools wins over allowMcpActions: the classifier needs no connectors at all.
   const o = await codexClientOptions({ ...base, noTools: true, allowMcpActions: true }, {}, "/w/codex", servers(["fff"]).list);
-  assert.deepEqual(o.config, {
-    features: {
-      ...NO_CONNECTORS, shell_tool: false, unified_exec: false, goals: false, image_generation: false, multi_agent: false,
-    },
-    mcp_servers: { fff: { enabled: false } },
-  });
+  assert.deepEqual(o.config, { features, agents, mcp_servers: { fff: { enabled: false } } });
+  const none = await codexClientOptions({ ...base, noTools: true }, {}, "/w/codex", servers([]).list);
+  assert.deepEqual(none.config, { features, agents });
 });
 
 test("#codex-connectors codexClientOptions keeps the API key", async () => {
