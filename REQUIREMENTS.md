@@ -44,7 +44,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F8a. Auto cards: one toolbar toggle turns automatic cards (answers, context, fact-checks) off and on mid-session without stopping listening; manual actions and Ask keep working while it's off.
 - F9. Surface background context for detected entities (relevant notes, tickets, docs, prior discussion).
 - F10. Fact-check claims against web/internal sources, citing the source; say "couldn't verify" rather than guess when a claim can't be confirmed.
-- F11. Search across: the web, work tools via the user's MCP connectors (e.g. Jira, Confluence, Slack), and the user's own notes and local files/repos (read-only; credential paths excluded). Advisor holds no notes location of its own: personal context, such as where notes live, comes from the user's own agent configuration (for Claude, `~/.claude/CLAUDE.md`).
+- F11. Search across: the web, work tools via the user's MCP connectors (e.g. Jira, Confluence, Slack), and the user's own notes and local files/repos (read-only; credential paths excluded). A Codex card cannot search local files itself (N12): it reaches notes only through a connector. Advisor holds no notes location of its own: personal context, such as where notes live, comes from the user's own agent configuration (for Claude, `~/.claude/CLAUDE.md`).
 - F12. Every answer cites its source(s).
 
 ### Agent backend
@@ -120,6 +120,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - When a ping to the main thread stays unanswered for 5 s, the app logs the stall and its length and saves one stack sample of itself in the logs folder. The app pings once a second, so a stall of about 7 s or more is caught, and a delayed timer (App Nap) can make it later. The length counts from the unanswered ping, not from the start of the stall. A long stall gives one sample, and the app logs when the main thread answers again. `#stall-sample`
   - The logs folder keeps the newest five stack samples. `#stall-sample-cap`
   - When the user closes the recording window (close button or ⌘W), the app logs whether agent tasks were running, the first responder of each visible window and, when the prompt appears, the choice. A close while the window is already finishing is ignored and not logged. `#close-log`
+- N12. **Codex shell (issue #118):**
+  - Under the Seatbelt profile, a Codex card lane runs no shell command: the CLI cannot apply its own sandbox inside the profile, so a command fails before it reads an ordinary file or a denied path (such as `~/.ssh`). The user guide says that Codex cards cannot run shell commands. `#codex-shell`
 
 ## Risks
 

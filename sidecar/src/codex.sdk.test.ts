@@ -32,6 +32,11 @@ import { classifierOptions } from "./trigger.js";
 // JavaScript of its `exec` tool. So the fake model also probes: in code mode it
 // calls `exec` to list `ALL_TOOLS`, and in either mode it tries to read a
 // resource from the stub server, which reaches it only while it is enabled.
+//
+// A prompt whose name starts with `shell` probes the shell instead: the fake
+// model runs `SHELL_COMMAND` through `exec_command`, from code mode's `exec` or
+// directly, and the next request carries what the command printed. Under
+// Advisor's profile no command runs (#118).
 
 /// Seatbelt and the vendored darwin binary; CI runs the sidecar on Linux.
 const darwin = { skip: process.platform !== "darwin" ? "requires macOS and the darwin Codex CLI" : false };
@@ -39,11 +44,13 @@ const darwin = { skip: process.platform !== "darwin" ? "requires macOS and the d
 let home: string;
 let server: http.Server;
 /// What a session could use, by the prompt that sent it: the names of the tools
-/// it was offered, and what a read from the stub server's resources returned
-/// (undefined when no tool could try).
+/// it was offered, what a read from the stub server's resources returned
+/// (undefined when no tool could try), and what the shell probe printed
+/// (undefined when no shell was offered).
 interface Offered {
   tools: string[];
   stub?: string;
+  shell?: string;
 }
 const offered = new Map<string, Offered>();
 
@@ -54,6 +61,18 @@ const STUB_READ = { server: "stub", uri: "stub://probe" };
 const CODE_PROBE = `let stub;
 try { stub = JSON.stringify(await tools.read_mcp_resource(${JSON.stringify(STUB_READ)})); } catch (e) { stub = String(e); }
 text(JSON.stringify({ tools: ALL_TOOLS.map((t) => t.name), stub }));`;
+
+/// What the files in the synthetic home hold: a note that a card may read, and
+/// a key under `~/.ssh`, which the Seatbelt profile denies.
+const NOTE = "note-118-readable";
+const KEY = "key-118-secret";
+/// A read-only shell command: the note, then the key. Set in `before`, because
+/// the paths are in the synthetic home.
+let SHELL_COMMAND: string;
+/// Run by code mode's `exec`: the shell command, through the nested tool.
+const codeShell = (): string => `let out;
+try { out = await tools.exec_command(${JSON.stringify({ cmd: SHELL_COMMAND })}); } catch (e) { out = String(e); }
+text(typeof out === "string" ? out : JSON.stringify(out));`;
 
 type Tool = { name?: string; type: string; tools?: Tool[] };
 type InputItem = { type?: string; call_id?: string; output?: unknown; tools?: Tool[] };
@@ -95,14 +114,19 @@ const message = (text: string) => ({
 
 /// Record what a request offers and, on the first request of a prompt, probe:
 /// code mode lists its nested tools through `exec`; otherwise, a session with
-/// `read_mcp_resource` reads from the stub. The probe's output arrives in the
-/// next request, and the turn then ends.
+/// `read_mcp_resource` reads from the stub. A shell prompt runs the shell
+/// command instead. The probe's output arrives in the next request, and the
+/// turn then ends.
 function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: Tool[] }): void {
   const prompt = JSON.stringify(body.input).match(/PROMPT:(\w+)/)?.[1];
   const done = message('{"triggers":[]}');
   if (!prompt) return respond(res, done);
   const result = (body.input ?? []).find((i) => i.type?.endsWith("_output") && i.call_id === PROBE);
   const entry = offered.get(prompt);
+  if (result && entry && prompt.startsWith("shell")) {
+    entry.shell = outputText(result.output);
+    return respond(res, done);
+  }
   if (result && entry) {
     const text = outputText(result.output);
     const json = text.split("\n").find((line) => line.startsWith("{\"tools\""));
@@ -118,6 +142,16 @@ function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: T
   if (entry) return respond(res, done);
   const tools = requestTools(body);
   offered.set(prompt, { tools });
+  if (prompt.startsWith("shell")) {
+    if (tools.includes("exec")) {
+      return respond(res, { type: "custom_tool_call", id: "ctc_probe", call_id: PROBE, name: "exec", input: codeShell(), status: "completed" });
+    }
+    if (tools.includes("exec_command")) {
+      const args = JSON.stringify({ cmd: SHELL_COMMAND });
+      return respond(res, { type: "function_call", id: "fc_probe", call_id: PROBE, name: "exec_command", arguments: args, status: "completed" });
+    }
+    return respond(res, done);
+  }
   if (tools.includes("exec")) {
     return respond(res, { type: "custom_tool_call", id: "ctc_probe", call_id: PROBE, name: "exec", input: CODE_PROBE, status: "completed" });
   }
@@ -134,6 +168,12 @@ before(async () => {
   const codexHome = path.join(home, ".codex");
   fs.mkdirSync(codexHome);
   fs.mkdirSync(path.join(home, "sandbox"));
+  fs.mkdirSync(path.join(home, ".ssh"));
+  const note = path.join(home, "notes.md");
+  const key = path.join(home, ".ssh", "id_test");
+  fs.writeFileSync(note, `${NOTE}\n`);
+  fs.writeFileSync(key, `${KEY}\n`);
+  SHELL_COMMAND = `cat ${note}; cat ${key}`;
   const stub = path.join(home, "stub-mcp.mjs");
   fs.writeFileSync(stub, STUB_MCP);
   server = http.createServer((req, res) => {
@@ -264,8 +304,23 @@ test("#codex-connectors a card lane without connector actions is offered no conn
   for (const [i, model] of MODELS.entries()) {
     const o = await offeredTools(`card${i}`, cardLaneOptions(mergeConfig({ model }), "research0"));
     assert.deepEqual(connectors(o), [], `${model}: ${show(o)}`);
-    // It still reads local notes through the shell, as the Claude lanes do with Read/Grep.
+    // It is still offered the shell, though no command runs under the profile (#118).
     assert.ok(o.tools.includes("exec_command"), `${model}: ${show(o)}`);
+  }
+});
+
+test("#codex-shell a card lane's shell command fails closed under the Seatbelt profile", darwin, async () => {
+  // The CLI's read-only mode cannot apply its own profile inside Advisor's, so
+  // no command runs: not the read of an ordinary note, nor of a denied key.
+  // A command that runs fails this test: read DESIGN.md (*Codex shell stays
+  // closed*) before you accept it.
+  for (const [i, model] of MODELS.entries()) {
+    const o = await offeredTools(`shell${i}`, cardLaneOptions(mergeConfig({ model }), "research0"));
+    const shown = `${model}: shell printed ${JSON.stringify(o.shell)}`;
+    assert.ok(o.shell !== undefined, shown);
+    assert.match(o.shell, /sandbox_apply: Operation not permitted/, shown);
+    assert.ok(!o.shell.includes(NOTE), shown);
+    assert.ok(!o.shell.includes(KEY), shown);
   }
 });
 

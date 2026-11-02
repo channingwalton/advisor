@@ -25,12 +25,18 @@ export function codexConstructorOptions(
 
 /// Map an Advisor agent spec onto Codex thread options.
 ///
-/// Sandbox: "read-only" + "never" approval is the CLI's own bound, kept as a
-/// first layer but not relied on. It restricts modification, not reading (see
-/// DESIGN.md), and MCP tools bypass it entirely (openai/codex#4152). The
-/// enforced boundary is the Seatbelt profile the CLI runs under — see
+/// Sandbox: "read-only" + "never" approval is the CLI's own bound. It restricts
+/// modification, not reading (see DESIGN.md), and MCP tools bypass it entirely
+/// (openai/codex#4152), so Advisor does not rely on it for the paths that it
+/// denies. The enforced boundary is the Seatbelt profile the CLI runs under — see
 /// codexSandbox.ts — which denies the same paths as the Claude backend's
 /// `canUseTool` and confines writes, for the CLI and every process it spawns.
+///
+/// Under that profile, "read-only" also keeps the shell closed: the CLI applies
+/// its own Seatbelt profile to each command, macOS refuses it, and no command
+/// runs (#118). "danger-full-access" makes the shell work, but the profile then
+/// cannot stop a command that sends the `~/.codex` login out or starts the CLI
+/// with every connector on. See DESIGN.md, *Codex shell stays closed*.
 ///
 /// Connectors and `noTools` are handled by `codexClientOptions`; here an empty
 /// `allowedTools` turns web search and network off.

@@ -1219,7 +1219,9 @@ builds the profile from the same `deniedPaths()` list as the Claude backend. A
 wrapper that runs the vendored CLI under `sandbox-exec -f` goes to the SDK as
 `codexPathOverride`. Children inherit the profile, so MCP servers and shell
 commands are covered with no help from the CLI. Writes are denied except to
-the state folders of Codex, the temp roots and `/dev`.
+the state folders of Codex, the temp roots and `/dev`. (Since 2026-11-02, no
+shell command runs under the profile, because the CLI's `read-only` mode
+cannot apply inside it: see *Codex shell stays closed*.)
 
 Reason: the `sandboxMode: "read-only"` of Codex limits writes, not reads. Its
 documentation says that the agent "can inspect files". No CLI or SDK option
@@ -1586,9 +1588,11 @@ through its folder and, for a symlink, by its target, dangling or not; either
 rule alone was bypassable. Verified against the kernel: a hard link cannot give
 a denied file an allowed name, and a case variant (`HOOKS.JSON`) matches on a
 case-insensitive volume. `auth.json` stays writable for the OAuth refresh.
-Codex's own `read-only` mode stays, but Advisor does not rely on it. Rejected:
-an allowlist of the state that the CLI writes. That set is large and changes
-with releases, so an allowlist breaks the backend at the first unexpected write.
+Codex's own `read-only` mode stays, but Advisor does not rely on it for these
+writes. (Since 2026-11-02, Advisor relies on it to keep the shell closed: see
+*Codex shell stays closed*.) Rejected: an allowlist of the state that the CLI
+writes. That set is large and changes with releases, so an allowlist breaks the
+backend at the first unexpected write.
 Residuals: a symlink inside a denied folder is not followed; a resumed thread's
 rollout under `sessions/` and the CLI's memories are read back but stay
 writable; and the CLI's own writes to denied folders fail with EPERM. Turns
@@ -2149,7 +2153,72 @@ wrapper, each shell command of the CLI fails with
 `sandbox-exec: sandbox_apply: Operation not permitted`. The CLI applies its
 own Seatbelt profile to the command, and a process in a sandbox cannot apply
 another one. The fault fails closed. But a Codex card cannot read notes
-through the shell, which the user guide says it can.
+through the shell, which the user guide says it can. (Decided 2026-11-02:
+the shell stays closed, and the guide says so. See *Codex shell stays
+closed*.)
+
+## Codex shell stays closed (2026-11-02)
+
+Decision: each Codex session keeps `sandboxMode: "read-only"`, so no shell
+command of a Codex card runs under Advisor's Seatbelt profile (issue #118). The
+user guide now says that Codex cards cannot run shell commands, and so cannot
+read local notes. `codex.sdk.test.ts` (`#codex-shell`) asserts that a command
+fails with `sandbox_apply: Operation not permitted` and prints nothing it read.
+
+The fault: in `read-only` mode the CLI runs each shell command under
+`sandbox-exec` with its own profile, and under Advisor's profile
+`sandbox_apply` fails (exit 71). Measured with `sandbox-exec` alone: a nested
+profile applies under a bare `(allow default)`, but one deny rule of any kind
+in the outer profile refuses it. The allow rules tried (`system-mac-syscall`,
+`sandbox-check`) do not help. The `sandbox_mode` setting of CLI 0.166.0 has
+only three values. The CLI has an "external sandbox" policy inside, but no
+setting selects it. `workspace-write` was not tried.
+
+Rejected: `danger-full-access` for card lanes, which the issue suggested. It
+was built and tested on 2026-11-02. It made the shell work: against the real
+CLI, on a code-mode model and on the classic model, a card lane read a note
+through `exec_command`, and `cat ~/.ssh/id_test` failed in Advisor's profile.
+A real card on a ChatGPT login did the same. But the shell then runs under the
+same profile as the CLI, which needs the network and its login, so the profile
+cannot confine it. A code review found three paths, and a probe under
+Advisor's profile confirmed each precondition:
+
+- **The login leaves.** `~/.codex/auth.json` is readable, because the CLI
+  reads it, and a shell command reaches the network (`curl` reached
+  `https://example.com`). So a prompt injection could send the ChatGPT token
+  out. On Claude, `~/.claude` is denied, so this has no Claude equivalent.
+- **The connector toggle fails.** The vendored CLI runs from the shell, and
+  `codex mcp list` there lists the user's servers. So a command could start
+  `codex exec` with none of the `enabled = false` overrides, or read the
+  server commands and tokens in `~/.codex/config.toml`.
+- **Codex state is written.** A command can write where the profile allows,
+  for example `~/.codex/shell_snapshots`. The review says that the user's own
+  Codex, outside the sandbox, reads such files back. That read was not
+  verified.
+
+Other facts found on the way, for a later design:
+
+- The CLI's default model depends on the mode: `gpt-6.1-sol` in `read-only`
+  and `gpt-6-astra` in `danger-full-access`. A model from Preferences or from
+  `~/.codex/config.toml` wins in both.
+- In `danger-full-access` the CLI trusts the working directory and loads
+  `<cwd>/.codex/config.toml` as a project layer, which `codex mcp list` does
+  not load. A session there gets MCP servers that no listing disables. The
+  override `projects.<cwd>.trust_level = "untrusted"` does not help: the SDK
+  writes the key as a bare dotted path, so it has no effect for a folder with
+  a `.` in its name, quoted or not.
+
+Follow-ups:
+
+- #119: turn the shell off on purpose for card lanes (`features.shell_tool`
+  and `features.unified_exec` off, as for the classifier). Today the shell is
+  closed only because the nested profile fails.
+- #120: an Advisor MCP server with read-only file tools (read, grep, glob)
+  that applies `deniedPaths()` and `toolDecision`, with the shell still
+  closed. Its alternative: shell commands under the CLI's own sandbox, with
+  the outer wrapper changed. The 0.166.0 binary names a
+  `permissions.filesystem.deny_read` setting among its managed requirements,
+  but whether a user config can set it was not checked.
 
 ## Revisit as it grows
 

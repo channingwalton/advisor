@@ -52,9 +52,9 @@ export function sandboxWritableRoots(home: string, tmps: string[] = DEFAULT_TMPS
 /// `AGENTS.md`, `instructions.md`, `agents/`, `skills/`, `rules/`, `prompts/`
 /// and `plugins/` are instructions and commands every later session loads.
 /// Codex's own read-only mode is the only other thing in the way, and it is not
-/// relied on. `auth.json` stays writable (the OAuth token refresh rewrites it),
-/// as does the CLI's working state (sessions, sqlite databases, memories, logs,
-/// locks, temp files) — the set the CLI writes is large and changes with
+/// relied on for these writes. `auth.json` stays writable (the OAuth token
+/// refresh rewrites it), as does the CLI's working state (sessions, sqlite
+/// databases, memories, logs, locks, temp files) — the set the CLI writes is large and changes with
 /// releases, so it is the inputs that are listed, not the outputs. Two of those
 /// outputs are read back (a resumed thread's rollout, the memories): known
 /// residuals, recorded in DESIGN.md. A denylist, so a new input class in a Codex

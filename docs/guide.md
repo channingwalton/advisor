@@ -291,12 +291,17 @@ On **Codex**, the Codex CLI runs under a macOS Seatbelt profile, built from the
 same list of credential paths. Codex, and each process that it starts, cannot
 read those paths, and can write only to Codex's own state and temporary
 folders. Even there, it cannot change Codex's configuration, hooks or
-instructions. This is coarser than the Claude policy: read-only shell commands
-are allowed, and Codex can read its own `~/.codex` login. Codex cannot allow
-connector reads and refuse actions, so with **Allow connector actions** off it
-gets no connectors (no MCP servers or plugins from `~/.codex/config.toml`, and
-no ChatGPT apps), and with it on, it gets all of them. See
-[DESIGN.md](../DESIGN.md).
+instructions. This is coarser than the Claude policy: Codex can read its own
+`~/.codex` login, and it cannot allow connector reads and refuse actions. So
+with **Allow connector actions** off it gets no connectors (no MCP servers or
+plugins from `~/.codex/config.toml`, and no ChatGPT apps), and with it on, it
+gets all of them.
+
+Codex cards cannot run shell commands. Codex can try one, but the Codex CLI
+cannot start its own sandbox inside the profile, so the command fails. So,
+unlike a Claude card, a Codex card cannot read your local notes. Only a
+connector can reach them, and Codex gets connectors only with **Allow
+connector actions** on. See [DESIGN.md](../DESIGN.md).
 
 ## Logs
 

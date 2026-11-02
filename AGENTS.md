@@ -114,7 +114,8 @@ rework because of this.
     `canUseTool`. MCP tools fail closed.
   - Codex has no per-call hook, so its boundary is a Seatbelt profile
     (`sidecar/src/codexSandbox.ts`) built from the same `deniedPaths()` list.
-    Its own `sandboxMode: "read-only"` stays, but nothing relies on it.
+    Keep its own `sandboxMode: "read-only"`: it cannot apply inside the
+    profile, so each Codex shell command fails closed (#118).
 - User preferences are in `~/Library/Application Support/Advisor/config.json`,
   mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts`. Change
   both together. Keys commented "App-side only" in Preferences.swift (such as
