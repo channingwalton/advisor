@@ -143,6 +143,8 @@ Important properties of the input:
 - A line beginning "[note from the user]" is an editorial note the user typed by hand, not
   speech. Trust it as authoritative context, use it to disambiguate the surrounding lines,
   and trigger research on it when it warrants looking something up.
+- A message can start with an <earlier> block: the conversation before the new lines, which
+  you did not see. Use it only to understand the new lines. Never trigger on it.
 
 Your mission: behave like a sharp assistant sitting in the meeting who looks things up
 BEFORE being asked. ${SENSITIVITY[cfg.triggerSensitivity] ?? SENSITIVITY.balanced}
@@ -228,14 +230,29 @@ export async function warmClassifier(): Promise<void> {
 /// judged (issue #43). The caller must only commit the cursor on `ok:true`.
 export type ClassifyResult = { ok: true; triggers: Trigger[] } | { ok: false };
 
-export async function classify(window: string, covered: string[]): Promise<ClassifyResult> {
+/// One classify pass on the classifier session. `earlier` is the end of the
+/// conversation before `window` (see `classifyOn`).
+export async function classify(window: string, covered: string[], earlier = ""): Promise<ClassifyResult> {
+  return classifyOn(ensureSession(), window, covered, earlier);
+}
+
+/// One classify pass on `session`. `earlier` goes to the session as the recap,
+/// so only a pass that starts a new session or thread sends it (#116). A
+/// session that keeps its conversation already holds those lines.
+export async function classifyOn(
+  session: Agent,
+  window: string,
+  covered: string[],
+  earlier: string
+): Promise<ClassifyResult> {
   const prompt = `Already covered: ${covered.join(", ") || "(none)"}
 
 Transcript window (newest last):
 ${window}
 
 JSON:`;
-  const { text, error } = await ensureSession().run(prompt, undefined, 30_000);
+  const recap = earlier ? `<earlier>\n${earlier}\n</earlier>\n\n` : undefined;
+  const { text, error } = await session.run(prompt, undefined, 30_000, recap);
   return parseClassifierResponse(text, error);
 }
 

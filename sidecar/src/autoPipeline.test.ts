@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AutoPipeline } from "./autoPipeline.js";
+import { AutoPipeline, CLASSIFIER_RECAP_CHARS } from "./autoPipeline.js";
 import { Transcript, type Lane } from "./lanes.js";
 import type { ClassifyResult, Trigger } from "./trigger.js";
 
@@ -10,6 +10,8 @@ function harness(lanes = 1, debounceMs = 0) {
   const transcript = new Transcript();
   const windows: string[] = [];
   const coveredLists: string[][] = [];
+  /// The conversation before each window, as offered for a recap.
+  const earliers: string[] = [];
   const pending: ((r: ClassifyResult) => void)[] = [];
   const researched: string[] = [];
   /// Each card's "first text sent" hook, in dispatch order.
@@ -23,9 +25,10 @@ function harness(lanes = 1, debounceMs = 0) {
   const pipeline = new AutoPipeline({
     transcript,
     debounceMs,
-    classify: (window, covered) => {
+    classify: (window, covered, earlier) => {
       windows.push(window);
       coveredLists.push(covered);
+      earliers.push(earlier);
       return new Promise((resolve) => pending.push(resolve));
     },
     freeLane: () => pool.find((l) => !l.busy),
@@ -44,7 +47,7 @@ function harness(lanes = 1, debounceMs = 0) {
   const answer = (...subjects: string[]) =>
     pending.shift()!({ ok: true, triggers: subjects.map((subject): Trigger => ({ kind: "question", subject, query: subject })) });
   const tick = (ms: number) => { clock += ms; };
-  return { pipeline, say, answer, windows, coveredLists, researched, cardTexts, pool, pending, transcript, logs, tick };
+  return { pipeline, say, answer, windows, coveredLists, earliers, researched, cardTexts, pool, pending, transcript, logs, tick };
 }
 
 /// Let timers (debounce 0) and promise continuations run.
@@ -276,6 +279,69 @@ test("after three failed classifies the window is given up on (issue #43)", asyn
   }
   await settle();
   assert.doesNotMatch(h.windows[3], /Cedar/, "re-fed twice, then skipped");
+});
+
+test("#classifier-recap each pass offers the conversation before its window, for a classifier that starts again", async () => {
+  const h = harness();
+  h.pipeline.start();
+  h.say("Our migration is named Cedar");
+  await settle();
+  assert.equal(h.earliers[0], "", "nothing came before the first window");
+  h.answer();
+  await settle();
+  h.say("Who owns it?");
+  await settle();
+  assert.doesNotMatch(h.windows[1], /Cedar/, "a judged line is not judged again");
+  assert.equal(h.earliers[1], "them: Our migration is named Cedar");
+});
+
+test("#classifier-recap a failed window is re-fed as new lines, not as the earlier conversation", async () => {
+  const h = harness();
+  h.pipeline.start();
+  h.say("Our migration is named Cedar");
+  await settle();
+  h.answer();
+  await settle();
+  h.say("Who owns it?");
+  await settle();
+  h.pending.shift()!({ ok: false });
+  await settle();
+  h.say("And when does it ship?");
+  await settle();
+  assert.match(h.windows[2], /Who owns it\? And when does it ship\?/);
+  assert.equal(h.earliers[2], "them: Our migration is named Cedar");
+});
+
+test("#classifier-recap the earlier conversation is bounded to its most recent lines", async () => {
+  const h = harness();
+  h.pipeline.start();
+  const line = "x".repeat(990);
+  for (let i = 0; i < 20; i++) h.transcript.push({ id: `old${i}`, source: i % 2 ? "me" : "them", text: `line${i} ${line}`, ts: i });
+  h.say("First window");
+  await settle();
+  h.answer();
+  await settle();
+  h.say("Second window");
+  await settle();
+  const earlier = h.earliers[1];
+  assert.match(earlier, /First window/, "the newest line is kept");
+  assert.doesNotMatch(earlier, /line0 /, "the oldest line is left out");
+  // Speech within the bound, plus a speaker label per line.
+  assert.ok(earlier.length <= CLASSIFIER_RECAP_CHARS + 20 * "them: \n".length, `${earlier.length} chars`);
+});
+
+test("#classifier-recap a single line longer than the bound keeps its end", async () => {
+  const h = harness();
+  h.pipeline.start();
+  h.transcript.push({ id: "n1", source: "note", text: `start ${"x".repeat(CLASSIFIER_RECAP_CHARS)} end`, ts: 0 });
+  h.pipeline.heard();
+  await settle();
+  h.answer();
+  await settle();
+  h.say("Next");
+  await settle();
+  assert.match(h.earliers[1], /^\[note from the user\] …x+ end$/);
+  assert.equal(h.earliers[1].length, "[note from the user] …".length + CLASSIFIER_RECAP_CHARS);
 });
 
 test("#trigger-subject-any-script a subject in any script becomes a card, once", async () => {

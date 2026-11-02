@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { documentResearchTask, parseClassifierResponse, researchKind, researchTask } from "./trigger.js";
+import type { Agent, TaskResult } from "./agent.js";
+import { classifyOn, documentResearchTask, parseClassifierResponse, researchKind, researchTask } from "./trigger.js";
 
 const q = (subject: string) => ({ kind: "question", subject, query: `q:${subject}` });
 
@@ -77,4 +78,24 @@ test("researchKind maps the app's action names and rejects anything else", () =>
   assert.equal(researchKind("context"), "context");
   assert.equal(researchKind("factcheck"), "factcheck");
   assert.equal(researchKind("query"), undefined);
+});
+
+// The session decides whether a pass starts a new conversation, so the pass
+// hands it the earlier conversation as the recap and keeps it out of the task.
+test("#classifier-recap a classify pass hands the earlier conversation to the session as its recap", async () => {
+  const runs: { task: string; recap?: string }[] = [];
+  const session: Agent = {
+    run: async (task, _progress, _timeoutMs, recap): Promise<TaskResult> => {
+      runs.push({ task, recap });
+      return { text: '{"triggers":[]}' };
+    },
+    reset: () => {},
+    interrupt: async () => {},
+  };
+  await classifyOn(session, "them: Who owns it?", [], "them: Our migration is named Cedar");
+  await classifyOn(session, "them: Thanks", [], "");
+  assert.equal(runs[0].recap, "<earlier>\nthem: Our migration is named Cedar\n</earlier>\n\n");
+  assert.doesNotMatch(runs[0].task, /Cedar/);
+  assert.match(runs[0].task, /Who owns it\?/);
+  assert.equal(runs[1].recap, undefined, "nothing earlier, no recap");
 });

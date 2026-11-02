@@ -233,7 +233,12 @@ export type QueryFn = typeof query;
 /// A long-lived agent backend. Tasks are answered in FIFO order; the session
 /// retains context across tasks until reset().
 export interface Agent {
-  run(task: string, progress?: RunProgress, timeoutMs?: number): Promise<TaskResult>;
+  /// `recap` is what the session's conversation held before this task. The
+  /// session puts it before the task only when the task starts a new
+  /// conversation: a new, reset or dead Claude session, a Claude session
+  /// recycled after a wedged turn (#46), or a new Codex thread. A session that
+  /// keeps its conversation leaves it out (#116).
+  run(task: string, progress?: RunProgress, timeoutMs?: number, recap?: string): Promise<TaskResult>;
   /** Drop the session (and its accumulated context); next run() starts fresh. */
   reset(): void;
   /** Interrupt the currently-running turn (best effort). */
@@ -538,7 +543,7 @@ export class AgentSession implements Agent {
     }
   }
 
-  async run(task: string, progress?: RunProgress, timeoutMs = 180_000): Promise<TaskResult> {
+  async run(task: string, progress?: RunProgress, timeoutMs = 180_000, recap?: string): Promise<TaskResult> {
     // A previous turn that timed out (or was interrupted) but never emitted a
     // clean `result` leaves its settled task at the head of the queue. Reusing
     // the session would let that stale head suppress this task's streaming and
@@ -575,9 +580,12 @@ export class AgentSession implements Agent {
       p.resolve = res;
     });
     this.pending.push(p);
+    // The first task after a spawn starts the conversation, so it carries the
+    // recap. A recycle or a dead CLI spawns again (ensure), so it counts too.
+    if (cold && recap) log(`${this.opts.name}: new conversation, recap ${recap.length} chars`);
     this.input!.push({
       type: "user",
-      message: { role: "user", content: task },
+      message: { role: "user", content: cold && recap ? recap + task : task },
       parent_tool_use_id: null,
       session_id: "",
     } as SDKUserMessage);

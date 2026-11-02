@@ -1,6 +1,6 @@
 # Advisor — Requirements
 
-**Status:** Living document — last revised 2026-11-01 (first draft 2026-06-11).
+**Status:** Living document — last revised 2026-11-02 (first draft 2026-06-11).
 Decision history is in [DESIGN.md](DESIGN.md).
 **Owner:** Channing
 
@@ -32,6 +32,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F6a. Trigger sensitivity (conservative / balanced / eager) and a toggle per kind (answer / context / fact-check), set in Preferences, tune how readily cards appear.
 - F7. Maintain rolling conversation context so retrieval is topic-aware, not utterance-by-utterance.
   - A research or query lane whose session lost the conversation, after a failed card or a cancelled Codex card, is sent the whole conversation again, so its next card keeps the earlier context (issue #112). `#context-lane-recycle`
+  - When the trigger classifier's session or thread starts again, its next classification is sent the recent conversation as context, so a new line keeps its referent; a session that kept the conversation is not sent it again (issue #116). `#classifier-recap`
 - F7a. Session context: an optional name (titling the session in the browser) and session prompt (who's present, the topic, what to focus on), set before Listen or edited live; each edit steers the agents from the next card. Both clear when the session ends.
   - A question asked after a session ends, before the next Listen, carries neither that session's prompt nor its conversation (issue #113). `#session-prompt-end`
 - F7b. Saved contexts (issue #10): a library of named contexts, managed in Preferences, that can be loaded into a session's context, or saved from it, instead of retyping common setups.

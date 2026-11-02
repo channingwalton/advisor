@@ -80,7 +80,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **main.ts.** Reads NDJSON from stdin and dispatches it; holds the live session prompt (seeded by `session_start`, replaced by `session_context`, prefixed to each task), the lane pools and the transient-lane runners. Sends `hello` on startup. Stray rejections and exceptions are logged, not fatal (issue #45).
 
-**AutoPipeline** (`autoPipeline.ts`). Each utterance or note restarts a 1.5 s quiet debounce; then the classifier gets only the lines past its cursor, consecutive same-source lines merged. The cursor commits only on a successful classify (a failed window is re-fed, up to 3 times). New subjects are deduped for 10 minutes (normalised in any script), queued (≤20) and dispatched to free research lanes, anchored to the last line of the window. Turning Auto cards off drops the pending classify, queued research and any in-flight classify result.
+**AutoPipeline** (`autoPipeline.ts`). Each utterance or note restarts a 1.5 s quiet debounce; then the classifier gets only the lines past its cursor, consecutive same-source lines merged. The cursor commits only on a successful classify (a failed window is re-fed, up to 3 times). A pass that starts a new classifier session or thread also carries the last 8,000 characters before its window, as context only (#116). New subjects are deduped for 10 minutes (normalised in any script), queued (≤20) and dispatched to free research lanes, anchored to the last line of the window. Turning Auto cards off drops the pending classify, queued research and any in-flight classify result.
 
 **Classifier** (`trigger.ts`). A persistent session on the shared provider and model, offered no tools (`noTools`; on Codex, no web search or network) and none of the user's settings; returns triggers of kind `question | context | factcheck` (only the kinds enabled in Preferences, at most 2 per pass) with a subject and query, steered by the sensitivity preference (conservative / balanced / eager). Warmed at session start; 30 s timeout. A `question` becomes an `answer` card.
 
@@ -154,7 +154,7 @@ The placeholder-then-stream pattern keeps the card visible early. Until 2026-10-
 
 - **Sidecar crash** → in-flight cards fail and pending document requests fail; supervised restart with backoff and session replay (above); the status line shows the crash and each attempt; once the budget is spent it asks the user to stop and start listening again. Inside the sidecar, a stray rejection or exception is logged rather than killing the process.
 - **Apple STT result-stream failure** (for example a Speech helper disconnect, `NSCocoaErrorDomain` 4099) → the status line shows recovery, audio sources drain before both speech engines restart, then sources resume; simultaneous mic/system failures coalesce, and a failure during that restart stops listening with the error.
-- **Agent failure or timeout** → the card flips to `failed` with the reason, never silently; a failed pooled lane is reset and replays the conversation on its next card; a failed classify is re-fed (bounded).
+- **Agent failure or timeout** → the card flips to `failed` with the reason, never silently; a failed pooled lane is reset and replays the conversation on its next card; a failed classify is re-fed (bounded), and a classifier that starts again gets the recent conversation as context.
 - **Authentication** → no blocking banner. An API key is checked when entered in Preferences (`AuthValidator`), and re-read at each session start; a key that later fails surfaces as a failed card.
 
 ## Trade-offs made
@@ -1026,7 +1026,9 @@ Limits: after 3 consecutive failures (`MAX_CLASSIFY_RETRIES`), the pipeline
 moves on, so a failed classifier cannot stall the pipeline. A retry needs a new
 utterance, so in silence a failed window waits. A re-fed window can show lines
 to the session twice; the classifier prompt already treats near-duplicates as
-one.
+one. (A failed classify can also start a new classifier session. Since
+2026-11-02 that pass carries the recent conversation: see *A restarted
+classifier gets the recent conversation*.)
 
 ## Pooled lanes recycle on failure, never wedge (2026-07-03, issue #46)
 
@@ -2413,6 +2415,72 @@ pane loads (the note at its new path is sent, a research line is found in it,
 and a summary saved to it replaces the old one and keeps the transcript), on a
 deleted note (`send` is not called, and no note is created), and on a readable
 note (the outcome of `send` comes back). Not verified in the running app.
+
+## A restarted classifier gets the recent conversation (2026-11-02)
+
+Decision: a classify pass that starts a new classifier session or thread
+carries the end of the conversation before its window, in an `<earlier>`
+block (issue #116). The bound is 8,000 characters of speech
+(`CLASSIFIER_RECAP_CHARS`), about the last ten minutes. The classifier prompt
+says that the block is context only. The cursor does not move, so the
+classifier does not judge those lines again. `Agent.run()` takes the block as
+an optional `recap`, and the session decides whether to send it: Claude on
+the first run after a spawn, Codex on the first turn of a thread, where it
+already puts the system prompt. A session that keeps its conversation leaves
+the recap out.
+
+Reason: a failed classify can leave the classifier in a new session. A Codex
+timeout or turn error drops the thread, and the next run recycles a Claude
+session whose timed-out turn never ended (#46). The cursor stays at the
+failed window (#43), so the next pass got only that window and the lines after
+it, and a line such as "who owns it?" lost its referent. Only the session
+knows whether a pass starts a new conversation. After a Claude timeout the
+interrupted turn usually ends, and the session keeps its conversation. The
+recycle happens inside `run()`, after the pipeline builds the window. A Claude
+CLI that dies between passes also starts again with no failed classify, and
+the recap covers that case too.
+
+Why not the card-lane rule (forget the cursor, so the next pass replays the
+whole conversation; see *Recycled lanes replay the conversation*):
+
+- The classifier judges each line that it gets as new. A replay would judge
+  the whole meeting again. Old lines would compete with the new ones for the
+  2 triggers of a pass, and a subject older than the 10-minute covered list
+  could come back as a duplicate card, anchored to the newest line.
+- The cost. That entry calls a 10–15k-token replay small beside the web
+  fetches of a research turn. The classifier has no tools, answers in about
+  1.5 s, times out at 30 s, and gates every automatic card.
+- Retries. Each failed Codex classify drops the thread, so each retry would
+  carry the whole meeting, and the give-up after 3 failures (#43) would no
+  longer bound the prompt. A classifier that times out on a long prompt would
+  time out again on each retry.
+- The signal. The cursor must be forgotten before the pipeline builds the
+  window, and for Claude only `run()` knows then.
+
+The bound loses referents older than about ten minutes. The research lane
+that takes the trigger has the whole conversation through its own cursor, so
+it can still resolve a vague query.
+
+Rejected:
+
+- Forget the cursor after a failed classify. An answer with no JSON keeps the
+  session on both backends, and a Claude timeout usually does too. The whole
+  conversation would then go to a session that holds it.
+- Reset the classifier after each failed classify, as `runCard` does for a
+  card lane, so that a failure always means a new session. Each Claude timeout
+  whose turn ended would then pay a cold spawn (5–10 s) before the next card.
+- A method on `Agent` that reports a fresh session (rejected for #112 too). An
+  optional argument of `run()` changes no fake.
+
+Verified: tests drive `AgentSession` over a fake SDK stream and
+`CodexAgentSession` over the SDK's `Thread` with a controlled event stream,
+each through `AutoPipeline` and `classifyOn` (`#classifier-recap`). A probe on
+the real bundled Claude CLI, against a local fake Messages API: after a
+classify timed out and was interrupted, the session stayed, the CLI's next
+request still held the first window, and no recap went out. After a reset,
+the first request carried the `<earlier>` block. Not verified: a wedged
+Claude turn on the real CLI (its interrupt worked), and the Codex paths on the
+real Codex CLI.
 
 ## Revisit as it grows
 

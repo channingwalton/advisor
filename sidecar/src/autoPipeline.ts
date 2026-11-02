@@ -1,5 +1,5 @@
 import { boundedPush } from "./cards.js";
-import { Lane, Transcript } from "./lanes.js";
+import { Lane, Transcript, type TranscriptEntry } from "./lanes.js";
 import { transcriptLine, TranscriptSource } from "./prompts.js";
 import { log } from "./protocol.js";
 import { ClassifyResult, Trigger } from "./trigger.js";
@@ -15,12 +15,19 @@ const COVERED_TTL_MS = 10 * 60 * 1000;
 const MAX_CLASSIFY_RETRIES = 3;
 /// Cap the backlog so a long, noisy session can't grow it without bound.
 const MAX_RESEARCH_QUEUE = 20;
+/// How much of the conversation before the window a classifier session that
+/// starts again gets, in characters of speech: about the last ten minutes. A
+/// bound, not the whole meeting, because each failed Codex classify drops its
+/// thread, and the pass gates every automatic card (#116).
+export const CLASSIFIER_RECAP_CHARS = 8_000;
 
 /// What the pipeline needs from the sidecar. Injected so the pipeline is
 /// testable without the SDK or the module-global lanes.
 export interface AutoPipelineDeps {
   transcript: Transcript;
-  classify(window: string, covered: string[]): Promise<ClassifyResult>;
+  /// `earlier` is the end of the conversation before `window`. The classifier
+  /// sends it only on a pass that starts a new session or thread (#116).
+  classify(window: string, covered: string[], earlier: string): Promise<ClassifyResult>;
   /// A free research lane, or undefined when every lane is busy (a lane
   /// finishing drains the queue again).
   freeLane(): Lane | undefined;
@@ -154,8 +161,9 @@ export class AutoPipeline {
 
   /// New-since-last-classify utterances, with consecutive same-source lines
   /// merged so the classifier sees sentences, not STT fragments. The classifier
-  /// session is persistent, so it has already seen everything earlier — feeding
-  /// only the delta means each line is judged once on a successful classify.
+  /// session is persistent, so it has already seen everything earlier (unless it
+  /// started again: see classifierRecap) — feeding only the delta means each
+  /// line is judged once on a successful classify.
   ///
   /// This does NOT advance the classifier cursor — it returns `end` (the window's
   /// exclusive upper bound) and lets runClassify commit it only after a successful
@@ -166,23 +174,35 @@ export class AutoPipeline {
   private classifierDelta(): { text: string; anchorId?: string; end: number } {
     const { fresh, end } = this.deps.transcript.unseen("classifier");
     if (fresh.length === 0) return { text: "", end };
-    const blocks: { source: TranscriptSource; text: string }[] = [];
-    for (const e of fresh) {
-      const last = blocks[blocks.length - 1];
-      if (last && last.source === e.source) {
-        last.text += " " + e.text;
-      } else {
-        blocks.push({ source: e.source, text: e.text });
-      }
-    }
     // Anchor every trigger from this pass to the last line of the window — the
     // sentence that completed it. Removes research-latency drift; residual error
     // is at most the debounce window.
-    return {
-      text: blocks.map((b) => transcriptLine(b.source, b.text)).join("\n"),
-      anchorId: fresh[fresh.length - 1].id,
-      end,
-    };
+    return { text: mergedLines(fresh), anchorId: fresh[fresh.length - 1].id, end };
+  }
+
+  /// The conversation before the classifier cursor, cut to its last
+  /// CLASSIFIER_RECAP_CHARS characters of speech, merged as the window is.
+  /// The classifier session holds these lines until it starts again: a failed
+  /// Codex classify drops its thread, and the next run recycles a wedged
+  /// Claude turn (#46). The session sends them only on the pass that starts
+  /// again, so a line such as "who owns it?" keeps its referent (#116). They
+  /// are context, not new lines: the cursor stays, and the classifier does not
+  /// judge them again.
+  private classifierRecap(): string {
+    const { entries } = this.deps.transcript;
+    const tail: TranscriptEntry[] = [];
+    let size = 0;
+    for (let i = this.deps.transcript.cursor("classifier") - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (size + e.text.length > CLASSIFIER_RECAP_CHARS) {
+        // A single line longer than the bound keeps its end.
+        if (tail.length === 0) tail.push({ ...e, text: "…" + e.text.slice(-CLASSIFIER_RECAP_CHARS) });
+        break;
+      }
+      size += e.text.length;
+      tail.push(e);
+    }
+    return mergedLines(tail.reverse());
   }
 
   private coveredSubjects(): string[] {
@@ -214,7 +234,7 @@ export class AutoPipeline {
       this.log(`classify start (window ${window.length} chars)`);
       const ct0 = this.now();
       const epoch = this.epoch;
-      const result = await this.deps.classify(window, this.coveredSubjects());
+      const result = await this.deps.classify(window, this.coveredSubjects(), this.classifierRecap());
       // Auto cards was toggled, or the session ended or restarted, meanwhile:
       // drop the result and leave the cursor to the new conditions.
       if (epoch !== this.epoch) return;
@@ -258,6 +278,21 @@ export class AutoPipeline {
       }
     }
   }
+}
+
+/// Transcript lines with consecutive same-source lines merged, so the
+/// classifier sees sentences, not STT fragments.
+function mergedLines(entries: readonly TranscriptEntry[]): string {
+  const blocks: { source: TranscriptSource; text: string }[] = [];
+  for (const e of entries) {
+    const last = blocks[blocks.length - 1];
+    if (last && last.source === e.source) {
+      last.text += " " + e.text;
+    } else {
+      blocks.push({ source: e.source, text: e.text });
+    }
+  }
+  return blocks.map((b) => transcriptLine(b.source, b.text)).join("\n");
 }
 
 /// The dedup key for a subject, in any script: letters, marks and digits of

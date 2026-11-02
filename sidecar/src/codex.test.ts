@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,11 +12,13 @@ import {
   codexConstructorOptions,
   codexThreadOptions,
 } from "./codex.js";
-import { AsyncQueue } from "./agent.js";
+import { AsyncQueue, type Agent } from "./agent.js";
+import { AutoPipeline } from "./autoPipeline.js";
 import { handleCancel } from "./cancel.js";
 import { guardedRun } from "./guardedRun.js";
 import { runCard, Transcript, type Lane } from "./lanes.js";
 import type { Outbound } from "./protocol.js";
+import { classifyOn } from "./trigger.js";
 
 const base = { name: "x", systemPrompt: "sp", allowedTools: [] as string[] };
 
@@ -187,6 +189,112 @@ test("#context-lane-recycle the card after a cancelled Codex card is sent the wh
   assert.match(calls[1].input, /Who owns it\?/);
   complete(calls[1], "Priya", "next");
   await next;
+});
+
+test("#classifier-recap a recap goes into the first turn of each Codex thread only", async () => {
+  const { calls, factory } = controlledThreads();
+  const session = new CodexAgentSession(base, factory);
+
+  const first = session.run("task1", undefined, 60_000, "RECAP1 ");
+  await setImmediate();
+  assert.equal(calls[0].input, "sp\n\nRECAP1 task1");
+  complete(calls[0], "a1");
+  await first;
+
+  const second = session.run("task2", undefined, 60_000, "RECAP2 ");
+  await setImmediate();
+  assert.equal(calls[1].input, "task2", "the thread holds the conversation");
+  emit(calls[1], { type: "turn.failed", error: { message: "turn failed" } });
+  calls[1].events.end();
+  assert.equal((await second).error, "turn failed");
+
+  const third = session.run("task3", undefined, 60_000, "RECAP3 ");
+  await setImmediate();
+  assert.equal(calls[2].threadId, null, "a failed turn drops the thread");
+  assert.equal(calls[2].input, "sp\n\nRECAP3 task3");
+  complete(calls[2], "a3", "next");
+  await third;
+});
+
+/// The automatic-card classifier over `session`: `say` hears a line, and
+/// `pass` lets the debounce fire and the classify reach the session. Needs the
+/// test's setTimeout mocked.
+function classifierOver(session: Agent, t: TestContext) {
+  const transcript = new Transcript();
+  const pipeline = new AutoPipeline({
+    transcript,
+    debounceMs: 0,
+    classify: (window, covered, earlier) => classifyOn(session, window, covered, earlier),
+    freeLane: () => undefined,
+    research: async () => {},
+    log: () => {},
+  });
+  pipeline.start();
+  let n = 0;
+  return {
+    say(text: string) {
+      transcript.push({ id: `u${++n}`, source: "them", text, ts: n });
+      pipeline.heard();
+    },
+    async pass() {
+      t.mock.timers.tick(0);
+      await setImmediate();
+    },
+  };
+}
+
+const noTriggers = '{"triggers":[]}';
+
+test("#classifier-recap after a Codex classify times out, the next pass carries the earlier conversation", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, factory } = controlledThreads();
+  const c = classifierOver(new CodexAgentSession(base, factory), t);
+
+  c.say("Our migration is named Cedar");
+  await c.pass();
+  assert.match(calls[0].input, /Cedar/);
+  complete(calls[0], noTriggers);
+  await setImmediate();
+
+  c.say("Who owns it?");
+  await c.pass();
+  assert.equal(calls[1].threadId, "conversation");
+  assert.doesNotMatch(calls[1].input, /Cedar/, "the thread holds it");
+  t.mock.timers.tick(30_000); // the classify times out, which drops the thread
+  await setImmediate();
+  calls[1].events.end(); // the aborted CLI's stream closes
+
+  c.say("And when does it ship?");
+  await c.pass();
+  assert.equal(calls[2].threadId, null, "the next pass starts a new thread");
+  assert.match(calls[2].input, /^sp\n\n<earlier>\nthem: Our migration is named Cedar\n<\/earlier>\n\nAlready covered/);
+  assert.match(calls[2].input, /them: Who owns it\? And when does it ship\?/, "the failed window is re-fed");
+  complete(calls[2], noTriggers, "next");
+  await setImmediate();
+});
+
+test("#classifier-recap a Codex classify with no JSON keeps its thread, and the next pass sends no recap", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, factory } = controlledThreads();
+  const c = classifierOver(new CodexAgentSession(base, factory), t);
+
+  c.say("Our migration is named Cedar");
+  await c.pass();
+  complete(calls[0], noTriggers);
+  await setImmediate();
+
+  c.say("Who owns it?");
+  await c.pass();
+  complete(calls[1], "Sorry, I can't tell."); // a failed classify, on a turn that completes
+  await setImmediate();
+
+  c.say("And when does it ship?");
+  await c.pass();
+  assert.equal(calls[2].threadId, "conversation", "the thread is kept");
+  assert.doesNotMatch(calls[2].input, /Cedar/, "the thread holds the earlier conversation");
+  assert.match(calls[2].input, /them: Who owns it\? And when does it ship\?/);
+  complete(calls[2], noTriggers);
+  await setImmediate();
 });
 
 test("timed-out warm-up retires its thread and releases queued requests", async (t) => {

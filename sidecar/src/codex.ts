@@ -134,6 +134,7 @@ interface PendingTask {
   task: string;
   progress?: RunProgress;
   timeoutMs: number;
+  recap?: string;
   resolve: (result: TaskResult) => void;
 }
 
@@ -144,6 +145,7 @@ interface PendingTask {
  *
  * Codex has no system-prompt parameter, so the configured system prompt is
  * prepended to the first turn; later turns inherit it from thread context.
+ * A task's recap goes into the first turn too, after the system prompt (#116).
  */
 export class CodexAgentSession implements Agent {
   /// The client every thread of this session starts from, set up once (listing
@@ -204,9 +206,9 @@ export class CodexAgentSession implements Agent {
     return (await this.client).startThread(codexThreadOptions(this.opts));
   }
 
-  run(task: string, progress?: RunProgress, timeoutMs = 180_000): Promise<TaskResult> {
+  run(task: string, progress?: RunProgress, timeoutMs = 180_000, recap?: string): Promise<TaskResult> {
     return new Promise((resolve) => {
-      this.pending.push({ task, progress, timeoutMs, resolve });
+      this.pending.push({ task, progress, timeoutMs, recap, resolve });
       this.drain();
     });
   }
@@ -264,7 +266,12 @@ export class CodexAgentSession implements Agent {
         // thread a later task is on.
         if (settled) return;
         this.thread = thread;
-        const input = this.firstTurn ? `${this.opts.systemPrompt}\n\n${task.task}` : task.task;
+        // A new thread has none of the conversation. A timeout or a failed
+        // turn drops the thread, so the next task starts one.
+        if (this.firstTurn && task.recap) log(`${this.opts.name}: new thread, recap ${task.recap.length} chars`);
+        const input = this.firstTurn
+          ? `${this.opts.systemPrompt}\n\n${task.recap ?? ""}${task.task}`
+          : task.task;
         this.firstTurn = false;
         const { events } = await thread.runStreamed(input, { signal: controller.signal });
         for await (const ev of events) {

@@ -1,9 +1,13 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { AgentSession, AsyncQueue, agentCwd, type QueryFn } from "./agent.js";
+import { setImmediate } from "node:timers/promises";
+import { AgentSession, AsyncQueue, agentCwd, type Agent, type QueryFn } from "./agent.js";
+import { AutoPipeline } from "./autoPipeline.js";
+import { Transcript } from "./lanes.js";
+import { classifyOn } from "./trigger.js";
 
 // A controllable fake of the SDK's `query()` stream: an async-iterable of
 // messages the test pushes into `messages`, plus an `interrupt()` spy. Each call
@@ -165,6 +169,123 @@ test("reset() then immediate run() keeps the new task off the old teardown (issu
   const r2 = await r2p;
   assert.equal(r2.text, "answer2"); // not "" with error "agent session ended"
   assert.equal(r2.error, undefined);
+});
+
+/// The next user message the session sent to `spawn`'s CLI.
+async function nextPrompt(spawn: FakeSpawn): Promise<string> {
+  const prompt = (spawn.args as { prompt: AsyncQueue<{ message: { content: string } }> }).prompt;
+  const next = await prompt[Symbol.asyncIterator]().next();
+  return next.value.message.content;
+}
+
+test("#classifier-recap a recap goes before the first task of each new Claude conversation only", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+
+  const r1 = session.run("task1", undefined, 1000, "RECAP1 ");
+  assert.equal(await nextPrompt(spawns[0]), "RECAP1 task1", "a new session starts a conversation");
+  spawns[0].messages.push(success("a1"));
+  await r1;
+
+  const r2 = session.run("task2", undefined, 1000, "RECAP2 ");
+  assert.equal(await nextPrompt(spawns[0]), "task2", "the warm session holds the conversation");
+  // The CLI dies, and the next run spawns a new one with none of the conversation.
+  spawns[0].messages.push(streamFailure(new Error("Claude Code process exited with code 1")));
+  assert.match((await r2).error ?? "", /agent session ended/);
+
+  const r3 = session.run("task3", undefined, 1000, "RECAP3 ");
+  assert.equal(spawns.length, 2);
+  assert.equal(await nextPrompt(spawns[1]), "RECAP3 task3");
+  spawns[1].messages.push(success("a3"));
+  await r3;
+});
+
+/// The automatic-card classifier over `session`: `say` hears a line, and
+/// `pass` lets the debounce fire and the classify reach the session. Needs the
+/// test's setTimeout mocked.
+function classifierOver(session: Agent, t: TestContext) {
+  const transcript = new Transcript();
+  const pipeline = new AutoPipeline({
+    transcript,
+    debounceMs: 0,
+    classify: (window, covered, earlier) => classifyOn(session, window, covered, earlier),
+    freeLane: () => undefined,
+    research: async () => {},
+    log: () => {},
+  });
+  pipeline.start();
+  let n = 0;
+  return {
+    say(text: string) {
+      transcript.push({ id: `u${++n}`, source: "them", text, ts: n });
+      pipeline.heard();
+    },
+    async pass() {
+      t.mock.timers.tick(0);
+      await setImmediate();
+    },
+  };
+}
+
+const noTriggers = success('{"triggers":[]}');
+
+test("#classifier-recap after a wedged Claude classify, the next pass carries the earlier conversation", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { queryFn, spawns } = makeFakeQuery();
+  const c = classifierOver(new AgentSession(opts, queryFn), t);
+
+  c.say("Our migration is named Cedar");
+  await c.pass();
+  assert.match(await nextPrompt(spawns[0]), /Cedar/);
+  spawns[0].messages.push(noTriggers);
+  await setImmediate();
+
+  c.say("Who owns it?");
+  await c.pass();
+  assert.doesNotMatch(await nextPrompt(spawns[0]), /Cedar/, "the warm session holds it");
+  // The classify times out, and its interrupted turn never sends a result.
+  t.mock.timers.tick(30_000);
+  await setImmediate();
+  assert.equal(spawns[0].interrupted, true);
+
+  c.say("And when does it ship?");
+  await c.pass();
+  assert.equal(spawns.length, 2, "the next run recycles the wedged session (#46)");
+  const prompt = await nextPrompt(spawns[1]);
+  assert.match(prompt, /^<earlier>\nthem: Our migration is named Cedar\n<\/earlier>\n\nAlready covered/);
+  assert.match(prompt, /them: Who owns it\? And when does it ship\?/, "the failed window is re-fed");
+  spawns[1].messages.push(noTriggers);
+  await setImmediate();
+});
+
+test("#classifier-recap a Claude classify that times out but ends keeps its session, and the next pass sends no recap", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { queryFn, spawns } = makeFakeQuery();
+  const c = classifierOver(new AgentSession(opts, queryFn), t);
+
+  c.say("Our migration is named Cedar");
+  await c.pass();
+  await nextPrompt(spawns[0]);
+  spawns[0].messages.push(noTriggers);
+  await setImmediate();
+
+  c.say("Who owns it?");
+  await c.pass();
+  await nextPrompt(spawns[0]);
+  t.mock.timers.tick(30_000);
+  await setImmediate();
+  // The interrupt ends the turn, as a real interrupted turn does.
+  spawns[0].messages.push({ type: "result", subtype: "error_during_execution", is_error: true });
+  await setImmediate();
+
+  c.say("And when does it ship?");
+  await c.pass();
+  assert.equal(spawns.length, 1, "the session is kept");
+  const prompt = await nextPrompt(spawns[0]);
+  assert.doesNotMatch(prompt, /Cedar/, "the session holds the earlier conversation");
+  assert.match(prompt, /them: Who owns it\? And when does it ship\?/);
+  spawns[0].messages.push(noTriggers);
+  await setImmediate();
 });
 
 // The CLI subprocess's stderr was dropped, so a spawn-time crash surfaced only
