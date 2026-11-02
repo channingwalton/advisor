@@ -200,7 +200,10 @@ edits are different. A follow-up that cannot be saved stays on screen, so that
 you can copy it. A note for a line that changed stays in the **Note** box, and
 the detail says that it will go at the end of the transcript. Send it again, or
 right-click to choose another line. An edit to a note that moved to another
-folder (in Finder, for example) is saved where the note is now.
+folder (in Finder, for example) is saved where the note is now. Ask, Summarise,
+a follow-up and the right-click research actions also read the note where it
+is now. If the note cannot be read, for example because it was deleted in
+Finder, nothing is sent, and the detail says so.
 
 You can read and collapse the session that is still recording, and change its
 name and tags. Other edits wait until it is fully saved.

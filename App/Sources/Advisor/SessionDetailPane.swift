@@ -11,6 +11,22 @@ private struct AnswerRequest {
     let question: String?
 }
 
+/// How Summarise, Ask, a follow-up or a research card on a saved note started
+/// (`SessionDetailPane.startRequest`; issue #115).
+enum NoteRequest: Equatable {
+    /// Sent to the sidecar, with its request id.
+    case sent(String)
+    /// Not sent, because the sidecar is not running.
+    case notSent
+    /// Not sent, because the paragraph to research is no longer in the note.
+    case declined
+    /// Not sent, because the note has gone or can't be read.
+    case unreadable
+
+    /// `.sent` with the sidecar's request id, or `.notSent` when it gave none.
+    init(sent id: String?) { self = id.map(NoteRequest.sent) ?? .notSent }
+}
+
 /// A follow-up streaming into a saved card.
 private struct SavedReply {
     /// The card's body with the follow-up turn so far.
@@ -324,40 +340,42 @@ struct SessionDetailPane: View {
 
     /// Summarise the whole saved transcript into its single `# Summary` section,
     /// replacing any existing one. Streams into the answer strip, then persists on
-    /// disk and refreshes the browser so the summary card shows.
+    /// disk and refreshes the browser so the summary card shows. The note is read
+    /// where it is now; an unreadable note sends nothing (issue #115).
     private func submitSummarise() {
         guard !isAsking, !isLive else { return }
         guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
 
-        askNote = ""
-        summarising = true
-        answerBody = "…"
-        answerState = "pending"
-        let document = SessionArchive.contents(of: file)
-
-        let sent = sidecar.summariseDocument(transcript: document) { body, state in
-            answerBody = body
-            answerState = state
-            if !isAsking { answerRequest = nil }
-            if state == "done" {
-                // Issue #51: only clear and reload once the summary is on disk. On
-                // failure keep it visible (leave answerBody / answerState) so it
-                // isn't lost, and don't post — but still drop `summarising` so the
-                // UI isn't stuck.
-                if SessionArchive.save(to: file, { SessionArchive.upsertSummary(body, to: $0) }) {
-                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
-                    answerBody = ""
-                    answerState = ""
-                    summarising = false
-                } else {
-                    askNote = "Summary couldn't be saved to disk."
-                    summarising = false
+        let started = Self.startRequest(on: file) { note, markdown in
+            askNote = ""
+            summarising = true
+            answerBody = "…"
+            answerState = "pending"
+            return NoteRequest(sent: sidecar.summariseDocument(transcript: markdown) { body, state in
+                answerBody = body
+                answerState = state
+                if !isAsking { answerRequest = nil }
+                if state == "done" {
+                    // Issue #51: only clear and reload once the summary is on disk. On
+                    // failure keep it visible (leave answerBody / answerState) so it
+                    // isn't lost, and don't post — but still drop `summarising` so the
+                    // UI isn't stuck.
+                    if SessionArchive.save(to: note, { SessionArchive.upsertSummary(body, to: $0) }) {
+                        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                        answerBody = ""
+                        answerState = ""
+                        summarising = false
+                    } else {
+                        askNote = "Summary couldn't be saved to disk."
+                        summarising = false
+                    }
                 }
-            }
+            })
         }
-        if let sent {
-            answerRequest = AnswerRequest(id: sent, question: nil)
-        } else {
+        switch started {
+        case .sent(let request): answerRequest = AnswerRequest(id: request, question: nil)
+        case .unreadable: askNote = Self.noteUnreadable
+        case .notSent, .declined:
             askNote = "Sidecar not running — summary not requested."
             answerBody = ""
             answerState = ""
@@ -598,90 +616,120 @@ struct SessionDetailPane: View {
         finishEdit(Self.removeBlock(at: offset, of: detail.blocks, from: file))
     }
 
+    /// Start Summarise, Ask, a follow-up or a research card on `file` (issue
+    /// #115). Read the note where it is now (`SessionArchive.readRelocated`),
+    /// which may be a folder it moved to outside the app, and pass the note and
+    /// its markdown to `send`. `send` sends the request and, when it finishes,
+    /// saves the answer to that note. When the note has gone or can't be read,
+    /// `send` is not called, so nothing is sent and nothing can be saved.
+    static func startRequest(
+        on file: SessionFile, archive: URL = SessionArchive.directory,
+        _ send: (_ note: SessionFile, _ markdown: String) -> NoteRequest
+    ) -> NoteRequest {
+        guard let note = SessionArchive.readRelocated(file, in: archive) else { return .unreadable }
+        return send(note.file, note.markdown)
+    }
+
     /// Research `selection` from the paragraph it's in (right-click Answer /
     /// Context / Fact check). The card streams in under the paragraph and, once
     /// done, is saved into the note under the paragraph's last line — where the
     /// live feed anchors a manual card. A failed or skipped card stays until
     /// deleted, and isn't saved. A paragraph out of step with the note takes the
-    /// edit-failed path before anything is sent.
+    /// edit-failed path before anything is sent. The note is read where it is
+    /// now; an unreadable note sends nothing (issue #115).
     private func startResearch(_ kind: String, on selection: String, in paragraph: FeedParagraph) {
         guard let offset = Self.blockOffset(of: paragraph, in: detail.blocks) else { return finishEdit(false) }
         guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
-        let document = SessionArchive.contents(of: file)
-        guard let anchor = NoteEdit.anchor(ofParagraphAt: offset, expecting: detail.blocks[offset], in: document)
-        else { return finishEdit(false) }
-
         let card = Card(
             id: "research-\(UUID().uuidString)", created: Date(), kind: kind, title: selection,
             body: "…", state: "pending",
             footnote: kind == "answer" ? SavedCard.savedGroundedNote : nil,
             isExpanded: kind != "factcheck")
-        let file = file
-        let request = sidecar.researchDocument(action: kind, text: selection, document: document) { body, state in
-            // Save first, from captured values: the user may have moved to another
-            // session, taking this pane's state with it.
-            if state == "done" {
-                var done = card
-                done.body = body
-                done.state = state
-                if SessionArchive.save(to: file, { SessionArchive.insertBlock(SessionMarkdown.cardBlock(done), after: anchor, in: $0) }) {
-                    research.removeAll { $0.card.id == card.id }
-                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
-                    return
+        let blocks = detail.blocks
+
+        let started = Self.startRequest(on: file) { note, markdown in
+            guard let anchor = NoteEdit.anchor(ofParagraphAt: offset, expecting: blocks[offset], in: markdown)
+            else { return .declined }
+            let request = sidecar.researchDocument(action: kind, text: selection, document: markdown) { body, state in
+                // Save first, from captured values: the user may have moved to another
+                // session, taking this pane's state with it.
+                if state == "done" {
+                    var done = card
+                    done.body = body
+                    done.state = state
+                    if SessionArchive.save(to: note, { SessionArchive.insertBlock(SessionMarkdown.cardBlock(done), after: anchor, in: $0) }) {
+                        research.removeAll { $0.card.id == card.id }
+                        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                        return
+                    }
+                    // Only an unreadable note or a failed write gets here.
+                    askNote = "Couldn't save the card to the note — copy it before navigating away."
                 }
-                // Only an unreadable note or a failed write gets here.
-                askNote = "Couldn't save the card to the note — copy it before navigating away."
+                guard let index = research.firstIndex(where: { $0.card.id == card.id }) else { return }
+                research[index].card.body = body
+                research[index].card.state = state
             }
-            guard let index = research.firstIndex(where: { $0.card.id == card.id }) else { return }
-            research[index].card.body = body
-            research[index].card.state = state
+            if let request {
+                research.append(SavedResearch(card: card, anchor: anchor, paragraphOffset: offset, requestId: request))
+            }
+            return NoteRequest(sent: request)
         }
-        guard let request else { askNote = "Sidecar not running — not sent."; return }
-        research.append(SavedResearch(card: card, anchor: anchor, paragraphOffset: offset, requestId: request))
+        switch started {
+        case .sent: if askNote == Self.noteUnreadable { askNote = "" }
+        case .unreadable: askNote = Self.noteUnreadable
+        case .declined: finishEdit(false)
+        case .notSent: askNote = "Sidecar not running — not sent."
+        }
     }
 
     /// Ask a follow-up on a saved card. The answer streams into the card in the
     /// live turn format and, once done, the card's body is rewritten in the note.
-    /// A failed or skipped follow-up leaves the note as it was.
+    /// A failed or skipped follow-up leaves the note as it was. The note is read
+    /// where it is now; an unreadable note sends nothing (issue #115).
     private func startReply(on card: Card, _ question: String) {
         guard replies[card.id] == nil else { return }
         guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
         let base = card.body
-        let file = file
-        let request = sidecar.replyDocument(
-            kind: card.kind, title: card.title, base: base, replyText: question,
-            document: SessionArchive.contents(of: file)
-        ) { answer, state in
-            let body = SessionMarkdown.replyBody(base: base, question: question, answer: answer)
-            switch state {
-            case "done":
-                // Save first, from captured values: the user may have moved on.
-                if SessionArchive.save(to: file, { SessionArchive.replaceCardBody(ofCard: card.id, body: base, with: body, in: $0) }) {
-                    replies[card.id] = nil
-                    // The new body gives the card a new id; keep it open, as it
-                    // was to take the follow-up (a fact-check would otherwise shut).
-                    let saved = SessionArchive.relocated(file) ?? file
-                    if let newId = NoteEdit.cardId(withBody: body, in: SessionArchive.contents(of: saved)) {
-                        expansion[newId] = true
+        let started = Self.startRequest(on: file) { note, markdown in
+            NoteRequest(sent: sidecar.replyDocument(
+                kind: card.kind, title: card.title, base: base, replyText: question, document: markdown
+            ) { answer, state in
+                let body = SessionMarkdown.replyBody(base: base, question: question, answer: answer)
+                switch state {
+                case "done":
+                    // Save first, from captured values: the user may have moved on.
+                    if SessionArchive.save(to: note, { SessionArchive.replaceCardBody(ofCard: card.id, body: base, with: body, in: $0) }) {
+                        replies[card.id] = nil
+                        // The new body gives the card a new id; keep it open, as it
+                        // was to take the follow-up (a fact-check would otherwise shut).
+                        let saved = SessionArchive.relocated(note) ?? note
+                        if let newId = NoteEdit.cardId(withBody: body, in: SessionArchive.contents(of: saved)) {
+                            expansion[newId] = true
+                        }
+                        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                    } else {
+                        replies[card.id]?.body = body
+                        replies[card.id]?.unsaved = true
+                        askNote = "Couldn't save the follow-up to the note — copy it before navigating away."
                     }
-                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
-                } else {
+                case "failed":
+                    replies[card.id] = nil
+                    askNote = "The follow-up didn't complete — \(answer)"
+                case "cancelled":
+                    replies[card.id] = nil
+                default:
                     replies[card.id]?.body = body
-                    replies[card.id]?.unsaved = true
-                    askNote = "Couldn't save the follow-up to the note — copy it before navigating away."
                 }
-            case "failed":
-                replies[card.id] = nil
-                askNote = "The follow-up didn't complete — \(answer)"
-            case "cancelled":
-                replies[card.id] = nil
-            default:
-                replies[card.id]?.body = body
-            }
+            })
         }
-        guard let request else { askNote = "Sidecar not running — follow-up not sent."; return }
-        replies[card.id] = SavedReply(
-            body: SessionMarkdown.replyBody(base: base, question: question, answer: "…"), requestId: request)
+        switch started {
+        case .sent(let request):
+            if askNote == Self.noteUnreadable { askNote = "" }
+            replies[card.id] = SavedReply(
+                body: SessionMarkdown.replyBody(base: base, question: question, answer: "…"), requestId: request)
+        case .unreadable: askNote = Self.noteUnreadable
+        case .notSent, .declined: askNote = "Sidecar not running — follow-up not sent."
+        }
     }
 
     /// After an edit to the note on disk, refresh the list cache (and so this
@@ -690,7 +738,7 @@ struct SessionDetailPane: View {
     private func finishEdit(_ applied: Bool) {
         if !applied {
             askNote = Self.editFailed
-        } else if askNote == Self.editFailed || askNote == Self.noteLineGone {
+        } else if askNote == Self.editFailed || askNote == Self.noteLineGone || askNote == Self.noteUnreadable {
             askNote = ""
         }
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
@@ -699,6 +747,10 @@ struct SessionDetailPane: View {
     private static let editFailed = "Couldn't update the note — it may have changed on disk, so it has been reloaded."
     private static let noteLineGone =
         "That line has changed, so the note will go at the end of the transcript — or right-click to pick another."
+    /// Summarise, Ask, a follow-up or a research card found no note to read, so
+    /// nothing was sent (issue #115).
+    private static let noteUnreadable =
+        "Couldn't read the note, so nothing was sent — it may have been deleted or moved out of the session folder."
 
     /// "Correct transcription…": apply `request` to `file`, following the note if
     /// it has been moved meanwhile (`SessionArchive.save`). False — the edit-failed
@@ -765,46 +817,51 @@ struct SessionDetailPane: View {
             stopHelp: summarising ? "Stop summarising" : "Stop answering")
     }
 
+    /// Ask about the saved note. The note is read where it is now; an unreadable
+    /// note sends nothing, and the question stays in the Ask popover (issue
+    /// #115).
     private func submitQuestion() {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !isAsking, !isLive else { return }
         guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
 
-        askNote = ""
-        summarising = false
-        answerBody = "…"
-        answerState = "pending"
-        let document = SessionArchive.contents(of: file)
-
-        let sent = sidecar.askDocument(question: q, document: document) { body, state in
-            answerBody = body
-            answerState = state
-            if !isAsking { answerRequest = nil }
-            if state == "done" {
-                // Issue #51: only clear the answer and reload once the append is
-                // on disk. On failure keep the answer visible (leave answerBody /
-                // answerState as they are) so the Q&A isn't lost, and don't post —
-                // a reload would drop the unsaved answer.
-                if SessionArchive.save(to: file, { SessionArchive.appendFollowUp(question: q, answer: body, to: $0) }) {
-                    // Refresh the parent list cache (and so this pane's `detail`),
-                    // not just a pane-local copy, or the appended Q&A would vanish on
-                    // navigating away and back or via search.
-                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
-                    answerBody = ""
-                    answerState = ""
-                } else {
-                    askNote = "Answer couldn't be saved to disk — copy it before navigating away."
+        let started = Self.startRequest(on: file) { note, markdown in
+            askNote = ""
+            summarising = false
+            answerBody = "…"
+            answerState = "pending"
+            return NoteRequest(sent: sidecar.askDocument(question: q, document: markdown) { body, state in
+                answerBody = body
+                answerState = state
+                if !isAsking { answerRequest = nil }
+                if state == "done" {
+                    // Issue #51: only clear the answer and reload once the append is
+                    // on disk. On failure keep the answer visible (leave answerBody /
+                    // answerState as they are) so the Q&A isn't lost, and don't post —
+                    // a reload would drop the unsaved answer.
+                    if SessionArchive.save(to: note, { SessionArchive.appendFollowUp(question: q, answer: body, to: $0) }) {
+                        // Refresh the parent list cache (and so this pane's `detail`),
+                        // not just a pane-local copy, or the appended Q&A would vanish on
+                        // navigating away and back or via search.
+                        NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                        answerBody = ""
+                        answerState = ""
+                    } else {
+                        askNote = "Answer couldn't be saved to disk — copy it before navigating away."
+                    }
                 }
-            }
+            })
         }
-        guard let sent else {
+        switch started {
+        case .sent(let request):
+            answerRequest = AnswerRequest(id: request, question: q)
+            question = ""
+            showAsk = false
+        case .unreadable: askNote = Self.noteUnreadable
+        case .notSent, .declined:
             askNote = "Sidecar not running — question not sent."
             answerBody = ""
             answerState = ""
-            return
         }
-        answerRequest = AnswerRequest(id: sent, question: q)
-        question = ""
-        showAsk = false
     }
 }

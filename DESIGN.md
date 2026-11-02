@@ -1845,10 +1845,10 @@ move needs an archive scan, which would hide a dependency on
 outside the app is lost with no message, and after such a reload the browser
 selects the first session. Residual: Summarise, Ask, a research card's anchor
 and a follow-up read the note at the old path first. After an outside move, a
-Summarise or Ask gets an empty transcript, and its answer is saved into the real
-note. The fix is to read through `relocated` first. Also, `relocated` takes the
-first note with the name, so with a copy in another folder an edit can follow
-the copy. Commit: `10d017a`.
+Summarise or Ask got an empty transcript, and its answer was saved into the
+real note. (Closed by #115: see *Ask, Summarise and follow-ups read a moved
+note*.) Also, `relocated` takes the first note with the name, so with a copy in
+another folder an edit can follow the copy. Commit: `10d017a`.
 
 ## Terms of use removed (2026-10-18)
 
@@ -2373,6 +2373,46 @@ Preferences, and Move to Folder. They also cover a new session folder under a
 symlinked parent and a missing folder under `/var`. `SessionRenameTests` cover
 a rename of the live note under a symlinked folder. Not verified in the
 running app.
+
+## Ask, Summarise and follow-ups read a moved note (2026-11-02)
+
+Decision: Summarise, Ask, a follow-up and a research card on a saved note
+start through `SessionDetailPane.startRequest` (issue #115). It reads the note
+through `SessionArchive.readRelocated`, at its own path or where `relocated`
+finds it now, and passes the note and its markdown to the action's `send`.
+When the note cannot be read, it does not call `send` and returns
+`.unreadable`: nothing is sent, so nothing can be saved, and the pane shows
+"Couldn't read the note, so nothing was sent" in its bottom bar. An Ask keeps
+its question in the popover. The answer is saved to the note that was read,
+and `save(to:)` still follows a later move. A research card finds its line in
+the note that was read; when the line has gone, `send` returns `.declined`,
+and the pane takes the edit-failed path, as before.
+
+Reason: `contents(of:)` reads "" for a missing note. After a move outside the
+app (in Finder, for example), the pane still held the old URL. So Summarise
+sent an empty transcript, and `save(to:)` followed the move and replaced the
+real summary with a summary of nothing. Ask saved an answer about nothing in
+the same way. A research card found no line in "", so it never ran, and the
+pane said that the note had changed on disk.
+
+`startRequest` holds the one decision, read the note or send nothing, outside
+the view's private methods, so a test can show that `send` is not called. The
+state of the pane before and after a request stays in each action.
+
+Rejected: a reload after a failed read. For a deleted note, the reload drops
+its pane, and the message with it.
+
+Left as they are:
+
+- A follow-up typed on a card is lost when the note cannot be read, as when the
+  sidecar is not running: the card's field clears on submit.
+- `relocated` takes the first note with the name (the #94 residual).
+
+Tests: `SessionDetailPaneTests` cover `startRequest` on a note moved after the
+pane loads (the note at its new path is sent, a research line is found in it,
+and a summary saved to it replaces the old one and keeps the transcript), on a
+deleted note (`send` is not called, and no note is created), and on a readable
+note (the outcome of `send` comes back). Not verified in the running app.
 
 ## Revisit as it grows
 

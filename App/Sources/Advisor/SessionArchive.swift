@@ -691,6 +691,20 @@ enum SessionArchive {
         return list(in: directory).first { $0.url.lastPathComponent == file.url.lastPathComponent }
     }
 
+    /// `file` where it is now (`relocated`) and its markdown, or nil when the
+    /// note has gone or can't be read (issue #115). Summarise, Ask, a follow-up
+    /// and a research card read the note through this
+    /// (`SessionDetailPane.startRequest`), so a note moved outside the app is
+    /// read at its new path, and an unreadable note sends nothing. Before, they
+    /// read "" at the old path, and the answer to that empty transcript was
+    /// saved into the moved note.
+    static func readRelocated(
+        _ file: SessionFile, in directory: URL = SessionArchive.directory
+    ) -> (file: SessionFile, markdown: String)? {
+        guard let note = relocated(file, in: directory), let markdown = readContents(of: note) else { return nil }
+        return (note, markdown)
+    }
+
     /// Delete `file` from disk. Returns false if removal fails (e.g. the note is
     /// already gone). Irreversible — the caller owns confirmation.
     @discardableResult

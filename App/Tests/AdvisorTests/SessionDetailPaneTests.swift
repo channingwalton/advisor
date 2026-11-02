@@ -266,6 +266,74 @@ private func moveIntoFolder(_ file: SessionFile, in dir: URL) throws -> URL {
     #expect(!FileManager.default.fileExists(atPath: file.url.path))
 }
 
+/// Summarise, Ask, a follow-up or a research card on a session moved into a
+/// folder from outside the app since the pane loaded sends the note there, not
+/// "" at the old path. A research card finds its line in it. A summary saved
+/// to the note that was sent replaces its old summary and keeps its transcript
+/// (issue #115).
+@MainActor
+@Test func aRequestOnAMovedNoteSendsTheNoteWhereItIsNow() throws {
+    let withSummary = SessionArchive.upsertingSummary(into: markdown, summary: "The old summary.")
+    let (file, detail, dir) = try savedNote(withSummary)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let moved = try moveIntoFolder(file, in: dir)
+    #expect(SessionArchive.contents(of: file) == "") // the read before #115
+
+    var sent: (note: SessionFile, markdown: String)?
+    let started = SessionDetailPane.startRequest(on: file, archive: dir) { note, markdown in
+        sent = (note, markdown)
+        return .sent("request")
+    }
+
+    #expect(started == .sent("request"))
+    let note = try #require(sent?.note)
+    #expect(note.folder == "Work")
+    #expect(sent?.markdown == withSummary)
+    let paragraph = try #require(detail.blocks.firstIndex { if case .paragraph = $0 { true } else { false } })
+    #expect(NoteEdit.anchor(ofParagraphAt: paragraph, expecting: detail.blocks[paragraph], in: withSummary) != nil)
+
+    #expect(SessionArchive.save(to: note, in: dir) { SessionArchive.upsertSummary("The new summary.", to: $0) })
+    let saved = try String(contentsOf: moved, encoding: .utf8)
+    #expect(saved == SessionArchive.upsertingSummary(into: withSummary, summary: "The new summary."))
+    #expect(saved.contains("- 17:00:00 OCaml is adopting effect systems."))
+    #expect(!saved.contains("The old summary."))
+    #expect(!FileManager.default.fileExists(atPath: file.url.path))
+}
+
+/// Summarise, Ask, a follow-up or a research card on a session deleted from
+/// outside the app since the pane loaded sends nothing: `send` is not called,
+/// so no request runs and no answer can be saved. The pane shows its message
+/// for `.unreadable`. No note appears at either path (issue #115).
+@MainActor
+@Test func aRequestOnADeletedNoteSendsNothing() throws {
+    let (file, _, dir) = try savedNote()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.removeItem(at: file.url)
+
+    var sends = 0
+    let started = SessionDetailPane.startRequest(on: file, archive: dir) { _, _ in
+        sends += 1
+        return .sent("request")
+    }
+
+    #expect(started == .unreadable)
+    #expect(sends == 0)
+    #expect(SessionArchive.list(in: dir).isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: file.url.path))
+}
+
+/// On a readable note, the outcome of `send` comes back as it is: a sidecar
+/// that is not running, or a research line that has gone.
+@MainActor
+@Test func aRequestOnAReadableNoteReturnsWhatSendGives() throws {
+    let (file, _, dir) = try savedNote()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    #expect(SessionDetailPane.startRequest(on: file, archive: dir) { _, _ in NoteRequest(sent: nil) } == .notSent)
+    #expect(SessionDetailPane.startRequest(on: file, archive: dir) { _, _ in .declined } == .declined)
+    #expect(SessionDetailPane.startRequest(on: file, archive: dir) { _, _ in NoteRequest(sent: "r") } == .sent("r"))
+}
+
 /// A note of the same file name in a folder isn't `file` moved: a copy made
 /// outside the app, or another note filed over it. With `file` gone, Add note
 /// and Delete find it as the relocated note but their expected-block checks run
