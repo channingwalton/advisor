@@ -10,7 +10,7 @@ import { ProcessCardIDs } from "./cardIds.js";
 import { Inbound, log, logSync, send, utteranceLogLine } from "./protocol.js";
 import { handleCancel } from "./cancel.js";
 import { cardUpdateFrame, guardedRun } from "./guardedRun.js";
-import { cardLaneOptions, Lane, LanePool, QueryLanes, runCard as runCardWith, Transcript, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, Lane, LanePool, LiveSession, QueryLanes, runCard as runCardWith, type RunCardDeps } from "./lanes.js";
 import { AutoPipeline } from "./autoPipeline.js";
 import {
   cardKind,
@@ -60,12 +60,6 @@ function guard(op: string): (err: unknown) => void {
   return (err) => log(`fire-and-forget ${op} rejected: ${err}`);
 }
 
-/// The user's live session prompt: free-text context seeded at session_start
-/// and editable mid-session (session_context messages). Injected per task via
-/// sessionContextPrefix() — read fresh at dispatch — so edits take effect on
-/// the next research/query/reply without rebuilding the persistent lanes.
-let sessionContext = "";
-
 const cancelledCards = new Set<string>();
 
 function makeLane(name: string): Lane {
@@ -76,7 +70,8 @@ function makeLane(name: string): Lane {
   };
 }
 
-const transcript = new Transcript();
+const live = new LiveSession();
+const transcript = live.transcript;
 
 /// Parallel research lanes: triggers fan out across persistent sessions. The
 /// pool grows lazily to its size (settable from the app) and sheds excess lanes
@@ -91,7 +86,7 @@ const cardIDs = new ProcessCardIDs();
 const cardDeps: RunCardDeps = {
   transcript,
   nextCardId: () => cardIDs.next(),
-  sessionContext: () => sessionContext,
+  sessionContext: () => live.context,
   cancelledCards,
   send,
 };
@@ -138,7 +133,7 @@ async function runCardReply(msg: Extract<Inbound, { type: "card_reply" }>): Prom
   send({ type: "card_update", id: msg.cardId, body: header + "…", state: "pending" });
   try {
     const task =
-      sessionContextPrefix(sessionContext) +
+      sessionContextPrefix(live.context) +
       replyTask(msg.kind, msg.title, msg.base, msg.replyText, msg.transcript ?? "");
     await guardedRun(
       lane.session, msg.cardId, task, cardUpdateFrame(msg.cardId, header),
@@ -275,10 +270,10 @@ const pipeline = new AutoPipeline({
 function handle(msg: Inbound): void {
   switch (msg.type) {
     case "session_start":
-      transcript.clear();
+      // A new conversation, seeded with the session prompt; the app may update
+      // the prompt mid-session.
+      live.start(msg.context ?? "");
       pipeline.start();
-      // Seed the live session prompt; the app may update it mid-session.
-      sessionContext = msg.context ?? "";
       // Re-read preferences and rebuild sessions so prompt/model changes apply.
       config = loadConfig();
       configureClassifier(config);
@@ -341,8 +336,8 @@ function handle(msg: Inbound): void {
     }
     case "session_context":
       // Live edit of the session prompt; applied to the next dispatched task.
-      sessionContext = msg.text;
-      log(`session prompt updated (${sessionContext.trim().length} chars)`);
+      live.context = msg.text;
+      log(`session prompt updated (${live.context.trim().length} chars)`);
       break;
     case "config":
       if (typeof msg.auto === "boolean") {
@@ -399,13 +394,13 @@ function handle(msg: Inbound): void {
       break;
     case "session_end":
       pipeline.end();
-      // Forget the conversation, in the transcript and the query lane's warm
-      // session, so a question asked before the next Listen isn't answered from
-      // this one — its card is kept into that session's note (issue #104). The
-      // classifier and research lanes keep their warm sessions, now out of step
-      // with the cleared cursors, but run nothing until session_start resets
-      // them.
-      transcript.clear();
+      // Forget the conversation, in the transcript, the session prompt and the
+      // query lane's warm session, so a question asked before the next Listen
+      // isn't answered from this one — its card is kept into that session's
+      // note (issues #104, #113). The classifier and research lanes keep their
+      // warm sessions, now out of step with the cleared cursors, but run
+      // nothing until session_start resets them.
+      live.end();
       queries.reset();
       log("session ended");
       break;

@@ -88,6 +88,28 @@ export class Transcript {
   }
 }
 
+/// What a card's prompt carries from the live session: its conversation and its
+/// session prompt. They start and end together, so a question asked before the
+/// next Listen uses neither (issues #104, #113).
+export class LiveSession {
+  readonly transcript = new Transcript();
+  /// The user's free-text context. Seeded at session_start and edited
+  /// mid-session (session_context). Read at dispatch through
+  /// sessionContextPrefix(), so an edit applies to the next task without a
+  /// rebuild of the persistent lanes.
+  context = "";
+
+  start(context: string): void {
+    this.transcript.clear();
+    this.context = context;
+  }
+
+  end(): void {
+    this.transcript.clear();
+    this.context = "";
+  }
+}
+
 /// What runCard needs from the sidecar. Injected so it is testable without the
 /// module-global stdout `send` (the same shape as guardedRun's deps).
 export interface RunCardDeps {

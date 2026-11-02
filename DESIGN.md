@@ -1925,9 +1925,9 @@ bar, and replaces the modal prompt of the right-click.
   and `SidecarManager.sendSessionStart` sends each note after `session_start`.
   `session_start` no longer aborts a busy query lane: `QueryLanes` retires it
   and gives the session a new lane, `query<n>`, because names key the transcript
-  cursors. `session_end` clears the transcript of the sidecar and resets the
-  query lane, so a question before the next Listen does not use the last
-  conversation.
+  cursors. `session_end` clears the transcript and the session prompt of the
+  sidecar (`LiveSession.end`, #113) and resets the query lane, so a question
+  before the next Listen does not use the last conversation.
 - **Narrow window.** Hide transcript, Summarise, Float and Export fold into a
   More (…) menu before the chips lose their labels
   (`ListeningToolbar.Layout.narrowing`). The minimum width of the recording

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TaskResult } from "./agent.js";
 import type { Outbound } from "./protocol.js";
-import { cardLaneOptions, LanePool, QueryLanes, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
+import { cardLaneOptions, LanePool, LiveSession, QueryLanes, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
 import { mergeConfig } from "./config.js";
 
 /// A session that records each prompt and answers from a script; `reset()` is
@@ -96,6 +96,23 @@ test("#context-lane-recycle a warm lane is sent only what it hasn't seen", async
   assert.equal(lane.resets, 0);
   assert.doesNotMatch(lane.prompts[1], /Cedar/);
   assert.match(lane.prompts[1], /Who owns it\?/);
+});
+
+test("#session-prompt-end a question after the session ends carries neither its prompt nor its conversation", async () => {
+  const live = new LiveSession();
+  const lane = scriptedLane([{ text: "a migration" }, { text: "no idea" }]);
+  const d = { ...deps(live.transcript), sessionContext: () => live.context };
+
+  live.start("Board meeting about the Cedar migration");
+  say(live.transcript, "u1", "Cedar ships in March");
+  await runCard(lane, "query", "Cedar", "Question: what is Cedar?", undefined, d);
+  assert.match(lane.prompts[0], /Board meeting/, "a question in the session carries its prompt");
+  assert.match(lane.prompts[0], /March/, "a question in the session carries its conversation");
+
+  live.end();
+  await runCard(lane, "query", "Cedar", "Question: what is Cedar?", undefined, d);
+  assert.doesNotMatch(lane.prompts[1], /Board meeting/);
+  assert.doesNotMatch(lane.prompts[1], /March/);
 });
 
 // Every card lane (research, query, reply, document, summary) is built from
