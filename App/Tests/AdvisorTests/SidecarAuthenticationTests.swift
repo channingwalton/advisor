@@ -268,7 +268,9 @@ private func waitFor(seconds: Double = 0.5, _ predicate: () -> Bool) async -> Bo
     let h = try AuthHarness()
     defer { h.close() }
     h.childScript = "exec sleep 30" // never reads stdin
-    h.exitGrace = 0.2
+    // A loaded CI runner can resume this test late after stop(). The first
+    // check needs a margin of more than 1 s before the SIGTERM (issue #121).
+    h.exitGrace = 2
     h.manager.start()
     let child = h.children[0]
     h.manager.stop()
