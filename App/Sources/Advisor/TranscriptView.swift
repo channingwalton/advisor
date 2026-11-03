@@ -485,9 +485,10 @@ struct TranscriptView: View {
 
     /// Send a follow-up about `card`. Optimistically appends the question to the
     /// body so it shows immediately; the sidecar reproduces this exact prefix and
-    /// streams the answer underneath via card_update.
-    private func submitReply(_ card: Card, _ reply: String) {
-        guard let idx = store.cards.firstIndex(where: { $0.id == card.id }) else { return }
+    /// streams the answer underneath via card_update. Returns whether the reply
+    /// was sent, so that the card's field keeps one that was not (issue #124).
+    private func submitReply(_ card: Card, _ reply: String) -> Bool {
+        guard let idx = store.cards.firstIndex(where: { $0.id == card.id }) else { return false }
         let base = store.cards[idx].body
         // Send first: if the sidecar is down the message is dropped, so skip the
         // optimistic edit — otherwise the card would spin forever with no answer
@@ -495,10 +496,11 @@ struct TranscriptView: View {
         let sent = services.sidecar.sendCardReply(
             cardId: card.id, kind: card.kind, title: card.title,
             base: base, replyText: reply, transcript: recentTranscript())
-        guard sent else { return }
+        guard sent else { return false }
         store.cards[idx].body = SessionMarkdown.replyBody(base: base, question: reply, answer: "…")
         store.cards[idx].replying = true
         store.cards[idx].state = "streaming"
+        return true
     }
 
     /// The tail of the live transcript, for resolving referents ("she", "that")

@@ -2412,7 +2412,9 @@ its pane, and the message with it.
 Left as they are:
 
 - A follow-up typed on a card is lost when the note cannot be read, as when the
-  sidecar is not running: the card's field clears on submit.
+  sidecar is not running: the card's field clears on submit. Fixed by #124:
+  `onReply` returns whether it sent the follow-up, and the field clears only
+  after a send.
 - `relocated` takes the first note with the name (the #94 residual).
 
 Tests: `SessionDetailPaneTests` cover `startRequest` on a note moved after the

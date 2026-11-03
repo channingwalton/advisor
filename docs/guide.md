@@ -111,8 +111,9 @@ with no selection, to:
 ### Cards
 
 A finished card has a follow-up box. Ask a question about the card, and the
-answer is added to the card, so a card becomes a short thread. Summary cards
-take no follow-ups. While a card researches, it shows what the agent does, such
+answer is added to the card, so a card becomes a short thread. A question that
+is not sent, for example because the sidecar is not running, stays in the box.
+Summary cards take no follow-ups. While a card researches, it shows what the agent does, such
 as *Searching the web for “…”* or *Thinking…*, and the answer shows as it is
 written. The ✕ beside *Researching* (**Skip this card**) stops it. The card
 stays in the window, marked cancelled, but the saved note leaves it out.

@@ -685,10 +685,12 @@ struct SessionDetailPane: View {
     /// Ask a follow-up on a saved card. The answer streams into the card in the
     /// live turn format and, once done, the card's body is rewritten in the note.
     /// A failed or skipped follow-up leaves the note as it was. The note is read
-    /// where it is now; an unreadable note sends nothing (issue #115).
-    private func startReply(on card: Card, _ question: String) {
-        guard replies[card.id] == nil else { return }
-        guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return }
+    /// where it is now; an unreadable note sends nothing (issue #115). Returns
+    /// whether the follow-up was sent, so that the card's field keeps one that
+    /// was not (issue #124).
+    private func startReply(on card: Card, _ question: String) -> Bool {
+        guard replies[card.id] == nil else { return false }
+        guard let sidecar = ctx.sidecar else { askNote = "Sidecar not running."; return false }
         let base = card.body
         let started = Self.startRequest(on: file) { note, markdown in
             NoteRequest(sent: sidecar.replyDocument(
@@ -727,8 +729,13 @@ struct SessionDetailPane: View {
             if askNote == Self.noteUnreadable { askNote = "" }
             replies[card.id] = SavedReply(
                 body: SessionMarkdown.replyBody(base: base, question: question, answer: "…"), requestId: request)
-        case .unreadable: askNote = Self.noteUnreadable
-        case .notSent, .declined: askNote = "Sidecar not running — follow-up not sent."
+            return true
+        case .unreadable:
+            askNote = Self.noteUnreadable
+            return false
+        case .notSent, .declined:
+            askNote = "Sidecar not running — follow-up not sent."
+            return false
         }
     }
 

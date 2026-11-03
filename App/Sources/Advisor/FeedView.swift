@@ -17,8 +17,9 @@ struct FeedActions {
     var onDeleteCard: ((Card) -> Void)?
     /// Skip a card that's still researching.
     var onCancelCard: ((Card) -> Void)?
-    /// A follow-up typed into a finished card.
-    var onReply: ((Card, String) -> Void)?
+    /// A follow-up typed into a finished card. Returns whether it was sent: the
+    /// card's field keeps a follow-up that was not sent (issue #124).
+    var onReply: ((Card, String) -> Bool)?
     /// Delete an editorial note, by its `FeedItem.note` id.
     var onDeleteNote: ((String) -> Void)?
 }
@@ -368,16 +369,34 @@ struct CardIconButton: View {
     }
 }
 
-/// Follow-up input shown on a finished card. Owns its draft text; clears on
-/// submit. A blue Send for answer cards, neutral otherwise (per the spec).
+/// The text of a card's follow-up field.
+struct ReplyDraft: Equatable {
+    var text = ""
+
+    var canSend: Bool { !text.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// Gives the trimmed text to `send`, and clears the text only when `send`
+    /// returns true. A follow-up that is not sent, for example because the
+    /// sidecar is not running or the note is unreadable, stays in the field
+    /// (issue #124).
+    mutating func submit(_ send: (String) -> Bool) {
+        let question = text.trimmingCharacters(in: .whitespaces)
+        guard !question.isEmpty else { return }
+        if send(question) { text = "" }
+    }
+}
+
+/// Follow-up input shown on a finished card. Owns its draft text; clears it
+/// after a send. A blue Send for answer cards, neutral otherwise (per the spec).
 struct CardReplyField: View {
     var accent: Color? = nil
-    let onSubmit: (String) -> Void
-    @State private var text = ""
+    /// Sends the follow-up, and returns whether it was sent.
+    let onSubmit: (String) -> Bool
+    @State private var draft = ReplyDraft()
 
     var body: some View {
         HStack(spacing: 8) {
-            TextField("Ask a follow-up about …", text: $text)
+            TextField("Ask a follow-up about …", text: $draft.text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .padding(.horizontal, 10)
@@ -388,16 +407,11 @@ struct CardReplyField: View {
             Button("Send", action: submit)
                 .buttonStyle(SendButtonStyle(accent: accent))
                 .focusEffectDisabled()
-                .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!draft.canSend)
         }
     }
 
-    private func submit() {
-        let t = text.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty else { return }
-        onSubmit(t)
-        text = ""
-    }
+    private func submit() { draft.submit(onSubmit) }
 }
 
 /// Send button: solid accent (answer) or neutral inset (context/fact-check).
