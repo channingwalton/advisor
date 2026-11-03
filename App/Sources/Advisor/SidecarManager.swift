@@ -780,8 +780,6 @@ final class SidecarManager {
             let body = obj["body"] as? String ?? ""
             let state = obj["state"] as? String ?? "streaming"
             documentHandlers.receive(id: id, body: body, state: state)
-        case "error":
-            store.status = "sidecar: \(obj["message"] as? String ?? "error")"
         default:
             break
         }

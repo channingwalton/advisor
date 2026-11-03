@@ -129,7 +129,6 @@ Sidecar → Swift:
 {"type":"card","id":"...","trigger":"<utterance uuid>","kind":"answer|context|factcheck|query|summary","title":"...","body":"...","state":"pending|streaming|done|failed|cancelled"}
 {"type":"card_update","id":"...","body":"...","state":"pending|streaming|done|failed|cancelled","activity":"Searching the web for “…”"}
 {"type":"document_answer","id":"d3","body":"...","state":"pending|streaming|done|failed|cancelled"}
-{"type":"error","fatal":false,"message":"..."}
 ```
 
 The sidecar sends `hello` once at startup; the app ignores it — there is no version handshake. Card frames carry no separate `sources` or `verdict`: a fact-check's verdict and every card's citations are in the body markdown (removed 2026-10-18, see *Card sources and verdict removed*). Card ids are opaque: they carry a random per-process prefix, so a restarted sidecar cannot collide with cards the app still holds.
@@ -2311,6 +2310,12 @@ Rejected:
 
 Cost: an extra lane starts a new agent session, and sends the whole
 conversation once.
+
+Change (2026-11-03): the `error` frame (sidecar → app) is removed from the
+protocol. The busy refusal was its only sender, so after #110 no code sent it.
+The app read only its `message` into the status line and ignored `fatal`. A
+later sidecar error that the user must see gets its own place at that time: a
+card, the status line or an alert.
 
 ## Live-note checks see through symlinks (2026-11-02)
 

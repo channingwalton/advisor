@@ -260,7 +260,6 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
         "card": ["type", "id", "trigger", "kind", "title", "body", "state"],
         "card_update": ["type", "id", "body", "state", "activity"],
         "document_answer": ["type", "id", "body", "state"],
-        "error": ["type", "fatal", "message"],
     ]
     for frame in examples.sidecarToApp.frames {
         let type = try #require(frame["type"] as? String)
@@ -334,9 +333,4 @@ private func waitFor(_ predicate: () -> Bool) async -> Bool {
     #expect(answers.count == 1)
     #expect(answers.first?.body == answer["body"] as? String)
     #expect(answers.first?.state == answer["state"] as? String)
-
-    // error: the message onto the status line (`fatal` is not read by the app).
-    let error = try examples.sidecarToApp.frame("error")
-    h.manager.handle(type: "error", error)
-    #expect(h.store.status == "sidecar: \(try #require(error["message"] as? String))")
 }

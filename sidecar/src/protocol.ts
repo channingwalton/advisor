@@ -106,8 +106,7 @@ export type Outbound =
   // "Searching the web for “Cedar”"). Each update replaces it; absent clears it.
   | { type: "card_update"; id: string; body: string; state: CardState; activity?: string }
   // Streamed answer to an ask_document question, keyed by the request id.
-  | { type: "document_answer"; id: string; body: string; state: CardState }
-  | { type: "error"; fatal: boolean; message: string };
+  | { type: "document_answer"; id: string; body: string; state: CardState };
 
 export function send(msg: Outbound): void {
   process.stdout.write(JSON.stringify(msg) + "\n");

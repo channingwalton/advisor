@@ -60,7 +60,6 @@ const outbound: Fields<Outbound> = {
   card: { id: "string", trigger: "string?", kind: "string", title: "string", body: "string", state: "string" },
   card_update: { id: "string", body: "string", state: "string", activity: "string?" },
   document_answer: { id: "string", body: "string", state: "string" },
-  error: { fatal: "boolean", message: "string" },
 };
 
 type Frame = { type: string } & Record<string, unknown>;
