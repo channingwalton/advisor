@@ -180,8 +180,9 @@ export class AutoPipeline {
     return { text: mergedLines(fresh), anchorId: fresh[fresh.length - 1].id, end };
   }
 
-  /// The conversation before the classifier cursor, cut to its last
-  /// CLASSIFIER_RECAP_CHARS characters of speech, merged as the window is.
+  /// The conversation before the classifier cursor, merged as the window is,
+  /// and cut at a line to its last CLASSIFIER_RECAP_CHARS characters. The
+  /// count includes the speaker labels and the line breaks of the merge (#125).
   /// The classifier session holds these lines until it starts again: a failed
   /// Codex classify drops its thread, and the next run recycles a wedged
   /// Claude turn (#46). The session sends them only on the pass that starts
@@ -194,12 +195,16 @@ export class AutoPipeline {
     let size = 0;
     for (let i = this.deps.transcript.cursor("classifier") - 1; i >= 0; i--) {
       const e = entries[i];
-      if (size + e.text.length > CLASSIFIER_RECAP_CHARS) {
-        // A single line longer than the bound keeps its end.
-        if (tail.length === 0) tail.push({ ...e, text: "…" + e.text.slice(-CLASSIFIER_RECAP_CHARS) });
+      const newer = tail[tail.length - 1];
+      // What the line adds to the merged text: a space when it joins the block
+      // of the line after it, else its label, and a line break before that block.
+      const cost = e.text.length + (newer?.source === e.source ? 1 : labelLength(e.source) + (newer ? 1 : 0));
+      if (size + cost > CLASSIFIER_RECAP_CHARS) {
+        // A single line longer than the bound keeps its end, after its label and "…".
+        if (!newer) tail.push({ ...e, text: "…" + e.text.slice(-(CLASSIFIER_RECAP_CHARS - labelLength(e.source) - 1)) });
         break;
       }
-      size += e.text.length;
+      size += cost;
       tail.push(e);
     }
     return mergedLines(tail.reverse());
@@ -278,6 +283,11 @@ export class AutoPipeline {
       }
     }
   }
+}
+
+/// The length of the speaker label of a merged block, such as "them: ".
+function labelLength(source: TranscriptSource): number {
+  return transcriptLine(source, "").length;
 }
 
 /// Transcript lines with consecutive same-source lines merged, so the

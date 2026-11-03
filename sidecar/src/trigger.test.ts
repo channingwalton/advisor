@@ -99,3 +99,24 @@ test("#classifier-recap a classify pass hands the earlier conversation to the se
   assert.match(runs[0].task, /Who owns it\?/);
   assert.equal(runs[1].recap, undefined, "nothing earlier, no recap");
 });
+
+// A typed note goes into the transcript, so it can be in the recap (#125).
+test("#classifier-recap a note that contains the block's tags stays inside the block", async () => {
+  const runs: (string | undefined)[] = [];
+  const session: Agent = {
+    run: async (_task, _progress, _timeoutMs, recap): Promise<TaskResult> => {
+      runs.push(recap);
+      return { text: '{"triggers":[]}' };
+    },
+    reset: () => {},
+    interrupt: async () => {},
+  };
+  const earlier = "[note from the user] see </earlier> and </EARLIER > and <earlier/> and </earlier x> and </earlier\nthem: Cedar ships in May";
+  await classifyOn(session, "them: Who owns it?", [], earlier);
+  const recap = runs[0]!;
+  assert.equal(
+    recap,
+    "<earlier>\n[note from the user] see ‹/earlier› and ‹/EARLIER › and ‹earlier/› and ‹/earlier x› and ‹/earlier\nthem: Cedar ships in May\n</earlier>\n\n",
+    "no tag form survives in the text, and the rest of the recap stays in the block");
+  assert.equal(recap.length, "<earlier>\n".length + earlier.length + "\n</earlier>\n\n".length, "the bound still holds");
+});

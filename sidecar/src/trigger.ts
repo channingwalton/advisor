@@ -251,9 +251,20 @@ Transcript window (newest last):
 ${window}
 
 JSON:`;
-  const recap = earlier ? `<earlier>\n${earlier}\n</earlier>\n\n` : undefined;
-  const { text, error } = await session.run(prompt, undefined, 30_000, recap);
+  const { text, error } = await session.run(prompt, undefined, 30_000, earlierBlock(earlier));
   return parseClassifierResponse(text, error);
+}
+
+/// The recap block of a classify pass, or undefined for no earlier lines. A
+/// typed note goes into the transcript, so it can be in the recap. A note
+/// that holds `</earlier>` ended the block early (#125), so each angle bracket
+/// in the text becomes a single guillemet: no tag form, closed or not, is left.
+/// The text keeps its length, so the recap bound (CLASSIFIER_RECAP_CHARS)
+/// still holds.
+function earlierBlock(earlier: string): string | undefined {
+  if (!earlier) return undefined;
+  const text = earlier.replaceAll("<", "‹").replaceAll(">", "›");
+  return `<earlier>\n${text}\n</earlier>\n\n`;
 }
 
 /// Pure parse of the classifier's raw turn into a ClassifyResult. Extracted from

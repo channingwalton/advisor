@@ -326,8 +326,44 @@ test("#classifier-recap the earlier conversation is bounded to its most recent l
   const earlier = h.earliers[1];
   assert.match(earlier, /First window/, "the newest line is kept");
   assert.doesNotMatch(earlier, /line0 /, "the oldest line is left out");
-  // Speech within the bound, plus a speaker label per line.
-  assert.ok(earlier.length <= CLASSIFIER_RECAP_CHARS + 20 * "them: \n".length, `${earlier.length} chars`);
+  // The labels and line breaks count too (#125), and the cut is at a line.
+  assert.ok(earlier.length <= CLASSIFIER_RECAP_CHARS, `${earlier.length} chars`);
+  assert.ok(earlier.length > CLASSIFIER_RECAP_CHARS - 1_000, `${earlier.length} chars: no more than one line is left out to fit`);
+  for (const l of earlier.split("\n")) assert.match(l, /^(them|me): (line\d+ x{990}|First window)$/);
+});
+
+test("#classifier-recap many short lines and speaker changes stay within the bound, labels included", async () => {
+  const h = harness();
+  h.pipeline.start();
+  // Each line is short beside its label, so a count of the speech alone let the recap pass its bound by far.
+  for (let i = 0; i < 2_000; i++) h.transcript.push({ id: `old${i}`, source: i % 2 ? "me" : "them", text: "ok", ts: i });
+  h.say("First window");
+  await settle();
+  h.answer();
+  await settle();
+  h.say("Second window");
+  await settle();
+  const earlier = h.earliers[1];
+  assert.ok(earlier.length <= CLASSIFIER_RECAP_CHARS, `${earlier.length} chars`);
+  assert.ok(earlier.length > CLASSIFIER_RECAP_CHARS - 20, `${earlier.length} chars`);
+  assert.match(earlier, /\nthem: First window$/);
+  assert.match(earlier, /^(them|me): ok\n/, "the cut is at a line");
+});
+
+test("#classifier-recap lines of one speaker merge into one block within the bound", async () => {
+  const h = harness();
+  h.pipeline.start();
+  for (let i = 0; i < 3_000; i++) h.transcript.push({ id: `old${i}`, source: "them", text: "ok", ts: i });
+  h.say("First window");
+  await settle();
+  h.answer();
+  await settle();
+  h.say("Second window");
+  await settle();
+  const earlier = h.earliers[1];
+  assert.match(earlier, /^them: ok ok .* ok First window$/);
+  assert.ok(earlier.length <= CLASSIFIER_RECAP_CHARS, `${earlier.length} chars`);
+  assert.ok(earlier.length > CLASSIFIER_RECAP_CHARS - 3, `${earlier.length} chars`);
 });
 
 test("#classifier-recap a single line longer than the bound keeps its end", async () => {
@@ -341,7 +377,7 @@ test("#classifier-recap a single line longer than the bound keeps its end", asyn
   h.say("Next");
   await settle();
   assert.match(h.earliers[1], /^\[note from the user\] …x+ end$/);
-  assert.equal(h.earliers[1].length, "[note from the user] …".length + CLASSIFIER_RECAP_CHARS);
+  assert.equal(h.earliers[1].length, CLASSIFIER_RECAP_CHARS, "the label and the ellipsis count too (#125)");
 });
 
 test("#trigger-subject-any-script a subject in any script becomes a card, once", async () => {

@@ -2427,9 +2427,12 @@ note (the outcome of `send` comes back). Not verified in the running app.
 
 Decision: a classify pass that starts a new classifier session or thread
 carries the end of the conversation before its window, in an `<earlier>`
-block (issue #116). The bound is 8,000 characters of speech
-(`CLASSIFIER_RECAP_CHARS`), about the last ten minutes. The classifier prompt
-says that the block is context only. The cursor does not move, so the
+block (issue #116). The bound is 8,000 characters of the merged lines, speaker
+labels and line breaks included (`CLASSIFIER_RECAP_CHARS`, #125), about the
+last ten minutes. The cut is at a line. A typed note can hold `</earlier>`, so
+each `<` and `>` in the text becomes `‹` and `›`, of the same length, and no
+tag form is left (#125). The classifier prompt says that the block is context
+only. The cursor does not move, so the
 classifier does not judge those lines again. `Agent.run()` takes the block as
 an optional `recap`, and the session decides whether to send it: Claude on
 the first run after a spawn, Codex on the first turn of a thread, where it
