@@ -15,32 +15,34 @@ private func window() -> NSWindow {
 }
 
 @MainActor
-private func key(_ code: UInt16, in window: NSWindow, modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
+private func key(_ code: UInt16, in window: NSWindow, modifiers: NSEvent.ModifierFlags = [],
+                 isARepeat: Bool = false) -> NSEvent {
     NSEvent.keyEvent(
         with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
         windowNumber: window.windowNumber, context: nil, characters: " ",
-        charactersIgnoringModifiers: " ", isARepeat: false, keyCode: code)!
+        charactersIgnoringModifiers: " ", isARepeat: isARepeat, keyCode: code)!
 }
 
 @MainActor
 @Test func spaceInTheRecordingWindowToggles() {
     let recording = window()
-    #expect(RecordingSpaceKey.toggles(key(49, in: recording), recordingWindow: recording))
+    #expect(RecordingSpaceKey.effect(of: key(49, in: recording), recordingWindow: recording) == .toggle)
 }
 
 @MainActor
 @Test func spaceInAnotherWindowDoesNotToggle() {
     let recording = window()
     let sessions = window()
-    #expect(!RecordingSpaceKey.toggles(key(49, in: sessions), recordingWindow: recording))
-    #expect(!RecordingSpaceKey.toggles(key(49, in: sessions), recordingWindow: nil))
+    #expect(RecordingSpaceKey.effect(of: key(49, in: sessions), recordingWindow: recording) == .pass)
+    #expect(RecordingSpaceKey.effect(of: key(49, in: sessions), recordingWindow: nil) == .pass)
 }
 
 @MainActor
 @Test func otherKeysAndModifiedSpaceDoNotToggle() {
     let recording = window()
-    #expect(!RecordingSpaceKey.toggles(key(0, in: recording), recordingWindow: recording))
-    #expect(!RecordingSpaceKey.toggles(key(49, in: recording, modifiers: .command), recordingWindow: recording))
+    #expect(RecordingSpaceKey.effect(of: key(0, in: recording), recordingWindow: recording) == .pass)
+    #expect(RecordingSpaceKey.effect(of: key(49, in: recording, modifiers: .command),
+                                     recordingWindow: recording) == .pass)
 }
 
 @MainActor
@@ -49,10 +51,27 @@ private func key(_ code: UInt16, in window: NSWindow, modifiers: NSEvent.Modifie
     let field = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
     recording.contentView?.addSubview(field)
     #expect(recording.makeFirstResponder(field))
-    #expect(!RecordingSpaceKey.toggles(key(49, in: recording), recordingWindow: recording))
+    #expect(RecordingSpaceKey.effect(of: key(49, in: recording), recordingWindow: recording) == .pass)
+    // A held Space in the field types more spaces.
+    #expect(RecordingSpaceKey.effect(of: key(49, in: recording, isARepeat: true),
+                                     recordingWindow: recording) == .pass)
     // The selectable transcript is a non-editable text view: Space still toggles.
     field.isEditable = false
-    #expect(RecordingSpaceKey.toggles(key(49, in: recording), recordingWindow: recording))
+    #expect(RecordingSpaceKey.effect(of: key(49, in: recording), recordingWindow: recording) == .toggle)
+}
+
+// Issue #122: a held Space toggled the recording again on each key repeat.
+@MainActor
+@Test func aHeldSpaceTogglesOnceAndItsRepeatsStopAtTheMonitor() {
+    let recording = window()
+    #expect(RecordingSpaceKey.effect(of: key(49, in: recording), recordingWindow: recording) == .toggle)
+    // A repeat does nothing, and does not go on to the window, which would beep.
+    #expect(RecordingSpaceKey.effect(of: key(49, in: recording, isARepeat: true),
+                                     recordingWindow: recording) == .ignore)
+    // A repeat in another window is that window's event.
+    let sessions = window()
+    #expect(RecordingSpaceKey.effect(of: key(49, in: sessions, isARepeat: true),
+                                     recordingWindow: recording) == .pass)
 }
 
 @MainActor
