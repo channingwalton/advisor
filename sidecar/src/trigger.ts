@@ -2,6 +2,7 @@ import { Agent, type AgentSessionOptions } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, modelArg } from "./config.js";
 import { log } from "./protocol.js";
+import { escapeTags } from "./prompts.js";
 
 /// Safety cap on triggers emitted per classification pass — bounds card spam
 /// and concurrent research lanes from one noisy window. The user steers volume
@@ -62,7 +63,7 @@ export function researchKind(action: string): ResearchKind | undefined {
 export function documentResearchTask(kind: ResearchKind, query: string, document: string): string {
   return (
     `The user is reading a saved transcript of a past conversation and picked a passage from it.\n\n` +
-    `<transcript>\n${document}\n</transcript>\n\n` +
+    `<transcript>\n${escapeTags(document)}\n</transcript>\n\n` +
     researchTask(kind, query, query)
   );
 }
@@ -85,8 +86,8 @@ export function replyTask(
   const ctx = !transcript.trim()
     ? ""
     : saved
-      ? `\n\nThe saved session note it belongs to (transcript and other cards):\n<transcript>\n${transcript.trim()}\n</transcript>`
-      : `\n\nRecent conversation transcript (resolve references like "she"/"that" against it):\n<transcript>\n${transcript.trim()}\n</transcript>`;
+      ? `\n\nThe saved session note it belongs to (transcript and other cards):\n<transcript>\n${escapeTags(transcript.trim())}\n</transcript>`
+      : `\n\nRecent conversation transcript (resolve references like "she"/"that" against it):\n<transcript>\n${escapeTags(transcript.trim())}\n</transcript>`;
   const origin = saved
     ? `This ${kind} card titled "${title}" is from a saved session the user is reviewing:`
     : `You previously produced this ${kind} card titled "${title}" during a live conversation:`;
@@ -248,7 +249,7 @@ export async function classifyOn(
   const prompt = `Already covered: ${covered.join(", ") || "(none)"}
 
 Transcript window (newest last):
-${window}
+${escapeTags(window)}
 
 JSON:`;
   const { text, error } = await session.run(prompt, undefined, 30_000, earlierBlock(earlier));
@@ -257,13 +258,12 @@ JSON:`;
 
 /// The recap block of a classify pass, or undefined for no earlier lines. A
 /// typed note goes into the transcript, so it can be in the recap. A note
-/// that holds `</earlier>` ended the block early (#125), so each angle bracket
-/// in the text becomes a single guillemet: no tag form, closed or not, is left.
-/// The text keeps its length, so the recap bound (CLASSIFIER_RECAP_CHARS)
-/// still holds.
+/// that holds `</earlier>` ended the block early (#125), so the text goes
+/// through `escapeTags`. The text keeps its length, so the recap bound
+/// (CLASSIFIER_RECAP_CHARS) still holds.
 function earlierBlock(earlier: string): string | undefined {
   if (!earlier) return undefined;
-  const text = earlier.replaceAll("<", "‹").replaceAll(">", "›");
+  const text = escapeTags(earlier);
   return `<earlier>\n${text}\n</earlier>\n\n`;
 }
 

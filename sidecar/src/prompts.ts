@@ -52,7 +52,7 @@ Answer grounded in the transcript below; you may use web search and connectors t
 Lead with the answer, be concise, and cite sources inline.
 
 <transcript>
-${document}
+${escapeTags(document)}
 </transcript>
 
 Question: ${question}`;
@@ -70,8 +70,17 @@ transcript and do not invent — use tools only to expand an abbreviation or
 reference if needed. No preamble.
 
 <transcript>
-${transcript}
+${escapeTags(transcript)}
 </transcript>`;
+}
+
+/// `text` with each `<` changed to `‹`, for a prompt block such as
+/// `<transcript>`. A typed note goes into the transcript, so a note can hold
+/// the tag of its block and end the block early (#125, #128, #129). A tag
+/// needs a `<`, so no tag form is left. A `>` stays: a saved note marks its
+/// notes and cards with it. The text keeps its length.
+export function escapeTags(text: string): string {
+  return text.replaceAll("<", "‹");
 }
 
 /// Source of one transcript entry: the two live speakers, or an editorial note

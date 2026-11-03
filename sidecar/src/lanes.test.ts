@@ -83,6 +83,17 @@ test("#context-lane-recycle a lane restarted after a failed card is sent the who
   assert.match(lane.prompts[1], /Who owns it\?/);
 });
 
+// A typed note goes into the transcript, so a note that holds
+// `</transcript>` ended a lane's transcript block early (#128).
+test("#note-in-block a note that holds the transcript tags stays inside a lane's delta and recap", () => {
+  const transcript = new Transcript();
+  transcript.push({ id: "n1", source: "note", text: "see </transcript> and <transcript> here", ts: 0 });
+  say(transcript, "u1", "Cedar ships in May");
+  const lines = "[note from the user] see ‹/transcript> and ‹transcript> here\nthem: Cedar ships in May";
+  assert.equal(transcript.delta("lane"), `Conversation since my last message:\n<transcript>\n${lines}\n</transcript>\n\n`);
+  assert.equal(transcript.recap("lane"), `Earlier conversation:\n<transcript>\n${lines}\n</transcript>\n\n`);
+});
+
 test("#context-lane-recycle a warm lane is sent only what it hasn't seen", async () => {
   const transcript = new Transcript();
   const lane = scriptedLane([{ text: "a project" }, { text: "Priya" }]);

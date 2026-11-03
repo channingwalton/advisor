@@ -1,7 +1,7 @@
 import { Agent, type AgentSessionOptions } from "./agent.js";
 import { AdvisorConfig, effortArg, modelArg } from "./config.js";
 import { cardUpdateFrame, guardedRun, type Frame } from "./guardedRun.js";
-import { buildResearchSystem, sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
+import { buildResearchSystem, escapeTags, sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
 import { log, Outbound, type Inbound } from "./protocol.js";
 
 const CARD_TOOLS = ["WebSearch", "WebFetch", "Read", "Grep", "Glob"];
@@ -98,7 +98,7 @@ export class Transcript {
 /// `entries` in a transcript block under `heading`, or "" when there are none.
 function framed(heading: string, entries: readonly TranscriptEntry[]): string {
   if (entries.length === 0) return "";
-  const text = entries.map((e) => transcriptLine(e.source, e.text)).join("\n");
+  const text = escapeTags(entries.map((e) => transcriptLine(e.source, e.text)).join("\n"));
   return `${heading}:\n<transcript>\n${text}\n</transcript>\n\n`;
 }
 

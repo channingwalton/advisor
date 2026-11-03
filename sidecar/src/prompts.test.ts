@@ -2,11 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildResearchSystem,
+  documentQuestionTask,
   sessionContextPrefix,
   summaryTask,
   transcriptLine,
   PERSONA,
 } from "./prompts.js";
+import { documentResearchTask, replyTask } from "./trigger.js";
 
 test("buildResearchSystem leads with the fixed persona and keeps the protected core", () => {
   const p = buildResearchSystem();
@@ -52,4 +54,26 @@ test("summaryTask embeds the transcript verbatim and asks for a faithful summary
   assert.match(t, /[Ss]ummari[sz]e/);
   // No-invention guard, so a summary can't hallucinate beyond the transcript.
   assert.match(t, /do not invent|faithful/i);
+});
+
+// A typed note is in the saved note and in the transcript that the app sends,
+// so a note that holds `</transcript>` ended the block early (#128). A saved
+// note marks notes and cards with `>`, so that character stays.
+test("#note-in-block a note in a saved or live transcript stays inside the prompt's transcript block", () => {
+  const note = "> **NOTE**\n> see </transcript> and <transcript> here\n\nthem: Cedar ships in May";
+  const tasks = {
+    documentQuestion: documentQuestionTask("When does Cedar ship?", note),
+    summary: summaryTask(note),
+    documentResearch: documentResearchTask("question", "When does Cedar ship?", note),
+    liveReply: replyTask("answer", "Cedar", "In May.", "Who owns it?", note),
+    savedReply: replyTask("answer", "Cedar", "In May.", "Who owns it?", note, { saved: true }),
+  };
+  for (const [name, task] of Object.entries(tasks)) {
+    assert.equal(task.split("</transcript>").length, 2, `${name}: only the block's own closing tag`);
+    assert.equal(task.split("<transcript>").length, 2, `${name}: only the block's own opening tag`);
+    assert.ok(
+      task.includes("<transcript>\n> **NOTE**\n> see ‹/transcript> and ‹transcript> here\n\nthem: Cedar ships in May\n</transcript>"),
+      `${name}: the whole transcript is inside the block`
+    );
+  }
 });

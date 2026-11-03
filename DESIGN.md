@@ -2430,8 +2430,8 @@ carries the end of the conversation before its window, in an `<earlier>`
 block (issue #116). The bound is 8,000 characters of the merged lines, speaker
 labels and line breaks included (`CLASSIFIER_RECAP_CHARS`, #125), about the
 last ten minutes. The cut is at a line. A typed note can hold `</earlier>`, so
-each `<` and `>` in the text becomes `‹` and `›`, of the same length, and no
-tag form is left (#125). The classifier prompt says that the block is context
+each `<` in the text becomes `‹`, of the same length, and no tag form is left
+(#125; see *A note stays inside its prompt block*). The classifier prompt says that the block is context
 only. The cursor does not move, so the
 classifier does not judge those lines again. `Agent.run()` takes the block as
 an optional `recap`, and the session decides whether to send it: Claude on
@@ -2517,6 +2517,38 @@ idle, the next card's first message held every line in order, before its
 task, and the card after it was warm again. Not verified: a CLI killed on the
 real bundled Claude CLI, and Codex lanes, whose first turn of a thread also
 takes the recap.
+
+## A note stays inside its prompt block (2026-11-03)
+
+Decision: each prompt block that holds transcript text changes each `<` in
+that text to `‹`, through one helper (`escapeTags` in `prompts.ts`). The
+blocks are the delta and the recap of a lane (`framed`), the classifier's
+window and its `<earlier>` recap, and the `<transcript>` blocks of the saved
+note, Summarise and follow-up prompts (issues #128, #129).
+
+Reason: a typed note goes into the transcript. A note that holds
+`</transcript>` ended a lane's block early, and the lines after it were then
+outside the block, where the agent can take them for part of the task. A note
+that holds `<earlier>` in the classifier's new lines can look like the recap,
+which the classifier must never trigger on. A pass that succeeds moves the
+cursor past those lines, so they are not judged again. #125 fixed only the
+`<earlier>` recap.
+
+A tag needs a `<`, so the change of `<` alone leaves no tag form. #125 also
+changed `>` to `›`. That is not necessary, and a saved note marks its notes
+and cards with a `>` blockquote, which the agent then sees in the saved note
+and Summarise prompts. The text keeps its length, so the classifier recap
+bound still holds.
+
+Rejected: escape in `transcriptLine`. The saved note, Summarise and follow-up
+prompts get their text from the app as one string, not as lines, so they need
+the helper at the block anyway.
+
+Not changed: the `<card>` and `<followup>` blocks of a follow-up. The card
+body is agent text, and the follow-up is the last block of the prompt.
+
+Verified: unit tests (`#note-in-block`) cover each block. The effect of an
+early close on a real agent was not tested.
 
 ## Revisit as it grows
 

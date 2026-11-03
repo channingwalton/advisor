@@ -61,6 +61,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F14b. Editorial notes (issue #34): right-click a transcript line to inject the user's own context as a distinct green NOTE card anchored at that line; the agents read it as part of the transcript (so it can inform or trigger research). Deletable; persisted with the session.
   - The toolbar's Note (⇧⌘N) adds one at the current point in the conversation, or at the end of a saved transcript; right-click opens the same popover placed at its line (issue #104).
   - A note added before Listen is kept when the session starts, opens its transcript, and reaches the agents once the session has started (issue #104).
+  - A note that holds the tag of a prompt block, such as `</transcript>` or `<earlier>`, stays inside that block, and so do the lines after it (issues #125, #128, #129). `#note-in-block`
   - A question asked before Listen keeps its card when the session starts, and an answer still being written then finishes (issue #104).
 - F14c. Transcript corrections (issue #32): right-click a mis-transcribed word or phrase to correct that instance or replace it throughout the session, live or in a saved session; the correction is saved to the transcript in place.
 - F14d. Card follow-ups: a finished card takes a follow-up question, whose answer is appended to that card, so a card becomes a short thread.
