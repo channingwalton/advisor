@@ -30,13 +30,32 @@ final class HostWindow {
         return field.isEditable
     }
 
+    /// The window that `float(true)` floated, and its collection behaviour
+    /// before that.
+    private weak var floated: NSWindow?
+    private var behaviourBeforeFloat: NSWindow.CollectionBehavior = []
+
     /// Floats the host window above other windows and on all Spaces, or puts
     /// it back at the normal level. Another window, such as the key window,
-    /// does not change (issue #123).
+    /// does not change (issue #123). The window keeps its own collection
+    /// behaviour, such as `.auxiliary`, and gets it back at Float off (issue
+    /// #130). AppKit raises an exception for a window that both moves to the
+    /// active Space and joins all Spaces, so a floating window does not move.
     func float(_ on: Bool) {
         guard let window else { return }
         window.level = on ? .floating : .normal
-        window.collectionBehavior = on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
+        if on {
+            if floated !== window {
+                floated = window
+                behaviourBeforeFloat = window.collectionBehavior
+            }
+            window.collectionBehavior = behaviourBeforeFloat
+                .subtracting(.moveToActiveSpace)
+                .union([.canJoinAllSpaces, .fullScreenAuxiliary])
+        } else if floated === window {
+            window.collectionBehavior = behaviourBeforeFloat
+            floated = nil
+        }
     }
 
     /// A zero-size view that records the window it is in.

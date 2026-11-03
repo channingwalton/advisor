@@ -2550,6 +2550,26 @@ body is agent text, and the follow-up is the last block of the prompt.
 Verified: unit tests (`#note-in-block`) cover each block. The effect of an
 early close on a real agent was not tested.
 
+## Float keeps the window's collection behaviour (2026-11-03)
+
+Decision: `HostWindow.float` keeps the collection behaviour that the window
+had before Float, adds `.canJoinAllSpaces` and `.fullScreenAuxiliary` while
+Float is on, and puts the old behaviour back at Float off (issue #130).
+
+Reason: Float set the behaviour to a fixed value, and to `[]` at Float off.
+The recording window starts with `.auxiliary` and `.fullScreenAuxiliary`, so
+Float took `.auxiliary` away. A Swift probe showed that AppKit accepts
+`.auxiliary` with `.canJoinAllSpaces`. AppKit raises an exception for
+`.moveToActiveSpace` with `.canJoinAllSpaces`, so a floating window does not
+have `.moveToActiveSpace`.
+
+Verified: `HostWindowTests` start from `[.auxiliary, .fullScreenAuxiliary]`
+and from `[.moveToActiveSpace]`. A temporary probe in the dev build turned
+Float on and off twice through the toolbar's state. The recording window had
+131328 (`.auxiliary`, `.fullScreenAuxiliary`) before Float and after each
+Float off, and 131329 (also `.canJoinAllSpaces`) with Float on. The effect on
+full screen, Spaces and Stage Manager was not checked.
+
 ## Revisit as it grows
 
 - The approach to echo suppression.

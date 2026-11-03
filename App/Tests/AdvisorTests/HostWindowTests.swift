@@ -95,16 +95,51 @@ private func focusEditableField(in window: NSWindow, editable: Bool = true) {
 @Test func floatChangesTheHostWindowOnly() {
     let host = HostWindow()
     let recording = hostedWindow(host)
+    // The behaviour that the recording window starts with (issue #130).
+    recording.collectionBehavior = [.auxiliary, .fullScreenAuxiliary]
     let preferences = window()
     let before = recording.collectionBehavior
     host.float(true)
     #expect(recording.level == .floating)
-    #expect(recording.collectionBehavior.contains(.canJoinAllSpaces))
+    #expect(recording.collectionBehavior == before.union(.canJoinAllSpaces))
     #expect(preferences.level == .normal)
+    // A second Float on does not take the floating behaviour for the old one.
+    host.float(true)
     host.float(false)
     #expect(recording.level == .normal)
     #expect(recording.collectionBehavior == before)
     // With no window yet, nothing floats.
     HostWindow().float(true)
     #expect(preferences.level == .normal)
+}
+
+// A reopened scene puts the view in a new window while Float is on.
+@MainActor
+@Test func floatOffLeavesAWindowThatItDidNotFloat() {
+    let host = HostWindow()
+    let first = hostedWindow(host)
+    first.collectionBehavior = [.fullScreenAuxiliary]
+    host.float(true)
+    let second = hostedWindow(host)
+    second.collectionBehavior = [.auxiliary]
+    host.float(false)
+    #expect(second.level == .normal)
+    #expect(second.collectionBehavior == [.auxiliary])
+    host.float(true)
+    #expect(second.collectionBehavior == [.auxiliary, .canJoinAllSpaces, .fullScreenAuxiliary])
+    host.float(false)
+    #expect(second.collectionBehavior == [.auxiliary])
+}
+
+// AppKit raises an exception for a window that both moves to the active
+// Space and joins all Spaces.
+@MainActor
+@Test func floatOnAWindowThatMovesToTheActiveSpaceJoinsAllSpacesAndComesBack() {
+    let host = HostWindow()
+    let recording = hostedWindow(host)
+    recording.collectionBehavior = [.moveToActiveSpace]
+    host.float(true)
+    #expect(recording.collectionBehavior == [.canJoinAllSpaces, .fullScreenAuxiliary])
+    host.float(false)
+    #expect(recording.collectionBehavior == [.moveToActiveSpace])
 }
