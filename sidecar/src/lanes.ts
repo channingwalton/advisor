@@ -82,10 +82,24 @@ export class Transcript {
   delta(lane: string): string {
     const { fresh, end } = this.unseen(lane);
     this.cursors.set(lane, end);
-    if (fresh.length === 0) return "";
-    const text = fresh.map((e) => transcriptLine(e.source, e.text)).join("\n");
-    return `Conversation since my last message:\n<transcript>\n${text}\n</transcript>\n\n`;
+    return framed("Conversation since my last message", fresh);
   }
+
+  /// The entries `lane` has been sent, framed as the recap of its next task,
+  /// or undefined when there are none. Call it before `delta`. The session
+  /// sends the recap only when the task starts a new conversation, for
+  /// example after the lane's CLI stopped between cards. Then the card
+  /// carries the whole conversation, though no card failed (#126).
+  recap(lane: string): string | undefined {
+    return framed("Earlier conversation", this.items.slice(0, this.cursor(lane))) || undefined;
+  }
+}
+
+/// `entries` in a transcript block under `heading`, or "" when there are none.
+function framed(heading: string, entries: readonly TranscriptEntry[]): string {
+  if (entries.length === 0) return "";
+  const text = entries.map((e) => transcriptLine(e.source, e.text)).join("\n");
+  return `${heading}:\n<transcript>\n${text}\n</transcript>\n\n`;
 }
 
 /// What a card's prompt carries from the live session: its conversation and its
@@ -148,8 +162,10 @@ export async function runCard(
   let failed = false;
   let contextLost = false;
   try {
+    // The recap first: `delta` moves the cursor.
+    const recap = deps.transcript.recap(lane.name);
     const prompt = sessionContextPrefix(deps.sessionContext()) + deps.transcript.delta(lane.name) + task;
-    const result = await guardedRun(lane.session, cardId, prompt, frame, "agent error", deps);
+    const result = await guardedRun(lane.session, cardId, prompt, frame, "agent error", deps, recap);
     failed = Boolean(result.error);
     contextLost = Boolean(result.contextLost);
   } finally {

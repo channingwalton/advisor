@@ -86,7 +86,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Card lanes** (`lanes.ts`). Every card-answering session takes `cardLaneOptions`: one system prompt (`buildResearchSystem()`: persona plus fixed operating rules — lead with the answer, notes first then web, no narration, cite, say "couldn't verify", never ask), the tools `WebSearch`, `WebFetch`, `Read`, `Grep`, `Glob` plus the user's own connectors, and the effort preference. The per-task instruction comes from `researchTask` (answer / context / fact-check), `replyTask`, `summaryTask`, `documentQuestionTask` or `documentResearchTask`. Two kinds of lane:
 
-- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and the query lane (`QueryLanes`; a session start retires one still answering rather than aborting it — see *Ask and Note from the toolbar*; a query while it answers gets an extra lane — see *A second Ask runs beside the first*). `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation. A turn that loses the conversation with no error (`TaskResult.contextLost`, a cancelled Codex turn) forgets the cursor with no reset (#112).
+- *Pooled, persistent* — research lanes (3 by default, 1–8 from the app) and the query lane (`QueryLanes`; a session start retires one still answering rather than aborting it — see *Ask and Note from the toolbar*; a query while it answers gets an extra lane — see *A second Ask runs beside the first*). `Transcript` keeps a cursor per lane, so each task carries only the conversation that lane hasn't seen. `runCard` opens a `pending` card, then streams into it. A failed turn resets the lane and forgets its cursor, so its next card replays the conversation. A turn that loses the conversation with no error (`TaskResult.contextLost`, a cancelled Codex turn) forgets the cursor with no reset (#112). Each card also gives the session the lines before the cursor as its `recap`, which the session sends only to a new conversation, such as a Claude CLI that stopped between cards (#126).
 - *Transient, one-shot* — card follow-ups (≤3 at once), the live summary, and saved-session tasks (ask, research, follow-up, summarise; ≤2 at once). Created per request, disposed after, never holding a pool slot.
 
 **Query lane.** The Ask box (a `query` card with no anchor, so it sorts in at the time of asking) and right-click actions (the action's kind, anchored under the clicked line). One at a time on the lane. A query that comes while it answers runs on an extra lane (`QueryLanes.take`), up to three busy query lanes; past that it gets a failed card that holds the question (#110). Gets its conversation through its own cursor, like a research lane.
@@ -2491,6 +2491,32 @@ request still held the first window, and no recap went out. After a reset,
 the first request carried the `<earlier>` block. Not verified: a wedged
 Claude turn on the real CLI (its interrupt worked), and the Codex paths on the
 real Codex CLI.
+
+## A lane whose CLI stops between cards gets a recap (2026-11-03)
+
+Decision: `runCard` gives `session.run` the lines before the lane's cursor as
+the `recap` (`Transcript.recap`), the #116 mechanism. The session sends the
+recap only when the card starts a new conversation (issue #126).
+
+Reason: when a lane's Claude CLI stopped while no card ran, the next card
+spawned a new CLI with an empty conversation. No card failed, so the cursor
+stayed, and the card carried only the lines since the lane's last card. Only
+the session knows that the conversation is new, and it knows that inside
+`run()`, after the lane builds its prompt.
+
+The recap has no bound, as the replay after a failed card has none (*Recycled
+lanes replay the conversation*). After a failure the cursor is forgotten, so
+the recap is empty, and nothing goes twice.
+
+Rejected: a method on `Agent` that reports a cold start before the prompt is
+built, for the reasons in the #116 entry.
+
+Verified: a test drives `AgentSession` over a fake SDK stream through
+`runCard`. A warm lane sent only the new lines. After the stream ended while
+idle, the next card's first message held every line in order, before its
+task, and the card after it was warm again. Not verified: a CLI killed on the
+real bundled Claude CLI, and Codex lanes, whose first turn of a thread also
+takes the recap.
 
 ## Revisit as it grows
 

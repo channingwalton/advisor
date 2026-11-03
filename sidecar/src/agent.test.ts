@@ -6,7 +6,7 @@ import path from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { AgentSession, AsyncQueue, agentCwd, type Agent, type QueryFn } from "./agent.js";
 import { AutoPipeline } from "./autoPipeline.js";
-import { Transcript } from "./lanes.js";
+import { runCard, Transcript, type Lane } from "./lanes.js";
 import { classifyOn } from "./trigger.js";
 
 // A controllable fake of the SDK's `query()` stream: an async-iterable of
@@ -286,6 +286,67 @@ test("#classifier-recap a Claude classify that times out but ends keeps its sess
   assert.match(prompt, /them: Who owns it\? And when does it ship\?/);
   spawns[0].messages.push(noTriggers);
   await setImmediate();
+});
+
+/// A research lane over `session`: `say` hears a line, and `card` runs a card
+/// on the lane.
+function laneOver(session: Agent) {
+  const transcript = new Transcript();
+  const lane: Lane = { name: "research0", busy: false, session };
+  let n = 0;
+  const deps = {
+    transcript,
+    nextCardId: () => `c${++n}`,
+    sessionContext: () => "",
+    cancelledCards: new Set<string>(),
+    send: () => {},
+  };
+  return {
+    say: (text: string) => transcript.push({ id: `u${transcript.entries.length + 1}`, source: "them", text, ts: 0 }),
+    card: (task: string) => runCard(lane, "answer", task, task, undefined, deps),
+  };
+}
+
+test("#context-lane-recycle a lane whose Claude CLI stopped while idle sends its next card the whole conversation", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const l = laneOver(new AgentSession(opts, queryFn));
+
+  l.say("Our migration is named Cedar");
+  const first = l.card("Answer: what is Cedar?");
+  assert.match(await nextPrompt(spawns[0]), /them: Our migration is named Cedar/);
+  spawns[0].messages.push(success("A billing rewrite."));
+  await first;
+
+  l.say("It ships in May");
+  const second = l.card("Answer: when does it ship?");
+  const warm = await nextPrompt(spawns[0]);
+  assert.doesNotMatch(warm, /Cedar/, "a warm lane sends only the new lines");
+  assert.match(warm, /them: It ships in May/);
+  spawns[0].messages.push(success("May."));
+  await second;
+
+  // The CLI stops while no card runs (#126).
+  spawns[0].messages.push(streamFailure(new Error("Claude Code process exited with code 1")));
+  await setImmediate();
+
+  l.say("Who owns it?");
+  const third = l.card("Answer: who owns it?");
+  assert.equal(spawns.length, 2, "the next card starts a new CLI");
+  const cold = await nextPrompt(spawns[1]);
+  const lines = ["Our migration is named Cedar", "It ships in May", "Who owns it?"].map((t) => cold.indexOf(`them: ${t}`));
+  assert.ok(lines.every((at) => at >= 0), "the new conversation carries every line");
+  assert.deepEqual([...lines].sort((a, b) => a - b), lines, "in the order said");
+  assert.ok(cold.indexOf("Answer: who owns it?") > lines[2], "the task comes after the conversation");
+  spawns[1].messages.push(success("Priya."));
+  await third;
+
+  l.say("Thanks");
+  const fourth = l.card("Answer: thanks?");
+  const warmAgain = await nextPrompt(spawns[1]);
+  assert.doesNotMatch(warmAgain, /Cedar|Who owns it/, "the new session holds the conversation");
+  assert.match(warmAgain, /them: Thanks/);
+  spawns[1].messages.push(success("ok"));
+  await fourth;
 });
 
 // The CLI subprocess's stderr was dropped, so a spawn-time crash surfaced only

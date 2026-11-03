@@ -34,14 +34,16 @@ export function cardUpdateFrame(id: string, prefix = ""): Frame {
 /// Returns the turn's result, a thrown run as an error, so a pooled lane can
 /// decide to recycle or to resend the conversation.
 /// This is the shared skeleton behind every card / reply / summary / document
-/// runner — they differ only in the `frame` they build (issue #66).
+/// runner — they differ only in the `frame` they build (issue #66). `recap`
+/// goes to `session.run`, which sends it only to a new conversation (#126).
 export async function guardedRun(
   session: Pick<Agent, "run">,
   cardId: string,
   task: string,
   frame: Frame,
   errorLabel: string,
-  deps: GuardedRunDeps
+  deps: GuardedRunDeps,
+  recap?: string
 ): Promise<TaskResult> {
   let text = "";
   let activity: string | undefined;
@@ -60,7 +62,7 @@ export async function guardedRun(
         activity = line;
         live.request();
       },
-    });
+    }, undefined, recap);
     if (!deps.cancelledCards.has(cardId)) {
       const outcome = cardOutcome(result.text, result.error);
       deps.send(frame(outcome.body, outcome.state));
