@@ -61,7 +61,8 @@ struct TranscriptView: View {
     /// session resumable. Nil while recording or idle.
     private var stoppedAt: Date? { recordingControl.stoppedAt }
     @State private var spaceMonitor: Any?
-    /// The recording window, for the Space key monitor (issue #111).
+    /// The recording window, for the Space key monitor (issue #111), the feed's
+    /// field check and Float on Top (issue #123).
     @State private var hostWindow = HostWindow()
     /// True while a "Wait"-to-close is draining the session's in-flight agents.
     /// Covers the window with a blocking overlay so the about-to-close UI can't
@@ -165,14 +166,8 @@ struct TranscriptView: View {
         // nil (the global record button / window close) leaves staged values untouched.
         .onChange(of: winCtx.pendingFolder) { _, _ in seedDefaultsFromPendingFolder() }
         .onChange(of: autoCards) { _, on in services.sidecar.sendAuto(on) }
-        .onChange(of: pinned) { _, on in
-            // Prefer the key window (the recording window, since its toolbar holds
-            // the pin toggle) now that the Sessions window is also on screen.
-            guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible)
-            else { return }
-            window.level = on ? .floating : .normal
-            window.collectionBehavior = on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
-        }
+        // Float the recording window, not the key window (issue #123).
+        .onChange(of: pinned) { _, on in hostWindow.float(on) }
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
             // Preference toggles for triggers must reflect in the right-click
             // action menu immediately, not only after a relaunch; likewise the
@@ -393,14 +388,12 @@ struct TranscriptView: View {
         TranscriptAutoScroll.Content(utterances: store.utterances, notes: store.notes, cards: store.cards)
     }
 
-    /// True when an editable text field holds focus in the key window. A focused
-    /// `NSTextField` (the Ask or Note popover's) edits through a field-editor `NSTextView`; the
-    /// selectable transcript is a non-editable `NSTextView`, so `isEditable`
-    /// distinguishes them (issue #37). `RecordingSpaceKey` makes the same test,
+    /// True when an editable text field has the keyboard focus in this window
+    /// or in its Ask or Note popover, but not in another Advisor window, such
+    /// as Preferences (issue #123). `RecordingSpaceKey` makes the same test,
     /// but in the window of the key event.
     private var isEditingTextField: Bool {
-        guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
-        return tv.isEditable
+        hostWindow.isEditingText(keyWindow: NSApp.keyWindow)
     }
 
     /// Centred reading column: day divider, the shared feed (transcript runs,
