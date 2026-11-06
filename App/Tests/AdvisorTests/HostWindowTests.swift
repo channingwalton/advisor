@@ -18,9 +18,11 @@ private func window() -> NSWindow {
 }
 
 /// A window that holds a `HostWindow.Reader` for `host`, as the recording window does.
+/// `behaviour` is the collection behaviour that the window has before the reader records it.
 @MainActor
-private func hostedWindow(_ host: HostWindow) -> NSWindow {
+private func hostedWindow(_ host: HostWindow, behaviour: NSWindow.CollectionBehavior? = nil) -> NSWindow {
     let window = window()
+    if let behaviour { window.collectionBehavior = behaviour }
     let reader = NSHostingView(rootView: HostWindow.Reader(host: host))
     window.contentView?.addSubview(reader)
     reader.layoutSubtreeIfNeeded()
@@ -113,22 +115,39 @@ private func focusEditableField(in window: NSWindow, editable: Bool = true) {
     #expect(preferences.level == .normal)
 }
 
-// A reopened scene puts the view in a new window while Float is on.
+// A reopened scene can put the view in a new window while Float is on (issue
+// #132).
 @MainActor
-@Test func floatOffLeavesAWindowThatItDidNotFloat() {
+@Test func aNewHostWindowFloatsWhileFloatIsOnAndTheOldOneComesBack() {
     let host = HostWindow()
-    let first = hostedWindow(host)
-    first.collectionBehavior = [.fullScreenAuxiliary]
+    let first = hostedWindow(host, behaviour: [.fullScreenAuxiliary])
     host.float(true)
-    let second = hostedWindow(host)
-    second.collectionBehavior = [.auxiliary]
+    let second = hostedWindow(host, behaviour: [.auxiliary])
+    #expect(second.level == .floating)
+    #expect(second.collectionBehavior == [.auxiliary, .canJoinAllSpaces, .fullScreenAuxiliary])
+    #expect(first.level == .normal)
+    #expect(first.collectionBehavior == [.fullScreenAuxiliary])
     host.float(false)
     #expect(second.level == .normal)
     #expect(second.collectionBehavior == [.auxiliary])
+    #expect(first.level == .normal)
+    #expect(first.collectionBehavior == [.fullScreenAuxiliary])
+}
+
+// At a close, SwiftUI changed the floating recording window's
+// `.fullScreenAuxiliary` to `.fullScreenNone`, and a reopen kept that window
+// (issue #132). The view applies Float again when it appears.
+@MainActor
+@Test func floatOnAgainGivesTheFloatingBehaviourBack() {
+    let host = HostWindow()
+    let recording = hostedWindow(host, behaviour: [.auxiliary, .fullScreenAuxiliary])
     host.float(true)
-    #expect(second.collectionBehavior == [.auxiliary, .canJoinAllSpaces, .fullScreenAuxiliary])
+    recording.collectionBehavior = [.auxiliary, .canJoinAllSpaces, .fullScreenNone]
+    host.float(true)
+    #expect(recording.level == .floating)
+    #expect(recording.collectionBehavior == [.auxiliary, .canJoinAllSpaces, .fullScreenAuxiliary])
     host.float(false)
-    #expect(second.collectionBehavior == [.auxiliary])
+    #expect(recording.collectionBehavior == [.auxiliary, .fullScreenAuxiliary])
 }
 
 // AppKit raises an exception for a window that both moves to the active

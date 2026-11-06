@@ -2580,6 +2580,34 @@ Float on and off twice through the toolbar's state. The recording window had
 Float off, and 131329 (also `.canJoinAllSpaces`) with Float on. The effect on
 full screen, Spaces and Stage Manager was not checked.
 
+## Float follows the toggle after a close and a reopen (2026-11-06)
+
+Decision: `HostWindow` holds whether Float is on. A window that `Reader`
+records while Float is on floats, and the window that Float floated before
+gets its own level and collection behaviour back. The recording view also
+applies Float again when it appears (issue #132).
+
+Reason: the single-instance `Window` keeps `pinned` across a close and a
+reopen, and Float applied only when `pinned` changed. A probe in the dev build
+showed that a reopen gives the same `NSWindow`, and that the window keeps
+`.floating`. At the close, the floating window's behaviour changed from 131329
+to 131585: `.fullScreenAuxiliary` became `.fullScreenNone`. The app does not
+set it, and a plain AppKit window keeps its behaviour at a close, so SwiftUI is
+the likely cause. With Float off, the close kept 131328. A new window at a
+reopen was not seen, but `Reader` floats one if SwiftUI makes it.
+
+Rejected: turn `pinned` off in `onDisappear`. The user then loses Float at
+each reopen, and the view keeps its other toolbar state, such as Auto cards,
+across a reopen.
+
+Verified: `HostWindowTests` cover a new host window while Float is on, which
+failed before the fix, and Float on again after the change at a close. A
+temporary probe in the dev build turned Float on, closed and reopened the
+window, turned Float off, then closed and reopened it again. With the fix, the
+window had level 3 and 131329 after the reopen with Float on, and level 0 and
+131328 after Float off and after the reopen with Float off. Not checked: full
+screen, Spaces, Stage Manager, and a new window at a reopen in the running app.
+
 ## Revisit as it grows
 
 - The approach to echo suppression.

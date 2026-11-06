@@ -105,7 +105,13 @@ struct TranscriptView: View {
             setup()
         }
         .background(HostWindow.Reader(host: hostWindow))
-        .onAppear(perform: installSpaceMonitor)
+        .onAppear {
+            installSpaceMonitor()
+            // The single-instance `Window` keeps `pinned` across a close and a
+            // reopen, and SwiftUI changes a floating window's collection
+            // behaviour at the close, so Float applies again (issue #132).
+            hostWindow.float(pinned)
+        }
         .onDisappear {
             if let spaceMonitor { NSEvent.removeMonitor(spaceMonitor) }
             spaceMonitor = nil

@@ -30,32 +30,60 @@ final class HostWindow {
         return field.isEditable
     }
 
-    /// The window that `float(true)` floated, and its collection behaviour
+    /// Whether Float is on. A window that `Reader` records while Float is on
+    /// floats too (issue #132).
+    private var floatIsOn = false
+
+    /// The window that Float floated, and its level and collection behaviour
     /// before that.
     private weak var floated: NSWindow?
+    private var levelBeforeFloat: NSWindow.Level = .normal
     private var behaviourBeforeFloat: NSWindow.CollectionBehavior = []
 
     /// Floats the host window above other windows and on all Spaces, or puts
-    /// it back at the normal level. Another window, such as the key window,
-    /// does not change (issue #123). The window keeps its own collection
-    /// behaviour, such as `.auxiliary`, and gets it back at Float off (issue
-    /// #130). AppKit raises an exception for a window that both moves to the
-    /// active Space and joins all Spaces, so a floating window does not move.
+    /// it back. Another window, such as the key window, does not change
+    /// (issue #123). The window keeps its own collection behaviour, such as
+    /// `.auxiliary`, and gets it back at Float off (issue #130). Float on
+    /// again sets the floating behaviour again: SwiftUI changes it at a close
+    /// (issue #132).
     func float(_ on: Bool) {
-        guard let window else { return }
-        window.level = on ? .floating : .normal
-        if on {
-            if floated !== window {
-                floated = window
-                behaviourBeforeFloat = window.collectionBehavior
-            }
-            window.collectionBehavior = behaviourBeforeFloat
-                .subtracting(.moveToActiveSpace)
-                .union([.canJoinAllSpaces, .fullScreenAuxiliary])
-        } else if floated === window {
-            window.collectionBehavior = behaviourBeforeFloat
-            floated = nil
+        floatIsOn = on
+        applyFloat()
+    }
+
+    /// Records the window that the view moved into. While Float is on, the
+    /// new window floats, and the old one gets its own level and collection
+    /// behaviour back (issue #132).
+    private func record(_ new: NSWindow) {
+        window = new
+        applyFloat()
+    }
+
+    /// Floats the host window while Float is on, and puts back a window that
+    /// Float floated and that no longer floats. AppKit raises an exception for
+    /// a window that both moves to the active Space and joins all Spaces, so a
+    /// floating window does not move.
+    private func applyFloat() {
+        if !floatIsOn || floated !== window { putBack() }
+        guard floatIsOn, let window else { return }
+        if floated == nil {
+            floated = window
+            levelBeforeFloat = window.level
+            behaviourBeforeFloat = window.collectionBehavior
         }
+        window.level = .floating
+        window.collectionBehavior = behaviourBeforeFloat
+            .subtracting(.moveToActiveSpace)
+            .union([.canJoinAllSpaces, .fullScreenAuxiliary])
+    }
+
+    /// Gives the window that Float floated its own level and collection
+    /// behaviour back. A window that Float did not float does not change.
+    private func putBack() {
+        guard let window = floated else { return }
+        window.level = levelBeforeFloat
+        window.collectionBehavior = behaviourBeforeFloat
+        floated = nil
     }
 
     /// A zero-size view that records the window it is in.
@@ -81,7 +109,7 @@ final class HostWindow {
             /// recorded. The reference is weak, so a closed window goes.
             override func viewDidMoveToWindow() {
                 super.viewDidMoveToWindow()
-                if let window { host.window = window }
+                if let window { host.record(window) }
             }
         }
     }
