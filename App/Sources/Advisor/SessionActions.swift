@@ -32,6 +32,30 @@ import UniformTypeIdentifiers
     NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
 }
 
+/// Open a session note in the app that macOS uses for Markdown files (issue
+/// #127). The live note is never passed here — both menus disable its entry —
+/// because the writer rewrites it until it releases the note (after the late
+/// cards, at the close of the recording window), and an editor that saves an
+/// old copy after the last rewrite drops the lines added since. The
+/// workspace returns `false` with no message of its own (a note deleted in
+/// Finder, for example), so a failure goes to `reportFailure`.
+@MainActor func openSessionInDefaultApp(
+    _ file: SessionFile,
+    open: @MainActor (URL) -> Bool = { NSWorkspace.shared.open($0) },
+    reportFailure: @MainActor (URL) -> Void = showOpenFailure
+) {
+    if !open(file.url) { reportFailure(file.url) }
+}
+
+/// The modal alert for an open that failed.
+@MainActor func showOpenFailure(_ url: URL) {
+    let alert = NSAlert()
+    alert.messageText = "Couldn't open the session"
+    alert.informativeText =
+        "No app opened \(url.lastPathComponent). The file may have moved or been deleted."
+    alert.runModal()
+}
+
 /// Copy a session note to a user-chosen destination. Atomic write (read source,
 /// then replace) never pre-deletes the destination, so a failure can't leave a
 /// chosen file gone, and exporting onto the source itself is harmless. Failures

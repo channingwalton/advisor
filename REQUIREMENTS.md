@@ -1,6 +1,6 @@
 # Advisor — Requirements
 
-**Status:** Living document — last revised 2026-11-02 (first draft 2026-06-11).
+**Status:** Living document — last revised 2026-11-06 (first draft 2026-06-11).
 Decision history is in [DESIGN.md](DESIGN.md).
 **Owner:** Channing
 
@@ -76,7 +76,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - An Ask answer or Summary for a saved note still saves if the note is filed into a folder meanwhile, and a deleted note is never recreated. `#saved-note-moved-save`
   - An Ask or Summarise on a saved note can be stopped while it runs; nothing is saved, and a stopped question returns to the Ask popover. `#sessions-answer-cancel`
 - F16a. Ask a saved session: a question about a past session is answered from its note, and the answer is appended to that note under a Follow-ups heading.
-- F16b. Manage saved sessions: rename (a short name titles the session in the list; blank falls back to its context), export a copy of the markdown, share it, reveal it in Finder, or delete it behind a confirmation. The live session can be exported from the recording window, but not deleted.
+- F16b. Manage saved sessions: rename (a short name titles the session in the list; blank falls back to its context), export a copy of the markdown, share it, open it in the default Markdown app (issue #127), reveal it in Finder, or delete it behind a confirmation. The live session can be exported from the recording window, but not deleted or opened in another app.
 - F16c. Session folders (issues #25, #35): organise sessions into user-named folders in the browser; file a session by dragging it onto a folder or with Move to Folder, and start a recording straight into a folder. Deleting a folder keeps its sessions.
 - F16d. Folder context (issue #36): a folder can hold a context that seeds the session prompt of every recording started in it, editable per session; it can be loaded from a saved context (F7b).
 - F17. Session tags (issue #15): a user-managed library of coloured tags (Preferences), applied to a session from the live toolbar or the browser, shown as coloured dots on session rows (and pills in the session detail) and searchable. Stored by name in the note's frontmatter.

@@ -2608,6 +2608,39 @@ window had level 3 and 131329 after the reopen with Float on, and level 0 and
 131328 after Float off and after the reopen with Float off. Not checked: full
 screen, Spaces, Stage Manager, and a new window at a reopen in the running app.
 
+## Open a session in the default app (2026-11-06, issue #127)
+
+**Open in Default App** gives the note's file to `NSWorkspace.open`, so the app
+that macOS uses for Markdown files opens it. Both menus call
+`openSessionInDefaultApp` in `SessionActions.swift`, as they do for Rename,
+Delete and Export. For a missing file, the workspace returns `false` and shows
+nothing, so the function shows an alert. The live note is exempt, as for Delete
+and Move to Folder. The writer rewrites the whole note from memory two seconds
+after the last change, and after Stop for late cards, until `releaseRecording`
+releases the note. An editor that saves an old copy after the last rewrite drops the lines
+and cards added since, and nothing restores them. Reveal in Finder still shows
+the live note. Accepted limits, as for a note opened from Finder:
+
+- A saved note has the same hazard after an in-app change to its file, if the
+  editor then saves its old copy. An edit (Ask, Summarise, a note, a
+  correction, a rename or a tag change) is lost. After a Delete, a Move to Folder or a folder rename,
+  the save can put the note back at its old path.
+- The browser does not watch the file. An edit made in the other app shows only
+  after the next reload of the list, and until then the detail shows the old
+  text.
+
+Rejected: the app's name in the label, which needs a lookup that stays current
+when the user changes the default app, and an "Open With" submenu. Both are
+more than the issue asks for.
+
+Verified: `SessionOpenTests` cover the open and the failure report. A temporary
+probe in the dev build got the real row menu from a synthetic right-click. The
+item was between Share… and Reveal in Finder. It was enabled for a saved note,
+and disabled, as Delete was, when the probe set that note as the live note. A
+probe that chose the item opened the note in Typora, the default Markdown app
+on that Mac. Not checked in the running app: the detail pane's `…` menu and the
+failure alert.
+
 ## Revisit as it grows
 
 - The approach to echo suppression.

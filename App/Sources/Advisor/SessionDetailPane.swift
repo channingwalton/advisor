@@ -308,6 +308,9 @@ struct SessionDetailPane: View {
             }
             Button("Export…") { exportSessionCopy(file) }
             ShareLink("Share…", item: file.url, preview: SharePreview(detail.title))
+            // The live note is exempt: see `openSessionInDefaultApp`.
+            Button("Open in Default App") { openSessionInDefaultApp(file) }
+                .disabled(isLive)
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([file.url])
             }

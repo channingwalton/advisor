@@ -215,6 +215,8 @@ The right end of the toolbar holds **Ask**, **Note**, **Hide Transcript**,
 - **Rename…**: a short label for the list. Leave it blank to use the context.
 - **Export…**: save a copy of the markdown.
 - **Share…**: the macOS share sheet (Mail, AirDrop, Messages and others).
+- **Open in Default App**: open the session's markdown file in the app that
+  macOS uses for Markdown files. You cannot open the live session this way.
 - **Reveal in Finder**: show the session's markdown file.
 - **Delete…**: permanently remove the note from disk, after a confirmation. You
   cannot delete the live session.
