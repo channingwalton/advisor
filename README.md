@@ -17,9 +17,10 @@ script that makes it.*
 
 ## Getting started
 
-1. **Install.** Build the DMG from source (see
-   [docs/development.md](docs/development.md)), open it and drag Advisor to
-   Applications.
+1. **Install.** Download the DMG from the
+   [latest release](https://github.com/channingwalton/advisor/releases/latest),
+   or build it from source (see [docs/development.md](docs/development.md)).
+   Open the DMG and drag Advisor to Applications.
 2. **Grant permissions.** On first launch Advisor asks for **Microphone** and
    **Screen & System Audio Recording** — both are needed to hear the
    conversation.
