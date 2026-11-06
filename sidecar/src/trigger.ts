@@ -93,9 +93,9 @@ export function replyTask(
     : `You previously produced this ${kind} card titled "${title}" during a live conversation:`;
   return (
     `${origin}\n\n` +
-    `<card>\n${cardBody}\n</card>` +
+    `<card>\n${escapeTags(cardBody)}\n</card>` +
     ctx +
-    `\n\nThe user has a follow-up about that card:\n<followup>\n${followUp}\n</followup>\n\n` +
+    `\n\nThe user has a follow-up about that card:\n<followup>\n${escapeTags(followUp)}\n</followup>\n\n` +
     `Answer the follow-up concisely, leading with the answer. Use the card and transcript as context; don't repeat the card's content unless needed.`
   );
 }

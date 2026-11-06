@@ -66,6 +66,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - A question asked before Listen keeps its card when the session starts, and an answer still being written then finishes (issue #104).
 - F14c. Transcript corrections (issue #32): right-click a mis-transcribed word or phrase to correct that instance or replace it throughout the session, live or in a saved session; the correction is saved to the transcript in place.
 - F14d. Card follow-ups: a finished card takes a follow-up question, whose answer is appended to that card, so a card becomes a short thread.
+  - A card body that holds `</card>`, or a follow-up that holds `</followup>`, stays inside its block of the follow-up prompt (issue #131). `#followup-in-block`
 - F14e. Summarise (issue #30): on demand, live or on a saved session, distil the whole conversation into one Summary card kept with the note; summarising again updates it in place.
 - F15. Show live transcript (collapsible).
 - F16. Session history: transcripts and surfaced items reviewable afterwards, stored as app-managed local markdown files. Agents never write to the user's notes or other files (read-only sources).

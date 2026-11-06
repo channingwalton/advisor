@@ -2550,6 +2550,16 @@ body is agent text, and the follow-up is the last block of the prompt.
 Verified: unit tests (`#note-in-block`) cover each block. The effect of an
 early close on a real agent was not tested.
 
+Change (2026-11-06): the `<card>` and `<followup>` blocks of a follow-up
+also use `escapeTags` (issue #131). The card body is agent text, so a card
+about XML or HTML can hold `</card>`. The follow-up is the user's own text.
+Either one could end its block early, or look like the other block. A card
+about markup now shows its tags with `‹` in the `<card>` block. A follow-up
+on a saved note already showed the card that way, in its `<transcript>` block.
+Unit tests (`#followup-in-block`) cover both blocks, live and saved. Not
+tested: the effect on a real agent, and whether an answer that quotes markup
+from the card copies the `‹`.
+
 ## Float keeps the window's collection behaviour (2026-11-03)
 
 Decision: `HostWindow.float` keeps the collection behaviour that the window

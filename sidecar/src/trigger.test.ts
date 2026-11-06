@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Agent, TaskResult } from "./agent.js";
-import { classifyOn, documentResearchTask, parseClassifierResponse, researchKind, researchTask } from "./trigger.js";
+import { classifyOn, documentResearchTask, parseClassifierResponse, replyTask, researchKind, researchTask } from "./trigger.js";
 
 const q = (subject: string) => ({ kind: "question", subject, query: `q:${subject}` });
 
@@ -139,4 +139,37 @@ test("#note-in-block a note in the classifier's new lines cannot look like its e
     tasks[0]
   );
   assert.doesNotMatch(tasks[0], /<\/?earlier/i);
+});
+
+/// Each tag of the follow-up prompt occurs once in `task`: the block's own.
+function assertOwnTagsOnly(task: string, label: string): void {
+  const extra = ["<card>", "</card>", "<followup>", "</followup>"].filter((tag) => task.split(tag).length !== 2);
+  assert.deepEqual(extra, [], `${label}: tags that are not the prompt's own`);
+}
+
+// The card body is agent text, so a card about XML can hold `</card>` and
+// end the block early (#131).
+test("#followup-in-block a card body that holds the prompt's tags stays inside the card block", () => {
+  const body = "Close the element with </card>. A <followup> element is different.";
+  for (const saved of [false, true]) {
+    const task = replyTask("answer", "XML", body, "And an empty one?", "them: How do I close it?", { saved });
+    assertOwnTagsOnly(task, `saved: ${saved}`);
+    assert.ok(
+      task.includes("<card>\nClose the element with ‹/card>. A ‹followup> element is different.\n</card>"),
+      `saved: ${saved}: the whole body is inside the block`
+    );
+  }
+});
+
+// The follow-up is the user's own text, so it can hold `</followup>` (#131).
+test("#followup-in-block a follow-up that holds the prompt's tags stays inside the follow-up block", () => {
+  const followUp = "What do </followup> and <card> do?";
+  for (const saved of [false, true]) {
+    const task = replyTask("answer", "XML", "Use a closing tag.", followUp, "them: How do I close it?", { saved });
+    assertOwnTagsOnly(task, `saved: ${saved}`);
+    assert.ok(
+      task.includes("<followup>\nWhat do ‹/followup> and ‹card> do?\n</followup>"),
+      `saved: ${saved}: the whole follow-up is inside the block`
+    );
+  }
 });
