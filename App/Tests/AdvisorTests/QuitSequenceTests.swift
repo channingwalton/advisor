@@ -22,6 +22,10 @@ import Foundation
 }
 
 /// A wedged teardown is cut off at the deadline, and the final save still runs.
+/// The time bound is loose on purpose: the shutdown sleeps for an hour, so any
+/// bound far below that proves the cut-off. A tight bound measured the CI
+/// runner, where other tests can hold the main actor for seconds (run
+/// 42300778196 took 3 s).
 @MainActor
 @Test func req_quit_deadline() async {
     var events: [String] = []
@@ -32,7 +36,7 @@ import Foundation
         finish: { events.append("finish") })
     await task?.value
     #expect(events == ["finish", "exit"])
-    #expect(ContinuousClock.now - start < .seconds(2))
+    #expect(ContinuousClock.now - start < .seconds(60))
 }
 
 @MainActor
