@@ -565,7 +565,7 @@ private struct TagEditorSheet: View {
                 .textFieldStyle(.roundedBorder)
             if collides {
                 Text("A tag with this name already exists.")
-                    .font(.caption).foregroundStyle(Theme.factRed)
+                    .font(.caption).foregroundStyle(Theme.failureRed)
             }
             Text("Colour").font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 8) {

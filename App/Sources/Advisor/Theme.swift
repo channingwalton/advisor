@@ -99,10 +99,12 @@ enum Theme {
     static let contextCodeBg = dyn(0xF1F0F6, 0xB9A4FF, darkAlpha: 0.14)
     static let contextCodeText = dyn(0x6E54B8, 0xCCBEFF)
 
-    // MARK: success/failure colours
-    static let factGreen = dyn(0x2F8D5B, 0x46D389)
-    static let factGreenTint = dyn(0xE6F4EC, 0x46D389, darkAlpha: 0.16)
-    static let factRed = dyn(0xC0392B, 0xFF6B5C)
+    // MARK: note (green)
+    static let noteGreen = dyn(0x2F8D5B, 0x46D389)
+    static let noteGreenTint = dyn(0xE6F4EC, 0x46D389, darkAlpha: 0.16)
+
+    // MARK: failure (red): error text and failed states
+    static let failureRed = dyn(0xC0392B, 0xFF6B5C)
 
     // MARK: summary (teal) — distinct from the answer/context pills
     static let summaryTeal = dyn(0x0E7C86, 0x4FD0DA)

@@ -795,7 +795,7 @@ struct SessionDetailPane: View {
             // While running, even before any text, so Stop is always there.
             if isAsking || !answerBody.isEmpty { liveAnswer }
             if !askNote.isEmpty {
-                Text(askNote).font(.system(size: 11.5)).foregroundStyle(Theme.factRed)
+                Text(askNote).font(.system(size: 11.5)).foregroundStyle(Theme.failureRed)
                     .padding(.leading, 18)
             }
         }
@@ -819,7 +819,7 @@ struct SessionDetailPane: View {
                 ? (summarising ? "Couldn't summarise" : "Couldn't answer")
                 : (summarising ? "Summary" : "Answer"),
             titleColor: answerState == "failed"
-                ? Theme.factRed
+                ? Theme.failureRed
                 : (summarising ? Theme.summaryTeal : Theme.accent),
             markdown: answerBody,
             isRunning: isAsking,

@@ -216,7 +216,7 @@ struct FeedCardView: View {
                 }
             }
         } else if card.state == "failed" {
-            Text("failed").foregroundStyle(Theme.factRed)
+            Text("failed").foregroundStyle(Theme.failureRed)
         } else if card.state == "cancelled" {
             Text("cancelled").foregroundStyle(Theme.textTertiary)
         }
@@ -301,7 +301,7 @@ struct FeedNoteView: View {
                     Text("Note")
                 }
                 .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(Theme.factGreen)
+                .foregroundStyle(Theme.noteGreen)
                 Spacer(minLength: 8)
                 if let onDelete {
                     HoverReveal(hover: hover) { hovering in
@@ -317,7 +317,7 @@ struct FeedNoteView: View {
         .padding(.top, 18)
         .padding(.bottom, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.factGreenTint.opacity(0.5), in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
+        .background(Theme.noteGreenTint.opacity(0.5), in: RoundedRectangle(cornerRadius: Theme.Metric.cardRadius))
         .onHover { hover.isOn = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityActions {

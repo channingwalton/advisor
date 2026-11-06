@@ -295,7 +295,7 @@ struct ListeningToolbar: View {
     private func noteButton(compact: Bool) -> some View {
         Button { showNote.toggle() } label: {
             composerLabel(
-                "Note", system: "note.text", tint: Theme.factGreen, compact: compact,
+                "Note", system: "note.text", tint: Theme.noteGreen, compact: compact,
                 hasDraft: !noteDraft.isBlank)
         }
         .buttonStyle(.plain)

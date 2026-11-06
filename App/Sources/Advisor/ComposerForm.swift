@@ -87,7 +87,7 @@ struct ComposerTint {
     let text: Color
 
     static let ask = ComposerTint(fill: Theme.accent, text: Theme.onAccent)
-    static let note = ComposerTint(fill: Theme.factGreenTint, text: Theme.factGreen)
+    static let note = ComposerTint(fill: Theme.noteGreenTint, text: Theme.noteGreen)
 }
 
 /// The Ask / Add note button, dimmed while there's nothing to send.

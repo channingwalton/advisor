@@ -313,7 +313,7 @@ struct TranscriptView: View {
                     .frame(width: 7, height: 7)
                 Text(text)
                     .font(.system(size: 11))
-                    .foregroundStyle(fatalError == nil ? Theme.textSecondary : Theme.factRed)
+                    .foregroundStyle(fatalError == nil ? Theme.textSecondary : Theme.failureRed)
                     .lineLimit(1)
                 Spacer()
             }
