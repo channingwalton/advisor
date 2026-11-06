@@ -1275,7 +1275,10 @@ builds the profile from the same `deniedPaths()` list as the Claude backend. A
 wrapper that runs the vendored CLI under `sandbox-exec -f` goes to the SDK as
 `codexPathOverride`. Children inherit the profile, so MCP servers and shell
 commands are covered with no help from the CLI. Writes are denied except to
-the state folders of Codex, the temp roots and `/dev`. (Since 2026-11-02, no
+the state folders of Codex, the temp roots and `/dev`. `/dev` is writable
+because processes write to `/dev/null`, `/dev/fd/*` and pseudo-terminals. Unix
+permissions keep the disks root-only, so the worst case is text in one of the
+user's terminal windows. (Since 2026-11-02, no
 shell command runs under the profile, because the CLI's `read-only` mode
 cannot apply inside it: see *Codex shell stays closed*.)
 
