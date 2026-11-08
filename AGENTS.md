@@ -77,8 +77,10 @@ rework because of this.
 
 - Screenshot the dev build: run `cd App && sh xcode.sh swift build`, launch the
   `.build` binary, and capture its window with `screencapture -l <windowid>`
-  (ids from CGWindowList). A full-screen `screencapture` and `osascript` clicks
-  need Accessibility and Screen Recording grants, and usually fail.
+  (ids from CGWindowList). A full-screen `screencapture`, `osascript` clicks and
+  computer-use tools such as cmux-cua need Accessibility and Screen Recording
+  grants, and usually fail: a cmux-cua `launch_app` of Advisor hung and ended a
+  session.
 - **Verify the binary that the user runs.** A packaged `dist/Advisor.app` can be
   older than your edits. Confirm that it is rebuilt (its mtime, or a
   `package.sh` run) before you trust a report that a fault "still happens" or
