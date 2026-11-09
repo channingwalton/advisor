@@ -27,7 +27,10 @@ export interface AutoPipelineDeps {
   transcript: Transcript;
   /// `earlier` is the end of the conversation before `window`. The classifier
   /// sends it only on a pass that starts a new session or thread (#116).
-  classify(window: string, covered: string[], earlier: string): Promise<ClassifyResult>;
+  /// `context` is the session prompt at this pass.
+  classify(window: string, covered: string[], earlier: string, context: string): Promise<ClassifyResult>;
+  /// The live session prompt. Default: none.
+  sessionContext?(): string;
   /// A free research lane, or undefined when every lane is busy (a lane
   /// finishing drains the queue again).
   freeLane(): Lane | undefined;
@@ -239,7 +242,12 @@ export class AutoPipeline {
       this.log(`classify start (window ${window.length} chars)`);
       const ct0 = this.now();
       const epoch = this.epoch;
-      const result = await this.deps.classify(window, this.coveredSubjects(), this.classifierRecap());
+      const result = await this.deps.classify(
+        window,
+        this.coveredSubjects(),
+        this.classifierRecap(),
+        this.deps.sessionContext?.() ?? ""
+      );
       // Auto cards was toggled, or the session ended or restarted, meanwhile:
       // drop the result and leave the cursor to the new conditions.
       if (epoch !== this.epoch) return;

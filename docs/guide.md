@@ -67,7 +67,9 @@ controls then lose their labels.
   session in the browser.
 - **Context** (before or during a session) holds the **session prompt**: who is
   present, the topic, and what to focus on. Edit it live to steer the agents;
-  each edit applies to the next card. **Load** fills it from a saved context,
+  each edit applies to the next card. It also tells the trigger classifier what
+  the meeting is about. Name the projects or code that matter, so that
+  automatic cards about them are more likely. **Load** fills it from a saved context,
   and **Save…** stores the current text as one. Name, context and tags clear
   when the recording window closes, not on Stop.
 - **Tags** (before or during a session) applies tags from your library. Create

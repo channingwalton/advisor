@@ -12,6 +12,10 @@ function harness(lanes = 1, debounceMs = 0) {
   const coveredLists: string[][] = [];
   /// The conversation before each window, as offered for a recap.
   const earliers: string[] = [];
+  /// The session prompt offered with each window.
+  const contexts: string[] = [];
+  let sessionContext = "";
+  const setContext = (text: string) => { sessionContext = text; };
   const pending: ((r: ClassifyResult) => void)[] = [];
   const researched: string[] = [];
   /// Each card's "first text sent" hook, in dispatch order.
@@ -25,12 +29,14 @@ function harness(lanes = 1, debounceMs = 0) {
   const pipeline = new AutoPipeline({
     transcript,
     debounceMs,
-    classify: (window, covered, earlier) => {
+    classify: (window, covered, earlier, context) => {
       windows.push(window);
       coveredLists.push(covered);
       earliers.push(earlier);
+      contexts.push(context);
       return new Promise((resolve) => pending.push(resolve));
     },
+    sessionContext: () => sessionContext,
     freeLane: () => pool.find((l) => !l.busy),
     research: async (_lane, t, textSent) => {
       researched.push(t.subject);
@@ -47,7 +53,7 @@ function harness(lanes = 1, debounceMs = 0) {
   const answer = (...subjects: string[]) =>
     pending.shift()!({ ok: true, triggers: subjects.map((subject): Trigger => ({ kind: "question", subject, query: subject })) });
   const tick = (ms: number) => { clock += ms; };
-  return { pipeline, say, answer, windows, coveredLists, earliers, researched, cardTexts, pool, pending, transcript, logs, tick };
+  return { pipeline, say, answer, windows, coveredLists, earliers, contexts, setContext, researched, cardTexts, pool, pending, transcript, logs, tick };
 }
 
 /// Let timers (debounce 0) and promise continuations run.
@@ -293,6 +299,20 @@ test("#classifier-recap each pass offers the conversation before its window, for
   await settle();
   assert.doesNotMatch(h.windows[1], /Cedar/, "a judged line is not judged again");
   assert.equal(h.earliers[1], "them: Our migration is named Cedar");
+});
+
+test("#classifier-context each pass offers the session prompt as it is at that pass", async () => {
+  const h = harness();
+  h.pipeline.start();
+  h.setContext("Meeting about Cedar");
+  h.say("Who owns it?");
+  await settle();
+  h.answer();
+  await settle();
+  h.setContext("Meeting about Cedar and Birch");
+  h.say("And Birch?");
+  await settle();
+  assert.deepEqual(h.contexts, ["Meeting about Cedar", "Meeting about Cedar and Birch"]);
 });
 
 test("#classifier-recap a failed window is re-fed as new lines, not as the earlier conversation", async () => {

@@ -82,7 +82,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **AutoPipeline** (`autoPipeline.ts`). Each utterance or note restarts a 1.5 s quiet debounce; then the classifier gets only the lines past its cursor, consecutive same-source lines merged. The cursor commits only on a successful classify (a failed window is re-fed, up to 3 times). A pass that starts a new classifier session or thread also carries the last 8,000 characters before its window, as context only (#116). New subjects are deduped for 10 minutes (normalised in any script), queued (≤20) and dispatched to free research lanes, anchored to the last line of the window. Turning Auto cards off drops the pending classify, queued research and any in-flight classify result.
 
-**Classifier** (`trigger.ts`). A persistent session on the shared provider and model, offered no tools (`noTools`; on Codex, no web search or network) and none of the user's settings; returns triggers of kind `question | context | factcheck` (only the kinds enabled in Preferences, at most 2 per pass) with a subject and query, steered by the sensitivity preference (conservative / balanced / eager). Warmed at session start; 30 s timeout. A `question` becomes an `answer` card.
+**Classifier** (`trigger.ts`). A persistent session on the shared provider and model, offered no tools (`noTools`; on Codex, no web search or network) and none of the user's settings; returns triggers of kind `question | context | factcheck` (only the kinds enabled in Preferences, at most 2 per pass) with a subject and query, steered by the sensitivity preference (conservative / balanced / eager) and by the live session prompt, which a conversation gets once and again after each edit. After 30 passes the session starts a new conversation, which opens with the recap (see *The classifier starts a new conversation every 30 passes*). Warmed at session start; 30 s timeout. A `question` becomes an `answer` card.
 
 **Card lanes** (`lanes.ts`). Every card-answering session takes `cardLaneOptions`: one system prompt (`buildResearchSystem()`: persona plus fixed operating rules — lead with the answer, notes first then web, no narration, cite, say "couldn't verify", never ask), the tools `WebSearch`, `WebFetch`, `Read`, `Grep`, `Glob` plus the user's own connectors, and the effort preference. The per-task instruction comes from `researchTask` (answer / context / fact-check), `replyTask`, `summaryTask`, `documentQuestionTask` or `documentResearchTask`. Two kinds of lane:
 
@@ -163,7 +163,7 @@ The placeholder-then-stream pattern keeps the card visible early. Until 2026-10-
 | Standalone app; MCP only as the client protocol for sources | An Advisor MCP server | MCP is request/response from a host: it cannot capture audio continuously or push cards. The agent SDKs reach Jira, Confluence and Slack as MCP clients, so the sources come with the user's connectors |
 | stdio NDJSON | WebSocket/gRPC | Simplest; lifecycle coupling is a feature here |
 | Apple SpeechAnalyzer, on-device | whisper.cpp (removed 2026-06-14) | Streaming endpointing, no hallucination from noise, far less echo, no native build or model to ship |
-| Classifier on the shared model, persistent session fed only new lines | A dedicated Haiku call; local heuristics | One provider/model knob; ~1–1.5 s warm; quality over cost (cost tracking was removed 2026-06-14) |
+| Classifier on the shared model, persistent session fed only new lines, a new conversation every 30 passes | A dedicated Haiku call; local heuristics | One provider/model knob; ~1–1.5 s warm; quality over cost (cost tracking was removed 2026-06-14) |
 | Persistent pooled lanes with per-lane cursors | A fresh agent per card | Skips the 5–10 s cold spawn; follow-ups resolve referents from session memory |
 | Placeholder + stream cards | Wait for complete answer | The card is visible at dispatch, even though the answer isn't |
 | Float toggle on an ordinary window | Non-activating `NSPanel` overlay | Simpler and behaves like any window; revisit if focus-stealing annoys |
@@ -2643,6 +2643,98 @@ and disabled, as Delete was, when the probe set that note as the live note. A
 probe that chose the item opened the note in Typora, the default Markdown app
 on that Mac. Not checked in the running app: the detail pane's `…` menu and the
 failure alert.
+
+## The classifier starts a new conversation every 30 passes (2026-11-09)
+
+Decision: after 30 classify passes, `ClassifierSession` (`trigger.ts`) resets
+its agent, so the next pass starts a new conversation. The agent opens that
+conversation with the recap, as after a failed classify (see *A restarted
+classifier gets the recent conversation*). At session start,
+`configureClassifier()` drops the `ClassifierSession`, so the next one counts
+from zero and has no last session prompt.
+
+The classifier also gets the live session prompt, in the same form as the
+research tasks (`sessionContextPrefix`). `AutoPipeline` reads it at each pass
+(`sessionContext` in its deps). It goes into the recap, after the earlier
+lines, so each new conversation gets it. A pass carries it before the covered
+list only when the conversation does not hold it, so an edit reaches the next
+pass. The first pass after a reset carries no copy, because its recap holds
+the prompt. When the prompt is blank, such a pass carries
+`SESSION_CONTEXT_REMOVED` instead ("Context for this session: (none). Drop
+the previous session context."), because a blank prompt has no text to
+replace the old one. Whitespace at the start or end of the prompt does not
+count as an edit.
+
+A failed pass that carried an update, or that started a conversation, can be
+in the conversation or not. That depends on the agent and on the failure, and
+the session cannot see it. So the next pass states the prompt, or "(none)". The words of the "(none)" line are
+correct in both cases. A failed pass with no update changes nothing. A
+`warm()` after a reset does nothing, because the first turn of a conversation
+is the only one that carries the recap.
+
+The session prompt is not in the system prompt, which is fixed when the
+session starts. Its text goes through `escapeTags`, as the window and the
+recap do, so a typed `</earlier>` cannot look like the recap's block. The
+classifier prompt gives the order of the parts of a message, says what the
+context is for, and says that the context is not a trigger by itself.
+
+Why not in every pass: a conversation grows by the size of each pass. A saved
+context of 30,000 characters in each of 30 passes is about 225,000 tokens in
+one conversation. When a pass that starts a new conversation also carries an
+update, the model gets the context twice. `ClassifierSession` cannot see when
+the agent starts a new conversation by itself, for example after a failed turn
+or after the CLI exits. The next pass can then carry an update and the recap.
+One case is a warm-up turn that times out (3 of 129 cold classifier runs in
+the log), after which the first pass can start the conversation. The cost is
+one more copy of the context; no context is lost. In the same cases, a
+"(none)" line can go to a conversation that never held a prompt, which costs
+one line. `TaskResult.contextLost` could tell the session about a dropped
+conversation, but the Claude agent never sets it, and the Codex agent sets it
+only for a turn that `interrupt()` stops or drops.
+
+Reason: in a 31-minute meeting on 2026-11-09 (sensitivity eager), the
+classifier ran 386 passes and gave 4 triggers, and none in the last 14 minutes.
+Each pass sees the words since the last pause, so passes are small (median 53
+characters) and frequent (about every 4.7 s). 98% of the replies in the
+conversation were `{"triggers":[]}`, and by then the conversation held about
+27,000 tokens of almost identical turns. 84 replies gave `{"triggers":[]}` and
+then went on to write the next user message, with transcript lines that nobody
+said. One of them answered a direct question about the product, which the
+prompt says to always trigger on. The parser takes the first object with a
+`triggers` array, so that pass counted as a success and its lines were not
+judged again. The earlier meeting that day had the same fault in 107 of 536
+replies. The first such reply came at about pass 45 in both meetings.
+
+A fresh classifier session, with the same prompt and model and the same 8,000
+character recap, triggered on 3 of 4 windows that the live session had missed.
+The session prompt changed the result of 1 of the 4: without it, the
+classifier did not know that a term in the question named a part of the
+product that the meeting was about, which the research agents can read.
+
+The limit of 30 passes is about 2.5 minutes of speech, and it is below the
+pass where the invented turns started. The recap covers about ten minutes, so
+a new conversation keeps the referents. Each new conversation spawns the CLI
+again. In the log, 124 of 129 cold classifier runs finished, with a median of
+2.7 s (up to 15 s), against 1.4 s warm. So the first pass of a conversation is
+about 1.3 s slower. A warm-up turn cannot hide that cost, because the recap goes
+only into the first turn of a conversation. A spawn with no turn could hide
+it, but the `Agent` interface has no such call. That is a possible later change.
+
+Rejected for now: a reply that has text after its JSON counts as a failed pass.
+It finds the invented turns, but not the plain empty replies that come from the
+same bias. Not chosen: a one-shot classify for each pass, with no
+conversation. The limit gets most of that benefit and keeps the warm session.
+
+Accepted limits: the pass count does not see a new conversation that the agent
+starts by itself after a failure (#46, #116). So a limit reset can come soon
+after one, and cost one more cold spawn.
+
+Verified: `trigger.test.ts` (`#classifier-bounded`, `#classifier-context`),
+`autoPipeline.test.ts` (`#classifier-context`), and `agent.test.ts` and
+`codex.test.ts` for the recap after a `reset()`. The
+evidence above is from `advisor.log` and the session note of that meeting, and
+from a probe that ran the missed windows through `classify()` on fresh
+sessions.
 
 ## Revisit as it grows
 

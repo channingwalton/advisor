@@ -216,6 +216,26 @@ test("#classifier-recap a recap goes into the first turn of each Codex thread on
   await third;
 });
 
+// The classifier resets its session at the pass limit (ClassifierSession).
+test("#classifier-bounded a reset Codex session opens its next thread with the recap", async () => {
+  const { calls, factory } = controlledThreads();
+  const session = new CodexAgentSession(base, factory);
+
+  const first = session.run("task1", undefined, 60_000, "RECAP1 ");
+  await setImmediate();
+  assert.equal(calls[0].input, "sp\n\nRECAP1 task1");
+  complete(calls[0], "a1");
+  await first;
+
+  session.reset();
+  const second = session.run("task2", undefined, 60_000, "RECAP2 ");
+  await setImmediate();
+  assert.equal(calls[1].threadId, null, "a reset drops the thread");
+  assert.equal(calls[1].input, "sp\n\nRECAP2 task2");
+  complete(calls[1], "a2");
+  await second;
+});
+
 /// The automatic-card classifier over `session`: `say` hears a line, and
 /// `pass` lets the debounce fire and the classify reach the session. Needs the
 /// test's setTimeout mocked.

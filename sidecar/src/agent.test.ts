@@ -200,6 +200,24 @@ test("#classifier-recap a recap goes before the first task of each new Claude co
   await r3;
 });
 
+// The classifier resets its session at the pass limit (ClassifierSession).
+test("#classifier-bounded a reset Claude session opens its next conversation with the recap", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+
+  const r1 = session.run("task1", undefined, 1000, "RECAP1 ");
+  assert.equal(await nextPrompt(spawns[0]), "RECAP1 task1");
+  spawns[0].messages.push(success("a1"));
+  await r1;
+
+  session.reset();
+  const r2 = session.run("task2", undefined, 1000, "RECAP2 ");
+  assert.equal(spawns.length, 2, "a reset spawns a new CLI");
+  assert.equal(await nextPrompt(spawns[1]), "RECAP2 task2");
+  spawns[1].messages.push(success("a2"));
+  await r2;
+});
+
 /// The automatic-card classifier over `session`: `say` hears a line, and
 /// `pass` lets the debounce fire and the classify reach the session. Needs the
 /// test's setTimeout mocked.

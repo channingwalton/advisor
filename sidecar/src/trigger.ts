@@ -1,13 +1,19 @@
-import { Agent, type AgentSessionOptions } from "./agent.js";
+import { Agent, type AgentSessionOptions, type TaskResult } from "./agent.js";
 import { createAgent } from "./providers.js";
 import { AdvisorConfig, modelArg } from "./config.js";
 import { log } from "./protocol.js";
-import { escapeTags } from "./prompts.js";
+import { escapeTags, sessionContextPrefix } from "./prompts.js";
 
 /// Safety cap on triggers emitted per classification pass — bounds card spam
 /// and concurrent research lanes from one noisy window. The user steers volume
 /// via triggerSensitivity; this is just a backstop, not a preference.
 const MAX_TRIGGERS_PER_PASS = 2;
+
+/// Classify passes in one classifier conversation. A pass runs after each
+/// pause in speech, about every 5 s, so 30 passes is about 2.5 minutes. A
+/// longer conversation fills with the classifier's own empty answers, and then
+/// it answers empty to clear questions (2026-11-09).
+export const CLASSIFIER_PASSES_PER_CONVERSATION = 30;
 
 export type ResearchKind = "question" | "context" | "factcheck";
 
@@ -146,6 +152,13 @@ Important properties of the input:
   and trigger research on it when it warrants looking something up.
 - A message can start with an <earlier> block: the conversation before the new lines, which
   you did not see. Use it only to understand the new lines. Never trigger on it.
+- After the <earlier> block, a message can carry the user's "Context for this session": who is
+  present, the topic, and the projects, notes or code that the research agents can read. It
+  comes early in the conversation and again after each edit, and it holds until a new one
+  comes. "Context for this session: (none)" means that no context applies now. Use it to
+  judge the new lines: a question about something it names is worth a trigger, because the
+  research agents can look it up. Never trigger on the context itself.
+- Then come the "Already covered" list and the new transcript lines.
 
 Your mission: behave like a sharp assistant sitting in the meeting who looks things up
 BEFORE being asked. ${SENSITIVITY[cfg.triggerSensitivity] ?? SENSITIVITY.balanced}
@@ -164,8 +177,67 @@ Rules:
   self-contained research instruction (include enough context to be understood alone).`;
 }
 
+/// The line that a pass carries when the session prompt is blank and the
+/// conversation can hold an old one, which a blank prompt has no text to
+/// replace. Its words are also correct for a conversation that holds none.
+export const SESSION_CONTEXT_REMOVED = "Context for this session: (none). Drop the previous session context.\n\n";
+
+/// The classifier's agent, with a new conversation after each
+/// `passLimit` passes. The agent opens a new conversation with the recap
+/// (`earlier` and the session prompt), so the next pass keeps the referents of
+/// what was said (#116).
+export class ClassifierSession {
+  private passes = 0;
+  /// The session prompt that the conversation holds: blank at the start, and
+  /// undefined when that is not known. A failed pass that carried an update
+  /// can be in the conversation or not, so the next pass states the prompt.
+  private lastContext?: string = "";
+  /// True after `reset()`: the next turn starts a conversation with the recap.
+  private recapPending = false;
+
+  constructor(
+    private readonly agent: Agent,
+    private readonly passLimit = CLASSIFIER_PASSES_PER_CONVERSATION
+  ) {}
+
+  /// One classify pass (see `classifyOn`). The pass carries the session
+  /// prompt only when the conversation does not hold it, and
+  /// `SESSION_CONTEXT_REMOVED` when the prompt is blank. The first pass after
+  /// `reset()` carries no copy, because its recap holds the prompt.
+  async classify(window: string, covered: string[], earlier: string, context: string): Promise<ClassifyResult> {
+    if (this.passes >= this.passLimit) {
+      log(`classifier: new conversation after ${this.passes} passes`);
+      this.reset();
+    }
+    const newConversation = this.recapPending;
+    this.recapPending = false;
+    this.passes++;
+    const held = this.lastContext;
+    const edited = !newConversation && (held === undefined || context.trim() !== held.trim());
+    const result = await classifyOn(this.agent, window, covered, earlier, context, edited);
+    if (result.ok) this.lastContext = context;
+    else if (edited || newConversation) this.lastContext = undefined;
+    return result;
+  }
+
+  /// A first turn that pays the cold spawn before a pass needs the agent.
+  /// The answer is discarded. After `reset()` it does nothing, because the
+  /// first turn of a conversation is the only one that carries the recap.
+  async warm(): Promise<TaskResult> {
+    if (this.recapPending) return { text: "" };
+    return this.agent.run("warm-up", undefined, 15_000);
+  }
+
+  /// Drop the conversation. The next pass starts a new one.
+  reset(): void {
+    this.agent.reset();
+    this.passes = 0;
+    this.recapPending = true;
+  }
+}
+
 let cfg: AdvisorConfig | undefined;
-let session: Agent | undefined;
+let session: ClassifierSession | undefined;
 
 export function configureClassifier(config: AdvisorConfig): void {
   cfg = config;
@@ -191,7 +263,7 @@ export function classifierOptions(config: AdvisorConfig): AgentSessionOptions {
   };
 }
 
-function ensureSession(): Agent {
+function ensureSession(): ClassifierSession {
   if (!session) {
     const config =
       cfg ??
@@ -203,7 +275,7 @@ function ensureSession(): Agent {
         effort: "",
         allowMcpActions: false,
       } as AdvisorConfig);
-    session = createAgent(config.provider, classifierOptions(config));
+    session = new ClassifierSession(createAgent(config.provider, classifierOptions(config)));
   }
   return session;
 }
@@ -217,7 +289,7 @@ export function resetClassifier(): void {
 /// card appears. Best-effort; the warm-up "answer" is discarded.
 export async function warmClassifier(): Promise<void> {
   try {
-    await ensureSession().run("warm-up", undefined, 15_000);
+    await ensureSession().warm();
   } catch {
     /* best effort */
   }
@@ -232,35 +304,49 @@ export async function warmClassifier(): Promise<void> {
 export type ClassifyResult = { ok: true; triggers: Trigger[] } | { ok: false };
 
 /// One classify pass on the classifier session. `earlier` is the end of the
-/// conversation before `window` (see `classifyOn`).
-export async function classify(window: string, covered: string[], earlier = ""): Promise<ClassifyResult> {
-  return classifyOn(ensureSession(), window, covered, earlier);
+/// conversation before `window`, and `context` is the live session prompt
+/// (see `classifyOn`).
+export async function classify(window: string, covered: string[], earlier = "", context = ""): Promise<ClassifyResult> {
+  return ensureSession().classify(window, covered, earlier, context);
 }
 
 /// One classify pass on `session`. `earlier` goes to the session as the recap,
 /// so only a pass that starts a new session or thread sends it (#116). A
-/// session that keeps its conversation already holds those lines.
+/// session that keeps its conversation already holds those lines. `context`,
+/// the live session prompt, goes into the recap after them, and into the pass
+/// when `edited`. So a conversation gets it once, and again after each edit: a
+/// copy in every pass grows the conversation by its whole size on each pass.
+/// An edit to a blank prompt sends `SESSION_CONTEXT_REMOVED`, so the model
+/// drops the old one. By default, only a prompt with text is an edit.
+/// It goes through `escapeTags`, as the window and the recap do, so a typed
+/// `</earlier>` cannot look like the recap's block.
 export async function classifyOn(
   session: Agent,
   window: string,
   covered: string[],
-  earlier: string
+  earlier: string,
+  context = "",
+  edited = context.trim() !== ""
 ): Promise<ClassifyResult> {
-  const prompt = `Already covered: ${covered.join(", ") || "(none)"}
+  const contextBlock = sessionContextPrefix(escapeTags(context));
+  const update = edited ? contextBlock || SESSION_CONTEXT_REMOVED : "";
+  const prompt = `${update}Already covered: ${covered.join(", ") || "(none)"}
 
 Transcript window (newest last):
 ${escapeTags(window)}
 
 JSON:`;
-  const { text, error } = await session.run(prompt, undefined, 30_000, earlierBlock(earlier));
+  const recap = (earlierBlock(earlier) ?? "") + contextBlock;
+  const { text, error } = await session.run(prompt, undefined, 30_000, recap || undefined);
   return parseClassifierResponse(text, error);
 }
 
 /// The recap block of a classify pass, or undefined for no earlier lines. A
 /// typed note goes into the transcript, so it can be in the recap. A note
 /// that holds `</earlier>` ended the block early (#125), so the text goes
-/// through `escapeTags`. The text keeps its length, so the recap bound
-/// (CLASSIFIER_RECAP_CHARS) still holds.
+/// through `escapeTags`. The text keeps its length, so the bound on the earlier
+/// lines (CLASSIFIER_RECAP_CHARS) still holds. The session prompt that follows
+/// this block in the recap has no bound.
 function earlierBlock(earlier: string): string | undefined {
   if (!earlier) return undefined;
   const text = escapeTags(earlier);

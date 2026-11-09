@@ -262,6 +262,7 @@ async function runSummariseLive(msg: Extract<Inbound, { type: "summarise_live" }
 const pipeline = new AutoPipeline({
   transcript,
   classify,
+  sessionContext: () => live.context,
   freeLane: () => research.free(),
   releaseLane: (lane) => research.release(lane),
   research: (lane, t, textSent) =>
