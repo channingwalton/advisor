@@ -2736,6 +2736,69 @@ evidence above is from `advisor.log` and the session note of that meeting, and
 from a probe that ran the missed windows through `classify()` on fresh
 sessions.
 
+## The classifier triggers on named terms and implied numbers (2026-11-09)
+
+Decision: at the eager sensitivity, the "context" kind of the classifier
+prompt (`EAGER_KIND_DESCRIPTIONS` in `trigger.ts`) says to always trigger on
+an unfamiliar term or acronym, also when the speaker gives a short
+definition. It also says to trigger on a statement that implies numbers that
+nobody gives: cost, price, scale or supply. The eager "factcheck" kind says
+that a claim stated as fact is a "factcheck", not a "context". The examples
+in the prompt do not occur in the sessions below, so the replay does not only
+measure an echo of them. They are "RAG" (retrieval-augmented generation),
+"TPU" (tensor processing unit), "GDPR" (General Data Protection Regulation)
+and "these licences are very expensive".
+
+Balanced and conservative keep `KIND_DESCRIPTIONS`, so their prompt does not
+change. The replay tested only eager, and an "ALWAYS" on terms contradicts
+the conservative text ("When unsure, stay silent").
+
+Reason: two sessions on the evening of 2026-11-09 (sensitivity eager) missed
+clear triggers. Neither reached the 30-pass limit. A talk on AI hardware got
+1 card, and then none for its last 2 minutes. It missed an acronym that the
+speaker defined, the key-value (KV) cache, and a remark that a type of
+memory chip was very expensive. The prompt already named both cases. A news
+segment missed a claim about election results against the polls.
+
+Evidence: a harness rebuilt each live pass from `advisor.log` (the window, the
+covered list, the recap and the session prompt) and ran it through
+`ClassifierSession` with the real model, several runs for each prompt.
+
+- The "Already covered" list was not the cause. Over 3 runs, the classifier
+  gave 26 cards with the list and 19 without it.
+- The misses were variance near the threshold, and the live runs were at the
+  low end of the replay range. Each line gets one pass, so a borderline line
+  that misses once gets no card.
+- Old prompt against new prompt, 5 runs each: the defined acronym 2 of 5 runs
+  against 5 of 5, and the cost remark 0 of 5 against 5 of 5. Fact-check cards
+  went from 19 to 21.
+- The change does not address the election claim. The old prompt caught it
+  in 5 of 5 runs and the new prompt in 4 of 5, so the live miss was variance.
+- A noise check on a different session: a 51-minute meeting on the same day,
+  525 passes, 3 runs for each prompt, with the pipeline's own covered list and
+  its 10-minute expiry. Cards per run went from 11–16 to 13–19. The extra
+  cards were on topic: a named product, two claims that the user stated, and a
+  cost that the meeting discussed. One run had one near-duplicate card. One
+  question went from 2 of 3 runs to 0 of 3, but the next line answered it.
+
+Rejected: a first version also put "results" into the numbers rule and "a
+claim about a measurable outcome" into the "factcheck" kind. It, and a second
+version without these two changes, got the same gains on terms and costs.
+But both moved claims to "context": fact-check cards fell from 19 to 12, and
+a claim about a political appointment became a context card in 3 of 5 runs.
+The "factcheck" sentence fixed that.
+
+Accepted limits: the replay covered 3 sessions, and 2 of them were broadcast
+monologues. The 2 sessions that showed the misses are in the test set. A
+borderline line still gets one pass. With the "context" kind off, the eager
+"factcheck" text still names "context"; the parser drops a trigger of a kind
+that is off.
+
+Verified: `trigger.test.ts` (`#classifier-terms-numbers`,
+`#classifier-claims-factcheck`) pins the eager text, checks that balanced and
+conservative keep the earlier text, and checks the kind toggles. The replay
+above is the evidence that the model follows the text.
+
 ## Revisit as it grows
 
 - The approach to echo suppression.

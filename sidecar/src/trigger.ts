@@ -131,10 +131,28 @@ const KIND_DESCRIPTIONS: Record<keyof AdvisorConfig["triggers"], string> = {
   capabilities, "X said/does Y") and verifying it would add value.`,
 };
 
+/// The context and factcheck kinds at "eager" (DESIGN.md, *The classifier
+/// triggers on named terms and implied numbers*). A replay tested this text
+/// only at eager, and its ALWAYS on terms contradicts "conservative", so the
+/// other sensitivities keep KIND_DESCRIPTIONS.
+const EAGER_KIND_DESCRIPTIONS: Pick<typeof KIND_DESCRIPTIONS, "context" | "factcheck"> = {
+  context: `- "context": a named project, system, person, company, product, acronym, ticket, or topic
+  is being discussed where background, definitions, or recent news would help a
+  participant. Unfamiliar terms and acronyms are prime candidates: ALWAYS trigger on one
+  (e.g. "RAG", "TPU", "GDPR"), even when the speaker gives a short definition, because the
+  card adds the depth that the speaker skips. Also use this when a statement implies numbers
+  that nobody gives: cost, price, scale or supply (e.g. "these licences are very
+  expensive") → fetch the actual numbers.`,
+  factcheck: `${KIND_DESCRIPTIONS.factcheck} A claim stated as fact
+  is a "factcheck", not a "context", even when it names a person, role or topic.`,
+};
+
 function classifierSystem(cfg: AdvisorConfig): string {
-  const kinds = (Object.keys(KIND_DESCRIPTIONS) as (keyof AdvisorConfig["triggers"])[])
+  const descriptions =
+    cfg.triggerSensitivity === "eager" ? { ...KIND_DESCRIPTIONS, ...EAGER_KIND_DESCRIPTIONS } : KIND_DESCRIPTIONS;
+  const kinds = (Object.keys(descriptions) as (keyof AdvisorConfig["triggers"])[])
     .filter((k) => cfg.triggers[k])
-    .map((k) => KIND_DESCRIPTIONS[k])
+    .map((k) => descriptions[k])
     .join("\n");
   return `You are the trigger detector for a proactive realtime meeting
 assistant. Each user message contains the lines of a LIVE SPEECH-TO-TEXT transcript that

@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Agent, TaskResult } from "./agent.js";
+import { mergeConfig } from "./config.js";
 import { sessionContextPrefix } from "./prompts.js";
 import {
   ClassifierSession,
+  classifierOptions,
   classifyOn,
   documentResearchTask,
   parseClassifierResponse,
@@ -389,6 +391,48 @@ test("#classifier-bounded a reset counts the passes from zero again", async () =
   await classifier.classify("them: three", [], "", "");
   await classifier.classify("them: four", [], "", "");
   assert.deepEqual(events, ["run", "reset", "run", "run", "reset", "run"]);
+});
+
+const ALL_KINDS = { question: true, context: true, factcheck: true };
+
+/// The classifier's system prompt at a sensitivity, with only the given kinds enabled.
+function classifierPrompt(triggerSensitivity: string, triggers = ALL_KINDS): string {
+  return classifierOptions(mergeConfig({ triggerSensitivity, triggers })).systemPrompt;
+}
+
+// A replay of three sessions on 2026-11-09 (DESIGN.md, *The classifier
+// triggers on named terms and implied numbers*): at eager, an acronym that the
+// speaker defined got a card in 2 of 5 runs, and a remark that a part was very
+// expensive in 0 of 5. These tests pin the prompt text; the replay is the
+// evidence that the model follows it.
+test("#classifier-terms-numbers at eager, the context kind triggers on a named term and on numbers that nobody gives", () => {
+  const prompt = classifierPrompt("eager");
+  assert.match(prompt, /ALWAYS trigger on one[\s\S]*even when the speaker gives a short definition/);
+  assert.match(prompt, /a statement implies numbers\s+that nobody gives: cost, price, scale or supply/);
+  assert.doesNotMatch(classifierPrompt("eager", { ...ALL_KINDS, context: false }), /ALWAYS trigger on one|implies numbers/);
+});
+
+// The replay tested only eager, and an ALWAYS on terms contradicts
+// "conservative" ("When unsure, stay silent").
+test("#classifier-terms-numbers balanced and conservative keep the earlier context text", () => {
+  for (const level of ["balanced", "conservative"]) {
+    const prompt = classifierPrompt(level);
+    assert.match(prompt, /Unfamiliar terms and acronyms are prime candidates\. Also use this when a/, level);
+    assert.doesNotMatch(prompt, /ALWAYS trigger on one|implies numbers/, level);
+  }
+});
+
+// Without this sentence, the rules above moved claims about named people from
+// factcheck to context cards: 19 factchecks fell to 12.
+test("#classifier-claims-factcheck at eager, a claim stated as fact is a factcheck, not a context", () => {
+  assert.match(classifierPrompt("eager"), /A claim stated as fact\s+is a "factcheck", not a "context"/);
+  assert.doesNotMatch(classifierPrompt("eager", { ...ALL_KINDS, factcheck: false }), /A claim stated as fact/);
+});
+
+test("#classifier-claims-factcheck balanced and conservative do not have the claim rule", () => {
+  for (const level of ["balanced", "conservative"]) {
+    assert.doesNotMatch(classifierPrompt(level), /A claim stated as fact/, level);
+  }
 });
 
 /// Each tag of the follow-up prompt occurs once in `task`: the block's own.

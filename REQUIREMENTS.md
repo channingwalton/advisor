@@ -28,7 +28,9 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F6. Detect, in the transcript stream:
   - questions asked aloud,
   - entities/topics warranting background context (projects, people, tickets, technologies),
+    - At the eager sensitivity, an unfamiliar term or acronym that a speaker names is worth a context card, also when the speaker defines it. So is a statement that implies numbers that nobody gives (cost, price, scale or supply). Balanced and conservative do not have this rule. `#classifier-terms-numbers`
   - factual claims worth verifying.
+    - At the eager sensitivity, a claim stated as fact is a fact-check, not a context card, also when it names a person, role or topic. Balanced and conservative do not have this rule. `#classifier-claims-factcheck`
 - F6a. Trigger sensitivity (conservative / balanced / eager) and a toggle per kind (answer / context / fact-check), set in Preferences, tune how readily cards appear.
 - F7. Maintain rolling conversation context so retrieval is topic-aware, not utterance-by-utterance.
   - A research or query lane whose session lost the conversation, after a failed card, a cancelled Codex card or a Claude CLI that stopped between cards, is sent the whole conversation again, so its next card keeps the earlier context (issues #112, #126). `#context-lane-recycle`
