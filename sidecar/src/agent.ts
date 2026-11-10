@@ -28,6 +28,9 @@ export function agentCwd(home: string): string {
 }
 
 /// Paths (relative to $HOME) the agents may never read, even inside $HOME.
+/// A denylist: a credential store that is not named here is readable. The
+/// Codex Seatbelt profile uses the same list (minus Codex's own state), so a
+/// Codex connector cannot read these either.
 const DENY_NAMES = [
   ".ssh",
   ".aws",
@@ -44,6 +47,29 @@ const DENY_NAMES = [
   ".config/gh",
   "Library/Keychains",
   "Library/Cookies",
+  // GHSA-6xc8-f55f-jxqr. Shell and REPL history: commands with inline secrets.
+  ".zsh_history", ".zhistory", ".zsh_sessions", ".bash_history", ".bash_sessions", ".history",
+  ".local/share/fish", ".python_history", ".node_repl_history", ".psql_history",
+  ".mysql_history", ".sqlite_history",
+  // Cloud, deploy and password-manager credentials.
+  ".config/gcloud", ".azure", ".oci", ".boto", ".s3cfg", ".terraform.d", ".terraformrc",
+  ".vault-token", ".config/doctl", ".config/op", ".password-store", ".config/git/credentials",
+  ".config/github-copilot",
+  // Package-registry and database credentials.
+  ".pypirc", ".pgpass", ".cargo/credentials", ".cargo/credentials.toml", ".gem/credentials",
+  ".m2/settings.xml", ".ivy2/.credentials", ".sbt/.credentials", ".gradle/gradle.properties",
+  ".yarnrc", ".yarnrc.yml", ".config/hub", ".config/glab-cli",
+  // Other MCP clients' configuration, which holds server tokens.
+  ".cursor", ".codeium", ".config/zed", "Library/Application Support/Claude",
+  // Browser profiles: saved passwords, cookies, history.
+  "Library/Application Support/Google", "Library/Application Support/Chromium",
+  "Library/Application Support/Firefox",
+  "Library/Application Support/BraveSoftware", "Library/Application Support/Microsoft Edge",
+  "Library/Application Support/Arc", "Library/Application Support/Vivaldi",
+  "Library/Application Support/com.operasoftware.Opera", "Library/Safari",
+  // Electron and Chromium apps: session cookies and tokens.
+  "Library/Application Support/Slack", "Library/Application Support/discord",
+  "Library/Application Support/Code", "Library/Application Support/Cursor",
 ];
 
 export function deniedPaths(home: string): string[] {
@@ -51,11 +77,12 @@ export function deniedPaths(home: string): string[] {
 }
 
 /// Resolve a tool path argument to an absolute root. undefined/null/"" means the
-/// tool defaults to cwd; a non-string is invalid (null).
+/// tool defaults to cwd; a non-string is invalid (null). Not normalised: see
+/// `canonical`.
 function resolveRoot(cwd: string, p: unknown): string | null {
   if (p === undefined || p === null || p === "") return cwd;
   if (typeof p !== "string") return null;
-  return path.resolve(cwd, p);
+  return path.isAbsolute(p) ? p : `${cwd}/${p}`;
 }
 
 /// macOS's default filesystem is case-insensitive, so `~/.SSH/id_rsa` reaches
@@ -67,6 +94,14 @@ function isUnder(child: string, parent: string): boolean {
   const p = parent.toLowerCase();
   return c === p || c.startsWith(p + path.sep);
 }
+
+/// realpath(3): the path as the filesystem stores it. Node's JS `realpathSync`
+/// resolves symlinks but keeps each name as given, and APFS folds more than
+/// ASCII case: `.ſsh` (long s), `.ßh` and `.conﬁg` (fi ligature) open `.ssh`
+/// and `.config`. The lower-cased compare of the given spelling passed them
+/// (GHSA-6xc8-f55f-jxqr). The native call returns the stored names, so
+/// `isUnder` compares what the filesystem will open.
+const REALPATH = (p: string): string => fs.realpathSync.native(p);
 
 /// Resolve symlinks so the denylist sees the real target, not a link that
 /// points into a denied dir (e.g. ~/Documents/x -> ~/.ssh). A purely lexical
@@ -88,6 +123,22 @@ function realResolve(abs: string, realpath: (p: string) => string): string {
   }
 }
 
+/// `abs` resolved by the filesystem, then normalised.
+function canonical(abs: string, realpath: (p: string) => string): string {
+  return path.resolve(realResolve(abs, realpath));
+}
+
+/// The paths that the policy judges for `abs`, which a `..` can make two. The
+/// kernel follows a symlink before it applies a later `..`, so with `k ->
+/// ~/.ssh/keys`, `~/Documents/k/../id` opens `~/.ssh/id`. A caller that
+/// normalises first (the CLI does, for Read) applies the `..` first, so with
+/// `deep -> ~/work/sub`, `~/deep/../.ssh/id` opens `~/.ssh/id`. A Grep or
+/// Glob `path` reaches the gate unexpanded, and a later CLI may stop
+/// normalising, so both forms are judged (code review 2026-11-10).
+function judgedForms(abs: string, realpath: (p: string) => string): string[] {
+  return [...new Set([canonical(abs, realpath), canonical(path.resolve(abs), realpath)])];
+}
+
 /// Read policy: any non-sensitive file at or under $HOME; nothing outside.
 /// Keep both lexical and resolved denied roots: a credential directory may
 /// itself be a symlink (e.g. ~/.ssh -> ~/dotfiles/.ssh).
@@ -96,15 +147,22 @@ export function readPathAllowed(
   home: string,
   cwd: string,
   p: unknown,
-  realpath: (p: string) => string = fs.realpathSync
+  realpath: (p: string) => string = REALPATH
 ): boolean {
   const r0 = resolveRoot(cwd, p);
   if (r0 === null) return false;
-  const r = realResolve(r0, realpath);
-  if (!isUnder(r, home)) return false;
-  return !deniedPaths(home).some((d) =>
-    isUnder(r, d) || isUnder(r, realResolve(d, realpath))
-  );
+  const forms = judgedForms(r0, realpath);
+  // A form holds the stored form of each name, which can differ from $HOME's
+  // (NFD and NFC spellings of an accented name), so compare with both.
+  const homes = [home, canonical(home, realpath)];
+  if (!forms.every((r) => homes.some((h) => isUnder(r, h)))) return false;
+  const roots = deniedRoots(home, realpath);
+  return !forms.some((r) => roots.some((d) => isUnder(r, d)));
+}
+
+/// Each denied path, lexical and resolved.
+function deniedRoots(home: string, realpath: (p: string) => string): string[] {
+  return [...new Set(deniedPaths(home).flatMap((d) => [d, canonical(d, realpath)]))];
 }
 
 /// Search (Grep/Glob) policy: stricter than Read because these recurse — a
@@ -117,13 +175,11 @@ export function searchRootAllowed(
   home: string,
   cwd: string,
   p: unknown,
-  realpath: (p: string) => string = fs.realpathSync
+  realpath: (p: string) => string = REALPATH
 ): boolean {
   if (!readPathAllowed(home, cwd, p, realpath)) return false;
-  const r = realResolve(resolveRoot(cwd, p)!, realpath);
-  return !deniedPaths(home).some((d) =>
-    isUnder(d, r) || isUnder(realResolve(d, realpath), r)
-  );
+  const roots = deniedRoots(home, realpath);
+  return !judgedForms(resolveRoot(cwd, p)!, realpath).some((r) => roots.some((d) => isUnder(d, r)));
 }
 
 /** Unbounded async queue usable as the SDK's streaming prompt input. */
@@ -358,7 +414,7 @@ export type ToolDecision = { behavior: "allow" } | { behavior: "deny"; message: 
 /// retries with an absolute one.
 function absolutePath(p: unknown, home: string): string | null {
   if (typeof p !== "string") return null;
-  const expanded = p === "~" ? home : p.startsWith("~/") ? path.join(home, p.slice(2)) : p;
+  const expanded = p === "~" ? home : p.startsWith("~/") ? home + p.slice(1) : p;
   return path.isAbsolute(expanded) ? expanded : null;
 }
 
@@ -391,7 +447,7 @@ export function toolDecision(toolName: string, input: unknown, policy: SandboxPo
     };
   }
   const args = (input !== null && typeof input === "object" ? input : {}) as Record<string, unknown>;
-  const { home, cwd, realpath = fs.realpathSync } = policy;
+  const { home, cwd, realpath = REALPATH } = policy;
   const deniedPath: ToolDecision = {
     behavior: "deny",
     message: `Access denied: ${toolName} needs an absolute path to a non-sensitive file or folder in the home directory`,

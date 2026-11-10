@@ -42,6 +42,16 @@ function scripted(id: string): { name: string; input: Record<string, unknown> } 
     case "mcpRead": return { name: "mcp__stub__lookup", input: {} };
     case "mcpAction": return { name: "mcp__stub__share_file", input: {} };
     case "mcpCompound": return { name: "mcp__stub__findAndReplace", input: {} };
+    // GHSA-6xc8-f55f-jxqr: a spelling that APFS folds to `.ssh`, and a store from
+    // the extended denylist.
+    case "foldedSpelling": return { name: "Read", input: { file_path: "~/.\u017Fsh/synthetic-key" } };
+    case "shellHistory": return { name: "Read", input: { file_path: "~/.zsh_history" } };
+    case "foldedGlob": return { name: "Glob", input: { path: "~/.\u00DFh", pattern: "*" } };
+    case "linkDotDotGlob": return { name: "Glob", input: { path: `${p("Documents")}/k/..`, pattern: "*" } };
+    // A symlink followed by `..`, judged in the kernel's form (`k` first) and in
+    // the lexical form (`..` first), whichever the CLI opens.
+    case "linkDotDot": return { name: "Read", input: { file_path: `${p("Documents")}/k/../synthetic-key` } };
+    case "lexicalDotDot": return { name: "Read", input: { file_path: `${p("deep")}/../.ssh/synthetic-key` } };
     default: throw new Error(`no script for ${id}`);
   }
 }
@@ -82,10 +92,13 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, raw: string
 before(async () => {
   home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-sdk-sb-")));
   work = path.join(home, "work");
-  for (const dir of [".ssh", ".claude", "Documents", "work"]) fs.mkdirSync(path.join(home, dir));
+  for (const dir of [".ssh", ".ssh/sub", ".claude", "Documents", "work", "work/sub"]) fs.mkdirSync(path.join(home, dir));
+  fs.symlinkSync(path.join(home, ".ssh", "sub"), path.join(home, "Documents", "k"));
+  fs.symlinkSync(path.join(home, "work", "sub"), path.join(home, "deep"));
   fs.writeFileSync(path.join(home, ".ssh", "synthetic-key"), SECRET);
   fs.writeFileSync(path.join(home, ".ssh", HIDDEN_NAME), SECRET);
   fs.writeFileSync(path.join(home, ".claude", "secret.txt"), SECRET);
+  fs.writeFileSync(path.join(home, ".zsh_history"), SECRET);
   fs.writeFileSync(path.join(home, "Documents", "notes.txt"), NOTES);
   // The user's own settings allow a path the denylist refuses — the shape found
   // in a real ~/.claude/settings.json (`Read(~/.claude/**)`).
@@ -155,6 +168,44 @@ test("#sandbox-glob-pattern harness control: a scoped Glob lists its files", asy
 test("#sandbox-glob-pattern an absolute pattern cannot search outside its checked root", async () => {
   const out = await toolResult(session(work), "globEscape");
   assert.ok(!out.includes(HIDDEN_NAME), out);
+});
+
+test("#sandbox-fold-spelling a spelling that the filesystem folds to a denied path is not read", async (t) => {
+  if (!fs.existsSync(path.join(home, ".ſsh"))) return t.skip("this filesystem does not fold names");
+  const out = await toolResult(session(work), "foldedSpelling");
+  assert.ok(!out.includes(SECRET), out);
+  assert.ok(out.includes("Access denied"), out);
+  // A Glob `path` takes another route to the gate (unexpanded), and `.ßh` is
+  // another folded spelling.
+  if (!fs.existsSync(path.join(home, ".\u00DFh"))) return t.skip("this filesystem does not fold ß");
+  const glob = await toolResult(session(work), "foldedGlob");
+  assert.ok(!glob.includes(HIDDEN_NAME), glob);
+  assert.ok(glob.includes("Access denied"), glob);
+});
+
+test("#sandbox-credential-stores a credential store from the extended list is not read", async () => {
+  const out = await toolResult(session(work), "shellHistory");
+  assert.ok(!out.includes(SECRET), out);
+  assert.ok(out.includes("Access denied"), out);
+});
+
+test("#sandbox-symlink-read a symlink followed by .. cannot reach a denied file", async () => {
+  // The CLI normalises a Read path before the gate (seen 2026-11-10), so it
+  // opens the lexical form: `~/.ssh/…` for `deep/../.ssh/…`, which the gate
+  // denies, and the missing `Documents/synthetic-key` for `k/../…`. A CLI that
+  // stopped normalising would open the kernel's form, which the gate denies.
+  const lexical = await toolResult(session(work), "lexicalDotDot");
+  assert.ok(!lexical.includes(SECRET), lexical);
+  assert.ok(lexical.includes("Access denied"), lexical);
+  const link = await toolResult(session(work), "linkDotDot");
+  assert.ok(!link.includes(SECRET), link);
+  assert.ok(link.includes("Access denied") || link.includes("File does not exist"), link);
+  // A Glob `path` with `k/..`: the kernel's form is `~/.ssh`. The CLI also
+  // normalises a Glob path before it searches (seen 2026-11-10), so the old
+  // gate's allow listed `Documents`, not `~/.ssh`: the deny is a second layer.
+  const glob = await toolResult(session(work), "linkDotDotGlob");
+  assert.ok(!glob.includes(HIDDEN_NAME), glob);
+  assert.ok(glob.includes("Access denied"), glob);
 });
 
 test("#sandbox-explicit-paths a ~ path to an ordinary file still reaches the model", async () => {

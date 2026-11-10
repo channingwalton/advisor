@@ -312,6 +312,77 @@ change between versions).
 
 Commit: `a21dd2e`.
 
+### Folded spellings and more credential stores (2026-11-10, GHSA-6xc8-f55f-jxqr)
+
+The GitHub Security Advisory (GHSA) reports three ways past the read denylist
+of the Claude backend.
+With `WebFetch`, an agent under prompt injection could then send a credential
+out. This change fixes two of them: folded spellings and missing credential
+stores. It also fixes a fault that a code review found, with `..` after a
+symlink.
+
+- **Spellings that APFS folds.** The Apple File System (APFS) folds more than
+  ASCII case: `~/.ſsh` (long s), `~/.ßh` and `~/.conﬁg` (fi ligature) open
+  `~/.ssh` and `~/.config`. The JS `fs.realpathSync` of Node keeps the given
+  spelling, so the lower-cased compare passed these paths. The real CLI
+  returned a synthetic key for `Read ~/.ſsh/…`. The policy now resolves with
+  `fs.realpathSync.native`, which returns each name as the filesystem stores
+  it. The lower-cased compare stays for paths that do not exist. `$HOME` is
+  compared in its given and its stored form: an accented home name can be
+  stored in Unicode Normalisation Form D (NFD) while `$HOME` holds
+  Normalisation Form C (NFC), and the stored form alone refused every read.
+- **A symlink followed by `..`.** A `..` after a symlink gives a path two
+  forms. The kernel follows the symlink first: with `~/Documents/k ->
+  ~/.ssh/keys`, `~/Documents/k/../id` opens `~/.ssh/id`. A caller that
+  normalises first applies the `..` first: with `~/deep -> ~/work/sub`,
+  `~/deep/../.ssh/id` opens `~/.ssh/id`. The policy judged only the
+  normalised form. It now judges both forms, and denies when either is denied.
+  The bundled CLI normalises a Read path before the PreToolUse hook, and a
+  Glob path before it searches, so it opens the normalised form. The check of
+  the kernel's form is a second layer, against a CLI that stops normalising.
+- **More credential stores.** The denylist adds shell and REPL history; cloud,
+  deploy and password-manager credentials; package-registry and database
+  credentials; the configuration of other MCP clients, which holds server
+  tokens; browser profiles; and the profiles of Electron apps (Slack, Discord,
+  VS Code, Cursor), which hold session cookies.
+
+The fault with connector arguments is still open. `toolDecision` judges a
+connector tool by its name only, so the read verb of a local filesystem
+connector passes `read_file {path: "~/.ssh/id_rsa"}`, and `ReadMcpResource`
+passes a `file:` URI. Rejected for it:
+
+- A check of each argument string as a possible path. Three code reviews each
+  found new argument forms: other URI schemes, percent-encoding, and a path
+  inside a larger string. The check refused ordinary text such as
+  "Progress: 50% done". One of its fixes let a string such as `ab:ab:ab:…`
+  take exponential time, which can stop the sidecar.
+- A refusal of connector tools that have a file word in the name. A name rule
+  misses tools, and it refuses useful tools such as a Drive file search.
+
+Next: a denylist fails open, because a credential store that it does not name
+is readable. An allowlist of readable folders, set in Preferences, follows as
+the boundary for both backends. The denylist will then only refuse an allowed
+folder that is at, under or above a denied path. The Claude CLI, and the stdio
+connectors that it starts, will run under a Seatbelt profile built from the
+allowlist. Only a local stdio connector can read files, and the kernel then
+refuses each read outside the allowed folders, whatever form the argument has.
+The cost: a stdio connector that reads its own credentials outside the allowed
+folders stops working, and `~/.claude` must stay readable for the CLI.
+
+Limits:
+
+- The Codex Seatbelt profile gets the new entries too. A Codex connector (with
+  actions on) that reads its own credentials from, for example,
+  `~/.config/gcloud` fails.
+- The Codex profile builder still resolves with the JS `fs.realpathSync`, but
+  Seatbelt matches the name as the filesystem stores it. Under a rule for
+  `.ssh`, `sandbox-exec` refused reads through `.ſsh`, `.ßh` and `.SSH`, and a
+  rule spelled in NFC refused a folder stored in NFD, while an ordinary file
+  stayed readable (checked 2026-11-10). So the Codex profile has neither
+  fault.
+- Until the allowlist is in place, a credential store that the denylist does
+  not name is readable, and so is each file that a local connector reads.
+
 ## Connector tools (2026-06-13)
 
 The user's MCP connectors, loaded through their Claude settings, pass the

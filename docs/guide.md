@@ -295,9 +295,10 @@ On **Claude**, a tool policy limits each research agent call:
   tools, and tools that the policy does not recognise, need **Allow connector
   actions**.
 - Files under your home folder can be read, but not changed. Credential paths
-  (`~/.ssh`, `~/.aws`, `~/.claude`, `~/.codex`, keychains, …) are denied, also
-  through symlinks and in any letter case. A file search must name a folder
-  that holds no credential path.
+  (`~/.ssh`, `~/.aws`, `~/.claude`, `~/.codex`, keychains, shell history,
+  browser profiles, …) are denied, also through symlinks and in any spelling
+  that the disk treats as the same name, such as a different letter case. A
+  file search must name a folder that holds no credential path.
 - No shell, and no other Claude Code tool (skills, scheduling, sub-agents, …).
 
 The policy applies before the permission rules of Claude Code, so allow rules

@@ -150,6 +150,118 @@ test("#sandbox-symlink-permitted keeps ordinary files and scoped searches access
   }
 });
 
+// GHSA-6xc8-f55f-jxqr: APFS folds more than ASCII case. `.ſsh` (long s), `.ßh`
+// and `.conﬁg` (fi ligature) open `.ssh` and `.config`. The JS realpath keeps
+// the spelling as given, so the lower-cased compare missed them. Skipped on a
+// filesystem that does not fold names (CI runs the sidecar on Linux).
+function foldingHome(t: TestContext): string | undefined {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-fold-sb-")));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  for (const dir of [".ssh", ".config/gh", "Documents"]) fs.mkdirSync(path.join(home, dir), { recursive: true });
+  fs.writeFileSync(path.join(home, ".ssh", "synthetic-key"), "synthetic credential");
+  fs.writeFileSync(path.join(home, ".config", "gh", "hosts.yml"), "synthetic credential");
+  fs.writeFileSync(path.join(home, "Documents", "notes.txt"), "ordinary notes");
+  if (fs.existsSync(path.join(home, ".ſsh"))) return home;
+  t.skip("this filesystem does not fold names");
+  return undefined;
+}
+
+test("#sandbox-fold-spelling denies each spelling that the filesystem folds to a denied path", (t) => {
+  const home = foldingHome(t);
+  if (home === undefined) return;
+  const files = [".ſsh/synthetic-key", ".ßh/synthetic-key", ".SSH/synthetic-key", ".conﬁg/gh/hosts.yml", ".ſsh/missing/key"];
+  assert.deepEqual(files.filter((p) => readPathAllowed(home, home, path.join(home, p))), []);
+  const roots = [".ſsh", ".ßh", ".conﬁg", ".conﬁg/gh"];
+  assert.deepEqual(roots.filter((p) => searchRootAllowed(home, home, path.join(home, p))), []);
+  const policy: SandboxPolicy = { home, cwd: home, allowMcpActions: false };
+  assert.equal(toolDecision("Read", { file_path: "~/.ſsh/synthetic-key" }, policy).behavior, "deny");
+  assert.equal(toolDecision("Glob", { path: "~/.conﬁg", pattern: "**" }, policy).behavior, "deny");
+  // Control: an ordinary file in the same home is still readable.
+  assert.equal(toolDecision("Read", { file_path: "~/Documents/notes.txt" }, policy).behavior, "allow");
+});
+
+test("#sandbox-fold-spelling a home folder stored in another Unicode form still reads", (t) => {
+  // realpath(3) returns the stored form of each name (here NFD), while $HOME may
+  // hold another form (NFC). The home check must not refuse every read.
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-nfd-sb-")));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const stored = path.join(base, "Jose\u0301");
+  for (const dir of ["Documents", ".ssh"]) fs.mkdirSync(path.join(stored, dir), { recursive: true });
+  fs.writeFileSync(path.join(stored, "Documents", "notes.txt"), "ordinary notes");
+  fs.writeFileSync(path.join(stored, ".ssh", "id"), "synthetic credential");
+  const home = path.join(base, "Jos\u00e9");
+  if (!fs.existsSync(home) || fs.realpathSync.native(home) === home) {
+    return t.skip("this filesystem does not store another Unicode form");
+  }
+  assert.equal(readPathAllowed(home, home, path.join(home, "Documents", "notes.txt")), true);
+  assert.equal(searchRootAllowed(home, home, path.join(home, "Documents")), true);
+  assert.equal(readPathAllowed(home, home, path.join(home, ".ssh", "id")), false);
+});
+
+test("#sandbox-symlink-read a symlink followed by .. is judged where the kernel goes", (t) => {
+  // The kernel follows `k` before it applies `..`, so `~/Documents/k/../id`
+  // opens `~/.ssh/id`. A lexical collapse first judged `~/Documents/id`.
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-dotdot-sb-")));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  for (const dir of [".ssh/keys", "Documents"]) fs.mkdirSync(path.join(home, dir), { recursive: true });
+  fs.writeFileSync(path.join(home, ".ssh", "id"), "synthetic credential");
+  fs.writeFileSync(path.join(home, "Documents", "notes.txt"), "ordinary notes");
+  fs.symlinkSync(path.join(home, ".ssh", "keys"), path.join(home, "Documents", "k"));
+  const viaLink = path.join(home, "Documents") + "/k/../id";
+  assert.equal(fs.readFileSync(viaLink, "utf8"), "synthetic credential"); // the kernel's view
+  assert.equal(readPathAllowed(home, home, viaLink), false);
+  assert.equal(readPathAllowed(home, home, viaLink + "-missing"), false);
+  assert.equal(searchRootAllowed(home, home, path.join(home, "Documents") + "/k/.."), false);
+  const policy: SandboxPolicy = { home, cwd: home, allowMcpActions: false };
+  assert.equal(toolDecision("Read", { file_path: "~/Documents/k/../id" }, policy).behavior, "deny");
+  // The lexical form too: the CLI normalises first, so it opens `~/.ssh/id` for
+  // `~/deep/../.ssh/id`, while the kernel goes to `~/Documents/.ssh/id`.
+  fs.symlinkSync(path.join(home, "Documents", "sub"), path.join(home, "deep"));
+  fs.mkdirSync(path.join(home, "Documents", "sub"));
+  const lexical = path.join(home, "deep") + "/../.ssh/id";
+  assert.equal(readPathAllowed(home, home, lexical), false);
+  assert.equal(searchRootAllowed(home, home, path.join(home, "deep") + "/../.ssh"), false);
+  assert.equal(toolDecision("Grep", { path: path.join(home, "deep") + "/../.ssh", pattern: "x" }, policy).behavior, "deny");
+  // Control: an ordinary `..` still reads.
+  assert.equal(readPathAllowed(home, home, path.join(home, ".ssh") + "/../Documents/notes.txt"), true);
+});
+
+test("#sandbox-credential-stores denies common credential stores beyond the first list", () => {
+  const stores = [
+    ".zsh_history", ".zsh_sessions/x.history", ".bash_history", ".bash_sessions/x", ".history",
+    ".local/share/fish/fish_history", ".python_history", ".node_repl_history", ".psql_history",
+    ".mysql_history", ".sqlite_history",
+    ".config/gcloud/credentials.db", ".azure/msal_token_cache.json", ".oci/config", ".boto", ".s3cfg",
+    ".terraform.d/credentials.tfrc.json", ".terraformrc", ".vault-token", ".config/doctl/config.yaml",
+    ".config/op/config", ".password-store/x.gpg",
+    ".pypirc", ".pgpass", ".cargo/credentials", ".cargo/credentials.toml", ".gem/credentials",
+    ".m2/settings.xml", ".ivy2/.credentials", ".sbt/.credentials", ".gradle/gradle.properties",
+    ".yarnrc.yml", ".config/hub", ".config/glab-cli/config.yml",
+    ".cursor/mcp.json", ".codeium/windsurf/mcp_config.json", ".config/zed/settings.json",
+    "Library/Application Support/Claude/claude_desktop_config.json",
+    "Library/Application Support/Google/Chrome/Default/Login Data",
+    "Library/Application Support/Firefox/Profiles/x/logins.json",
+    "Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies",
+    "Library/Application Support/Microsoft Edge/Default/Login Data",
+    "Library/Application Support/Arc/User Data/Default/Cookies",
+    "Library/Application Support/Vivaldi/Default/Login Data",
+    "Library/Application Support/com.operasoftware.Opera/Login Data",
+    "Library/Safari/History.db",
+    ".config/git/credentials", ".config/github-copilot/apps.json", ".yarnrc", ".zhistory",
+    "Library/Application Support/Google/Chrome Beta/Default/Login Data",
+    "Library/Application Support/Google/Chrome Canary/Default/Cookies",
+    "Library/Application Support/Chromium/Default/Login Data",
+    "Library/Application Support/Slack/Cookies", "Library/Application Support/discord/Local Storage/x",
+    "Library/Application Support/Code/User/globalStorage/state.vscdb",
+    "Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+  ];
+  assert.deepEqual(stores.filter((p) => readPathAllowed(HOME, HOME, path.join(HOME, p), idFs)), []);
+  // Siblings stay readable: the denylist names stores, not their parents.
+  for (const p of [".config/git/config", ".cargo/config.toml", "Library/Application Support/Advisor/x"]) {
+    assert.equal(readPathAllowed(HOME, HOME, path.join(HOME, p), idFs), true, p);
+  }
+});
+
 test("MCP gate denies action tools when actions are disabled", () => {
   for (const t of [
     "mcp__claude_ai_Slack__slack_send_message",

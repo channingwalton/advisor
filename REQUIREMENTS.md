@@ -114,6 +114,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - A search pattern cannot redirect a search outside its checked root (absolute, `~` and `..` patterns are refused). `#sandbox-glob-pattern`
   - Only web, ToolSearch, read/search and gated connector tools run; every other tool is refused. `#sandbox-tool-allowlist`
   - File tools take absolute or `~` paths (not relative ones), so the policy judges the file the CLI opens. `#sandbox-explicit-paths`
+  - A spelling that the filesystem treats as a denied path (such as `~/.ſsh` for `~/.ssh` on APFS) is denied. `#sandbox-fold-spelling`
+  - Common credential stores are denied: shell history, cloud and registry credentials, the configuration of other MCP clients, and browser and app profiles. `#sandbox-credential-stores`
 - N8. **Codex session ordering (issue #81):**
   - Warm-ups and requests execute FIFO per session, preserving initial instructions and the conversation thread on later requests. `#codex-session-fifo`
   - Reset cancels active and queued work; subsequent requests start fresh and ignore late events from abandoned turns. `#codex-session-reset`
