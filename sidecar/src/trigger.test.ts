@@ -412,12 +412,21 @@ test("#classifier-terms-numbers at eager, the context kind triggers on a named t
   assert.doesNotMatch(classifierPrompt("eager", { ...ALL_KINDS, context: false }), /ALWAYS trigger on one|implies numbers/);
 });
 
+// The first eager text dropped this rule of the other levels, so eager could
+// trigger less than balanced on a long debate about data. A replay with the
+// rule back kept every gain above.
+test("#classifier-terms-numbers at eager, the context kind keeps the rule for a topic discussed at length", () => {
+  assert.match(classifierPrompt("eager"), /Also use this when a topic is discussed at length\s+and useful data exists/);
+  assert.doesNotMatch(classifierPrompt("eager", { ...ALL_KINDS, context: false }), /discussed at length/);
+});
+
 // The replay tested only eager, and an ALWAYS on terms contradicts
 // "conservative" ("When unsure, stay silent").
 test("#classifier-terms-numbers balanced and conservative keep the earlier context text", () => {
   for (const level of ["balanced", "conservative"]) {
     const prompt = classifierPrompt(level);
     assert.match(prompt, /Unfamiliar terms and acronyms are prime candidates\. Also use this when a/, level);
+    assert.match(prompt, /topic is discussed at length and useful data exists/, level);
     assert.doesNotMatch(prompt, /ALWAYS trigger on one|implies numbers/, level);
   }
 });

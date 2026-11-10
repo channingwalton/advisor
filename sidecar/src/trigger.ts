@@ -142,7 +142,8 @@ const EAGER_KIND_DESCRIPTIONS: Pick<typeof KIND_DESCRIPTIONS, "context" | "factc
   (e.g. "RAG", "TPU", "GDPR"), even when the speaker gives a short definition, because the
   card adds the depth that the speaker skips. Also use this when a statement implies numbers
   that nobody gives: cost, price, scale or supply (e.g. "these licences are very
-  expensive") → fetch the actual numbers.`,
+  expensive") → fetch the actual numbers. Also use this when a topic is discussed at length
+  and useful data exists (e.g. they debate costs → fetch the actual numbers).`,
   factcheck: `${KIND_DESCRIPTIONS.factcheck} A claim stated as fact
   is a "factcheck", not a "context", even when it names a person, role or topic.`,
 };

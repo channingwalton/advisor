@@ -2742,12 +2742,15 @@ Decision: at the eager sensitivity, the "context" kind of the classifier
 prompt (`EAGER_KIND_DESCRIPTIONS` in `trigger.ts`) says to always trigger on
 an unfamiliar term or acronym, also when the speaker gives a short
 definition. It also says to trigger on a statement that implies numbers that
-nobody gives: cost, price, scale or supply. The eager "factcheck" kind says
-that a claim stated as fact is a "factcheck", not a "context". The examples
-in the prompt do not occur in the sessions below, so the replay does not only
-measure an echo of them. They are "RAG" (retrieval-augmented generation),
-"TPU" (tensor processing unit), "GDPR" (General Data Protection Regulation)
-and "these licences are very expensive".
+nobody gives: cost, price, scale or supply. It keeps the rule of the other
+levels for a topic that is discussed at length when useful data exists. The
+eager "factcheck" kind says that a claim stated as fact is a "factcheck", not
+a "context". The examples
+of the new rules do not occur in the sessions below, so the replay does not
+only measure an echo of them. They are "RAG" (retrieval-augmented
+generation), "TPU" (tensor processing unit), "GDPR" (General Data Protection
+Regulation) and "these licences are very expensive". The kept rule has its
+old example, "they debate costs", and the sessions do have cost topics.
 
 Balanced and conservative keep `KIND_DESCRIPTIONS`, so their prompt does not
 change. The replay tested only eager, and an "ALWAYS" on terms contradicts
@@ -2780,6 +2783,18 @@ covered list, the recap and the session prompt) and ran it through
   cards were on topic: a named product, two claims that the user stated, and a
   cost that the meeting discussed. One run had one near-duplicate card. One
   question went from 2 of 3 runs to 0 of 3, but the next line answered it.
+- A review found that the first eager text dropped the rule for a topic
+  discussed at length, so eager could trigger less than balanced on a long
+  debate about data. With the rule back, a replay of the 3 sessions kept every
+  gain above, and the card counts stayed within variance. The same prompt gave
+  16 and 21 fact-check cards in two batches of 5 runs, so differences of that
+  size are noise. So the fall from 19 to 12 below is weak evidence alone; the
+  case for the "factcheck" sentence rests on the claim that moved to context
+  in 3 of 5 runs without it, and in 0 of 5 with it. The one consistent change
+  was in the 51-minute meeting: a card on its own topic at its first line, in
+  3 of 3 runs with the rule back against 0 of 3 without it. No session had a
+  long debate about data other than cost, so the replay does not show the
+  benefit of the rule.
 
 Rejected: a first version also put "results" into the numbers rule and "a
 claim about a measurable outcome" into the "factcheck" kind. It, and a second
@@ -2795,8 +2810,9 @@ borderline line still gets one pass. With the "context" kind off, the eager
 that is off.
 
 Verified: `trigger.test.ts` (`#classifier-terms-numbers`,
-`#classifier-claims-factcheck`) pins the eager text, checks that balanced and
-conservative keep the earlier text, and checks the kind toggles. The replay
+`#classifier-claims-factcheck`) checks the key phrases of the eager text, also
+the rule for a topic discussed at length. It checks that balanced and
+conservative keep the earlier text, and it checks the kind toggles. The replay
 above is the evidence that the model follows the text.
 
 ## Revisit as it grows
