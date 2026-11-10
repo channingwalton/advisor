@@ -2795,6 +2795,16 @@ covered list, the recap and the session prompt) and ran it through
   3 of 3 runs with the rule back against 0 of 3 without it. No session had a
   long debate about data other than cost, so the replay does not show the
   benefit of the rule.
+- To stop such a drift, the "context" text at every level builds the parts
+  that it shares from `CONTEXT_SUBJECT` and `CONTEXT_AT_LENGTH`. A test
+  checks that the eager text has every rule of the balanced text. This
+  changed the line breaks in the eager text after the replay: the at-length
+  rule now takes 3 lines, not 2. The words did not change, and the balanced
+  and conservative prompts did not change. A replay of the 2 shorter
+  sessions then compared the new and the old line breaks, 5 runs each in one
+  batch. With both, the defined acronym, the cost remark and the 2 claims
+  about appointments got a card in 5 of 5 runs. Fact-check cards were 21
+  against 16, a difference inside the noise above.
 
 Rejected: a first version also put "results" into the numbers rule and "a
 claim about a measurable outcome" into the "factcheck" kind. It, and a second
@@ -2812,7 +2822,8 @@ that is off.
 Verified: `trigger.test.ts` (`#classifier-terms-numbers`,
 `#classifier-claims-factcheck`) checks the key phrases of the eager text, also
 the rule for a topic discussed at length. It checks that balanced and
-conservative keep the earlier text, and it checks the kind toggles. The replay
+conservative keep the earlier text, that the eager text has every rule of
+the balanced text, and it checks the kind toggles. The replay
 above is the evidence that the model follows the text.
 
 ## Revisit as it grows

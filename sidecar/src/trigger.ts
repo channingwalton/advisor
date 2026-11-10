@@ -115,6 +115,15 @@ const SENSITIVITY: Record<string, string> = {
     "Be eager: in substantive conversation aim for a trigger every minute or two; returning empty triggers constantly means you are failing. When a topic could plausibly benefit from research, trigger.",
 };
 
+/// The parts of the "context" kind that every sensitivity shares, so that an
+/// edit reaches every level. A hand copy at eager once lost the at-length rule.
+const CONTEXT_SUBJECT = `- "context": a named project, system, person, company, product, acronym, ticket, or topic
+  is being discussed where background, definitions, or recent news would help a
+  participant. Unfamiliar terms and acronyms are prime candidates`;
+const CONTEXT_AT_LENGTH = `Also use this when a
+  topic is discussed at length and useful data exists (e.g. they debate costs → fetch the
+  actual numbers).`;
+
 const KIND_DESCRIPTIONS: Record<keyof AdvisorConfig["triggers"], string> = {
   question: `- "question": a factual question asked or wondered aloud (incl. implicit/musing forms:
   "I wonder", "not sure what", "does anyone know", "how does X work") that the transcript
@@ -122,11 +131,7 @@ const KIND_DESCRIPTIONS: Record<keyof AdvisorConfig["triggers"], string> = {
   user's own notes, projects, or work history ("what did I change in X", "when did
   I last...", "what's in my notes about...") — the research agent can search the user's
   notes, so these are among the MOST valuable triggers.`,
-  context: `- "context": a named project, system, person, company, product, acronym, ticket, or topic
-  is being discussed where background, definitions, or recent news would help a
-  participant. Unfamiliar terms and acronyms are prime candidates. Also use this when a
-  topic is discussed at length and useful data exists (e.g. they debate costs → fetch the
-  actual numbers).`,
+  context: `${CONTEXT_SUBJECT}. ${CONTEXT_AT_LENGTH}`,
   factcheck: `- "factcheck": a specific checkable claim was stated as fact (numbers, dates,
   capabilities, "X said/does Y") and verifying it would add value.`,
 };
@@ -136,14 +141,11 @@ const KIND_DESCRIPTIONS: Record<keyof AdvisorConfig["triggers"], string> = {
 /// only at eager, and its ALWAYS on terms contradicts "conservative", so the
 /// other sensitivities keep KIND_DESCRIPTIONS.
 const EAGER_KIND_DESCRIPTIONS: Pick<typeof KIND_DESCRIPTIONS, "context" | "factcheck"> = {
-  context: `- "context": a named project, system, person, company, product, acronym, ticket, or topic
-  is being discussed where background, definitions, or recent news would help a
-  participant. Unfamiliar terms and acronyms are prime candidates: ALWAYS trigger on one
+  context: `${CONTEXT_SUBJECT}: ALWAYS trigger on one
   (e.g. "RAG", "TPU", "GDPR"), even when the speaker gives a short definition, because the
   card adds the depth that the speaker skips. Also use this when a statement implies numbers
   that nobody gives: cost, price, scale or supply (e.g. "these licences are very
-  expensive") → fetch the actual numbers. Also use this when a topic is discussed at length
-  and useful data exists (e.g. they debate costs → fetch the actual numbers).`,
+  expensive") → fetch the actual numbers. ${CONTEXT_AT_LENGTH}`,
   factcheck: `${KIND_DESCRIPTIONS.factcheck} A claim stated as fact
   is a "factcheck", not a "context", even when it names a person, role or topic.`,
 };

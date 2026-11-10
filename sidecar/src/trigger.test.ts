@@ -416,8 +416,24 @@ test("#classifier-terms-numbers at eager, the context kind triggers on a named t
 // trigger less than balanced on a long debate about data. A replay with the
 // rule back kept every gain above.
 test("#classifier-terms-numbers at eager, the context kind keeps the rule for a topic discussed at length", () => {
-  assert.match(classifierPrompt("eager"), /Also use this when a topic is discussed at length\s+and useful data exists/);
+  assert.match(classifierPrompt("eager"), /Also use this when a\s+topic is discussed at length\s+and useful data exists/);
   assert.doesNotMatch(classifierPrompt("eager", { ...ALL_KINDS, context: false }), /discussed at length/);
+});
+
+/// The text of the context kind in the classifier prompt at a sensitivity.
+function contextKind(triggerSensitivity: string): string {
+  return classifierPrompt(triggerSensitivity).match(/- "context":[\s\S]*?(?=\n- "factcheck":)/)?.[0] ?? "";
+}
+
+// The first eager text was a hand copy of the base text, and the copy lost a
+// rule. Eager adds its rules after the subject, so the balanced text after the
+// subject must also be in the eager text, unchanged and in one block.
+test("#classifier-terms-numbers at eager, the context kind has every rule of the balanced text", () => {
+  const [, subject, rules] = contextKind("balanced").match(/^([\s\S]*?prime candidates)\. ([\s\S]+)$/) ?? [];
+  assert.ok(subject && rules, "the balanced context kind has a subject and rules");
+  const eager = contextKind("eager");
+  assert.ok(eager.startsWith(`${subject}: ALWAYS trigger on one`), "eager starts with the balanced subject");
+  assert.ok(eager.includes(rules), "eager has the balanced rules after the subject");
 });
 
 // The replay tested only eager, and an ALWAYS on terms contradicts
