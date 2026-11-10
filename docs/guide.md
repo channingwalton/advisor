@@ -284,7 +284,8 @@ next recording session.
 Advisor itself knows nothing about your notes. On Claude, the research agents
 load your own Claude configuration (`~/.claude/CLAUDE.md`), which is where note
 locations and personal context belong. Codex agents do not load it, and cannot
-read `~/.claude`.
+read `~/.claude`. A Claude agent reads a note folder only when it is one of your
+readable folders (see [Safety](#safety)).
 
 ## Safety
 
@@ -294,18 +295,27 @@ On **Claude**, a tool policy limits each research agent call:
 - Your MCP connectors (Slack, Jira, …) can read and search. Other connector
   tools, and tools that the policy does not recognise, need **Allow connector
   actions**.
-- Files under your home folder can be read, but not changed. Credential paths
-  (`~/.ssh`, `~/.aws`, `~/.claude`, `~/.codex`, keychains, shell history,
-  browser profiles, …) are denied, also through symlinks and in any spelling
-  that the disk treats as the same name, such as a different letter case. A
-  file search must name a folder that holds no credential path.
+- Files can be read, but not changed, only inside your readable folders. List
+  them in `readableFolders` in
+  `~/Library/Application Support/Advisor/config.json`, as absolute or `~/`
+  paths. There are none by default, so the agents read no local file until you
+  list a folder. A change applies at once, also to a card that is in progress.
+  A folder outside your home folder is not used, and nor is a symlink that
+  leads out of it.
+- A readable folder that is, holds or sits inside a credential path is not
+  used. Credential paths are `~/.ssh`, `~/.aws`, `~/.claude`, `~/.codex`,
+  keychains, shell history, browser profiles and more. So `~` and `~/Library`
+  give nothing, but `~/Library/Mobile Documents` (iCloud Drive) works. Each
+  path is judged where its symlinks lead, and in any spelling that the disk
+  treats as the same name, such as a different letter case. A file search must
+  name a folder inside a readable folder.
 - No shell, and no other Claude Code tool (skills, scheduling, sub-agents, …).
 
 The policy applies before the permission rules of Claude Code, so allow rules
 in your Claude settings cannot widen it.
 
 On **Codex**, the Codex CLI runs under a macOS Seatbelt profile, built from the
-same list of credential paths. Codex, and each process that it starts, cannot
+same list of credential paths. It does not use the readable folders yet. Codex, and each process that it starts, cannot
 read those paths, and can write only to Codex's own state and temporary
 folders. Even there, it cannot change Codex's configuration, hooks or
 instructions. This is coarser than the Claude policy: Codex can read its own

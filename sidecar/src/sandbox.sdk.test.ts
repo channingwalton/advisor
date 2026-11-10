@@ -18,11 +18,21 @@ import { fakeModelQuery, sse, stubMcp } from "./fakeModel.js";
 const SECRET = "SYNTHETIC_SECRET_CONTENT";
 const NOTES = "ORDINARY_NOTES_CONTENT";
 const HIDDEN_NAME = "hidden-credential-name";
+/// The denylist's refusal. The allowlist refuses most denied paths as well, so
+/// "Access denied" alone no longer shows that the denylist works.
+const DENYLIST = "non-sensitive file or folder";
+/// The allowlist's refusal: the path is in no readable folder.
+const NOT_READABLE = "folders that the user lists as readable";
+/// An ordinary file in a readable folder that the Grep pattern matches.
+const MATCH = "SYNTHETIC_ORDINARY_MATCH";
 
 let home: string;
 let work: string;
 let server: http.Server;
 let currentCase = "";
+/// Tool-use ids must differ within one conversation, and a case can run twice
+/// in one session.
+let toolUseCount = 0;
 const results = new Map<string, string>();
 const sessions: AgentSession[] = [];
 
@@ -52,6 +62,23 @@ function scripted(id: string): { name: string; input: Record<string, unknown> } 
     // the lexical form (`..` first), whichever the CLI opens.
     case "linkDotDot": return { name: "Read", input: { file_path: `${p("Documents")}/k/../synthetic-key` } };
     case "lexicalDotDot": return { name: "Read", input: { file_path: `${p("deep")}/../.ssh/synthetic-key` } };
+    // A credential store that the denylist does not name.
+    case "unnamedStore": return { name: "Read", input: { file_path: "~/.config/rclone/rclone.conf" } };
+    case "unnamedGlob": return { name: "Glob", input: { path: "~/.config/rclone", pattern: "*" } };
+    // A search of a readable folder that holds a symlink (`Documents/k`) to a store.
+    case "grepLink": return { name: "Grep", input: { path: p("Documents"), pattern: "SYNTHETIC", output_mode: "content" } };
+    case "globLink": return { name: "Glob", input: { path: p("Documents"), pattern: "**/*" } };
+    // A pattern that names the symlink. The CLI matches a folder in a pattern
+    // only after `**/`: `real/*` found nothing in a real folder (seen 2026-11-10).
+    case "globLinkNamed": return { name: "Glob", input: { path: p("Documents"), pattern: "**/k/*" } };
+    case "grepLinkNamed": return {
+      name: "Grep", input: { path: p("Documents"), pattern: "SYNTHETIC", glob: "**/k/*", output_mode: "content" },
+    };
+    // The same patterns for a real folder, as a control: they do match.
+    case "globRealNamed": return { name: "Glob", input: { path: p("Documents"), pattern: "**/real/*" } };
+    case "grepRealNamed": return {
+      name: "Grep", input: { path: p("Documents"), pattern: "SYNTHETIC", glob: "**/real/*", output_mode: "content" },
+    };
     default: throw new Error(`no script for ${id}`);
   }
 }
@@ -83,7 +110,7 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, raw: string
   if (id && body.tools) {
     currentCase = id;
     const call = scripted(id);
-    sse(res, [{ type: "tool_use", id: `toolu_${id}`, ...call }], "tool_use");
+    sse(res, [{ type: "tool_use", id: `toolu_${id}_${++toolUseCount}`, ...call }], "tool_use");
     return;
   }
   sse(res, [{ type: "text", text: "ok" }], "end_turn");
@@ -92,14 +119,22 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, raw: string
 before(async () => {
   home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-sdk-sb-")));
   work = path.join(home, "work");
-  for (const dir of [".ssh", ".ssh/sub", ".claude", "Documents", "work", "work/sub"]) fs.mkdirSync(path.join(home, dir));
+  for (const dir of [
+    ".ssh", ".ssh/sub", ".claude", ".config", ".config/rclone", "Documents", "Documents/real", "work", "work/sub",
+  ]) {
+    fs.mkdirSync(path.join(home, dir));
+  }
   fs.symlinkSync(path.join(home, ".ssh", "sub"), path.join(home, "Documents", "k"));
   fs.symlinkSync(path.join(home, "work", "sub"), path.join(home, "deep"));
   fs.writeFileSync(path.join(home, ".ssh", "synthetic-key"), SECRET);
   fs.writeFileSync(path.join(home, ".ssh", HIDDEN_NAME), SECRET);
+  fs.writeFileSync(path.join(home, ".ssh", "sub", HIDDEN_NAME), SECRET);
   fs.writeFileSync(path.join(home, ".claude", "secret.txt"), SECRET);
   fs.writeFileSync(path.join(home, ".zsh_history"), SECRET);
+  fs.writeFileSync(path.join(home, ".config", "rclone", "rclone.conf"), SECRET);
   fs.writeFileSync(path.join(home, "Documents", "notes.txt"), NOTES);
+  fs.writeFileSync(path.join(home, "Documents", "match.md"), MATCH);
+  fs.writeFileSync(path.join(home, "Documents", "real", "inner.md"), MATCH);
   // The user's own settings allow a path the denylist refuses — the shape found
   // in a real ~/.claude/settings.json (`Read(~/.claude/**)`).
   fs.writeFileSync(
@@ -121,11 +156,17 @@ after(() => {
 });
 
 /// A session whose CLI runs in the synthetic home against the fake endpoint.
-function session(cwd: string): AgentSession {
+/// `~/Documents` and `~/work` are readable unless a test lists other folders.
+/// The policy reads the list at each call, as it reads config.json.
+function session(cwd: string, readable = ["Documents", "work"].map((d) => path.join(home, d))): AgentSession {
   const { port } = server.address() as { port: number };
   const queryFn = fakeModelQuery(home, port);
   const s = new AgentSession(
-    { name: "sdk-sandbox", systemPrompt: "test", model: "claude-test", allowedTools: ["WebSearch", "WebFetch"], cwd, home },
+    {
+      name: "sdk-sandbox", systemPrompt: "test", model: "claude-test", allowedTools: ["WebSearch", "WebFetch"],
+      // A new list at each call, as a read of config.json gives.
+      cwd, home, readableFolders: () => [...readable],
+    },
     queryFn
   );
   sessions.push(s);
@@ -133,6 +174,7 @@ function session(cwd: string): AgentSession {
 }
 
 async function toolResult(s: AgentSession, id: string): Promise<string> {
+  results.delete(id); // a case that runs twice must not see its earlier result
   const r = await s.run(`CASE:${id}`, undefined, 30_000);
   assert.equal(r.error, undefined, `${id}: ${r.error}`);
   const out = results.get(id);
@@ -148,16 +190,19 @@ test("#sandbox-sdk-gate harness control: an ordinary file reaches the model", as
 test("#sandbox-sdk-gate a denied file inside the working directory is not read", async () => {
   const out = await toolResult(session(home), "cwdSecret");
   assert.ok(!out.includes(SECRET), out);
+  assert.ok(out.includes(DENYLIST), out);
 });
 
 test("#sandbox-sdk-gate a user-settings allow rule cannot open a denied path", async () => {
   const out = await toolResult(session(work), "settingsAllow");
   assert.ok(!out.includes(SECRET), out);
+  assert.ok(out.includes(DENYLIST), out);
 });
 
 test("#sandbox-sdk-gate a ~ path cannot reach a denied file", async () => {
   const out = await toolResult(session(work), "tilde");
   assert.ok(!out.includes(SECRET), out);
+  assert.ok(out.includes(DENYLIST), out);
 });
 
 test("#sandbox-glob-pattern harness control: a scoped Glob lists its files", async () => {
@@ -174,19 +219,19 @@ test("#sandbox-fold-spelling a spelling that the filesystem folds to a denied pa
   if (!fs.existsSync(path.join(home, ".ſsh"))) return t.skip("this filesystem does not fold names");
   const out = await toolResult(session(work), "foldedSpelling");
   assert.ok(!out.includes(SECRET), out);
-  assert.ok(out.includes("Access denied"), out);
+  assert.ok(out.includes(DENYLIST), out);
   // A Glob `path` takes another route to the gate (unexpanded), and `.ßh` is
   // another folded spelling.
   if (!fs.existsSync(path.join(home, ".\u00DFh"))) return t.skip("this filesystem does not fold ß");
   const glob = await toolResult(session(work), "foldedGlob");
   assert.ok(!glob.includes(HIDDEN_NAME), glob);
-  assert.ok(glob.includes("Access denied"), glob);
+  assert.ok(glob.includes(DENYLIST), glob);
 });
 
 test("#sandbox-credential-stores a credential store from the extended list is not read", async () => {
   const out = await toolResult(session(work), "shellHistory");
   assert.ok(!out.includes(SECRET), out);
-  assert.ok(out.includes("Access denied"), out);
+  assert.ok(out.includes(DENYLIST), out);
 });
 
 test("#sandbox-symlink-read a symlink followed by .. cannot reach a denied file", async () => {
@@ -196,16 +241,78 @@ test("#sandbox-symlink-read a symlink followed by .. cannot reach a denied file"
   // stopped normalising would open the kernel's form, which the gate denies.
   const lexical = await toolResult(session(work), "lexicalDotDot");
   assert.ok(!lexical.includes(SECRET), lexical);
-  assert.ok(lexical.includes("Access denied"), lexical);
+  assert.ok(lexical.includes(DENYLIST), lexical);
   const link = await toolResult(session(work), "linkDotDot");
   assert.ok(!link.includes(SECRET), link);
-  assert.ok(link.includes("Access denied") || link.includes("File does not exist"), link);
+  assert.ok(link.includes(DENYLIST) || link.includes("File does not exist"), link);
   // A Glob `path` with `k/..`: the kernel's form is `~/.ssh`. The CLI also
   // normalises a Glob path before it searches (seen 2026-11-10), so the old
   // gate's allow listed `Documents`, not `~/.ssh`: the deny is a second layer.
   const glob = await toolResult(session(work), "linkDotDotGlob");
   assert.ok(!glob.includes(HIDDEN_NAME), glob);
-  assert.ok(glob.includes("Access denied"), glob);
+  assert.ok(glob.includes(DENYLIST), glob);
+});
+
+test("#sandbox-readable-folders a credential store outside every readable folder is not read", async () => {
+  // `~/.config/rclone` is in no named store: only the allowlist refuses it.
+  const read = await toolResult(session(work), "unnamedStore");
+  assert.ok(!read.includes(SECRET), read);
+  assert.ok(read.includes(NOT_READABLE), read);
+  const glob = await toolResult(session(work), "unnamedGlob");
+  assert.ok(!glob.includes("rclone.conf"), glob);
+  assert.ok(glob.includes(NOT_READABLE), glob);
+});
+
+test("#sandbox-readable-folders an ordinary file is not read when no folder is listed, or only the home folder", async () => {
+  // The home folder holds denied paths, so a list of only `~` reads nothing.
+  for (const readable of [[], [home]]) {
+    const out = await toolResult(session(work, readable), "notes");
+    assert.ok(!out.includes(NOTES), out);
+    assert.ok(out.includes(NOT_READABLE), out);
+  }
+});
+
+test("#sandbox-readable-folders a folder removed from the list is refused at once, in a live session", async () => {
+  const readable = [path.join(home, "Documents")];
+  const s = session(work, readable);
+  const before = await toolResult(s, "notes");
+  assert.ok(before.includes(NOTES), before);
+  readable.length = 0; // the user removes the folder; the CLI keeps running
+  // A changed file: the CLI answers a repeated Read of an unchanged one
+  // without its content, so an allowed Read would then show nothing.
+  fs.appendFileSync(path.join(home, "Documents", "notes.txt"), "\n");
+  const after = await toolResult(s, "notes");
+  assert.ok(!after.includes(NOTES), after);
+  assert.ok(after.includes(NOT_READABLE), after);
+});
+
+test("#sandbox-readable-folders a search of a readable folder does not follow a symlink out of it", async () => {
+  // The policy checks the search root only. The CLI's search does not follow
+  // `Documents/k -> ~/.ssh/sub` (seen 2026-11-10), and the policy relies on it.
+  const grep = await toolResult(session(work), "grepLink");
+  assert.ok(grep.includes(MATCH), grep); // the search ran
+  assert.ok(!grep.includes(SECRET), grep);
+  const glob = await toolResult(session(work), "globLink");
+  assert.ok(glob.includes("notes.txt"), glob);
+  assert.ok(!glob.includes(HIDDEN_NAME), glob);
+  // Nor when the pattern names the symlink.
+  // The same patterns match in a real folder, so `k/*` would match if the
+  // search followed `k`.
+  // The pattern is what filters: the files beside `real` are not listed.
+  const globReal = await toolResult(session(work), "globRealNamed");
+  assert.ok(globReal.includes("real/inner.md"), globReal);
+  assert.ok(!globReal.includes("notes.txt") && !globReal.includes("match.md"), globReal);
+  const grepReal = await toolResult(session(work), "grepRealNamed");
+  assert.ok(grepReal.includes(`real/inner.md:1:${MATCH}`), grepReal);
+  assert.ok(!grepReal.includes("match.md"), grepReal);
+  // The searches run and find nothing (seen 2026-11-10): not refused, and not
+  // failed for some other reason.
+  const globNamed = await toolResult(session(work), "globLinkNamed");
+  assert.ok(!globNamed.includes(HIDDEN_NAME), globNamed);
+  assert.ok(globNamed.includes("No files found"), globNamed);
+  const grepNamed = await toolResult(session(work), "grepLinkNamed");
+  assert.ok(!grepNamed.includes(SECRET), grepNamed);
+  assert.ok(grepNamed.includes("No matches found"), grepNamed);
 });
 
 test("#sandbox-explicit-paths a ~ path to an ordinary file still reaches the model", async () => {

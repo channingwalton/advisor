@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { TaskResult } from "./agent.js";
 import type { Outbound } from "./protocol.js";
 import { cardLaneOptions, claimQueryLane, LanePool, LiveSession, QueryLanes, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
-import { mergeConfig } from "./config.js";
+import { loadReadableFolders, mergeConfig } from "./config.js";
 
 /// A session that records each prompt and answers from a script; `reset()` is
 /// counted so a test can see the lane recycle.
@@ -169,6 +169,13 @@ test("card lane options carry the configured model, effort and connector setting
   assert.equal(o.model, "opus");
   assert.equal(o.effort, "low");
   assert.equal(o.allowMcpActions, true);
+});
+
+test("#sandbox-readable-folders card lane options read the readable folders from config.json at each call", () => {
+  // Not the config that made the lane: a lane can outlive it, and a folder
+  // that the user removes must stop being read at once.
+  const o = cardLaneOptions(mergeConfig({ readableFolders: ["/Users/x/Old"] }), "research0");
+  assert.equal(o.readableFolders, loadReadableFolders);
 });
 
 test("card lane options inherit the user's effort when none is configured", () => {

@@ -95,7 +95,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Agent backends** (`agent.ts`, `codex.ts`, `providers.ts`). One `Agent` interface (`run` / `reset` / `interrupt`) behind a provider registry; one provider and model serve every lane. `AgentSession` is a long-lived Claude Agent SDK session fed by streaming input, with `includePartialMessages` so text reaches a card delta by delta, loading the user's own Claude configuration (`settingSources: ["user"]` — where personal context such as notes locations belongs), `maxTurns` 40, 180 s per task. `CodexAgentSession` wraps `@openai/codex-sdk` (measured far slower for cards — see the 2026-06-13 sections).
 
-**Sandbox.** Claude: one policy, `toolDecision` — web, `ToolSearch`, connector reads/searches, and non-sensitive `$HOME` reads by absolute or `~` path; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. Codex: the same denylist as a Seatbelt profile, the CLI running under `sandbox-exec` (`codexSandbox.ts`); connectors all or none, by the same preference (`codexClientOptions`). See *Agent sandboxing*, *Codex runs under a Seatbelt profile* and *Codex connectors follow the actions toggle*.
+**Sandbox.** Claude: one policy, `toolDecision` — web, `ToolSearch`, connector reads/searches, and reads by absolute or `~` path inside the folders that the user lists as readable, outside the credential denylist; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. Codex: the same denylist as a Seatbelt profile, the CLI running under `sandbox-exec` (`codexSandbox.ts`); connectors all or none, by the same preference (`codexClientOptions`). See *Agent sandboxing*, *Codex runs under a Seatbelt profile* and *Codex connectors follow the actions toggle*.
 
 ## IPC contract (NDJSON, one object per line)
 
@@ -382,6 +382,70 @@ Limits:
   fault.
 - Until the allowlist is in place, a credential store that the denylist does
   not name is readable, and so is each file that a local connector reads.
+
+### Readable folders (2026-11-10, GHSA-6xc8-f55f-jxqr)
+
+A denylist fails open: the real CLI returned a synthetic secret from
+`~/.config/rclone/rclone.conf`, which no entry names. Read, Grep and Glob of
+the Claude backend now reach only the folders that the user lists as readable:
+`readableFolders` in `config.json`, mirrored in `Preferences.swift` and
+`config.ts`. The default is none, so a new install reads no local file. Both
+mirrors keep only the string entries of the list, so a save from the app does
+not drop a folder that the sidecar uses.
+
+- **The denylist refuses a readable folder.** `readableRoots` drops a folder
+  that is at, under or above a denied path. So `~` and `~/Library` give
+  nothing, while `~/Library/Mobile Documents` is used. A folder outside the
+  home folder is dropped too: reads outside it were refused before, and this
+  change narrows the boundary, not widens it.
+- **A folder is judged in its listed and its resolved forms.** A symlink into
+  `~/.ssh`, or a folded spelling such as `~/.ſsh`, gives nothing. A folder
+  named in the NFC form of `$HOME` matches paths that the disk stores in NFD.
+- **Both layers apply to each call.** The denylist comes first, because its
+  refusal names the reason. Then each judged form of the path must be inside a
+  used folder, so a Read through a symlink that leads out of a readable
+  folder is refused, and so is a search root there.
+- **A search inside a readable folder does not follow symlinks**, because the
+  CLI's search does not follow them (seen 2026-11-10). The policy checks the
+  search root only, so it relies on this. `sandbox.sdk.test.ts` pins it, and
+  the planned Seatbelt profile for the Claude CLI would refuse such a read in
+  the kernel.
+- **The inside test does not fold case.** The denylist folds case, which
+  only denies more. For an allow, a fold would let `~/public` pass for a
+  listed `~/Public` on a case-sensitive volume. The resolved paths hold the
+  stored names, so on the default volume a folder listed in another case still
+  matches (code review 2026-11-10).
+- **The list is read from `config.json` at each call** (`loadReadableFolders`),
+  and the folders are judged at each call. A folder that the user removes is
+  refused at once, also in a session that is running. A folder that later
+  becomes a symlink into a store is dropped at once. Before the code review,
+  a lane kept the list of the config that made it, until the next recording
+  session. A decision takes about 1 to 1.5 ms (measured 2026-11-10), mostly
+  the realpath of each denied path.
+
+The Preferences window saves its whole copy of the config on each change, and
+it has no control for the list yet. Its save keeps the list that the file
+holds (`saveFromPreferences`), so it cannot add back a folder that the user
+removed from the file. It does not write over a file that cannot be read or
+does not decode:
+the window's copy could add back a removed folder, and the defaults would
+delete the list. The sidecar reads no folders from such a file.
+
+Rejected: a default list, such as `~/Documents`. A store that the denylist does
+not name can be in any folder, and only the user knows where the notes are.
+
+Cost: after the upgrade, an agent reads no local note until the user lists the
+note folder. Preferences gets the list next; until then, `config.json` holds
+it. `sandbox.sdk.test.ts` checks the unnamed store, an empty list, a list of
+only `~`, a folder removed in a live session and a search past a symlink
+against the real CLI.
+
+Limits:
+
+- Claude only. Codex reads under its Seatbelt profile, which does not use the
+  readable folders yet.
+- Connector arguments are still not checked. The Seatbelt profile for the
+  Claude CLI and its stdio connectors will close that fault.
 
 ## Connector tools (2026-06-13)
 

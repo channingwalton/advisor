@@ -28,9 +28,11 @@ export function agentCwd(home: string): string {
 }
 
 /// Paths (relative to $HOME) the agents may never read, even inside $HOME.
-/// A denylist: a credential store that is not named here is readable. The
-/// Codex Seatbelt profile uses the same list (minus Codex's own state), so a
-/// Codex connector cannot read these either.
+/// A denylist fails open for a store that it does not name, so the Claude
+/// policy reads only the readable folders (`readableRoots`), and this list
+/// refuses a readable folder at, under or above a store. The Codex Seatbelt
+/// profile uses the same list (minus Codex's own state), so a Codex connector
+/// cannot read these either.
 const DENY_NAMES = [
   ".ssh",
   ".aws",
@@ -93,6 +95,14 @@ function isUnder(child: string, parent: string): boolean {
   const c = child.toLowerCase();
   const p = parent.toLowerCase();
   return c === p || c.startsWith(p + path.sep);
+}
+
+/// `isUnder` without the case fold, for an allow: on a case-sensitive volume,
+/// `~/public` is not the listed `~/Public`. Compare resolved paths, which
+/// hold the stored names, so a case variant on the default volume still
+/// matches (code review 2026-11-10).
+function isUnderExact(child: string, parent: string): boolean {
+  return child === parent || child.startsWith(parent + path.sep);
 }
 
 /// realpath(3): the path as the filesystem stores it. Node's JS `realpathSync`
@@ -163,6 +173,37 @@ export function readPathAllowed(
 /// Each denied path, lexical and resolved.
 function deniedRoots(home: string, realpath: (p: string) => string): string[] {
   return [...new Set(deniedPaths(home).flatMap((d) => [d, canonical(d, realpath)]))];
+}
+
+/// The readable folders that the policy honours (GHSA-6xc8-f55f-jxqr): Read,
+/// Grep and Glob reach only paths inside one. The user lists them in
+/// `readableFolders` in config.json, and the default is none, so an agent reads no local file until
+/// the user lists a folder. A folder is refused when it is not in the home
+/// folder, or when it is at, under or above a denied path, in its listed or its
+/// resolved form: `~`, `~/Library` and a symlink into `~/.ssh` give nothing,
+/// while `~/Library/Mobile Documents` is honoured. An entry that is not
+/// absolute after `~` expansion is ignored. Each honoured folder is returned in
+/// its listed and its resolved forms.
+export function readableRoots(
+  home: string,
+  folders: readonly string[],
+  realpath: (p: string) => string = REALPATH
+): string[] {
+  const homes = [home, canonical(home, realpath)];
+  const denied = deniedRoots(home, realpath);
+  return [...new Set(folders.flatMap((folder) => {
+    const abs = absolutePath(folder, home);
+    if (abs === null) return [];
+    const forms = [...new Set([path.resolve(abs), ...judgedForms(abs, realpath)])];
+    const inHome = forms.every((f) => homes.some((h) => isUnder(f, h)));
+    const clash = forms.some((f) => denied.some((d) => isUnder(f, d) || isUnder(d, f)));
+    return inHome && !clash ? forms : [];
+  }))];
+}
+
+/// Each form of `abs` is in a readable root.
+function inReadableRoot(roots: readonly string[], abs: string, realpath: (p: string) => string): boolean {
+  return judgedForms(abs, realpath).every((r) => roots.some((f) => isUnderExact(r, f)));
 }
 
 /// Search (Grep/Glob) policy: stricter than Read because these recurse — a
@@ -279,6 +320,11 @@ export interface AgentSessionOptions {
   /// The home directory the sandbox policy is relative to. Defaults to the
   /// user's; injectable so tests can run the real CLI against a synthetic home.
   home?: string;
+  /// The folders that Read, Grep and Glob may reach (`readableRoots`), read
+  /// again at each call, so a folder that the user removes is refused at once.
+  /// None by default. The Claude backend only: Codex still reads under its
+  /// Seatbelt profile, which this list does not yet build.
+  readableFolders?: () => readonly string[];
 }
 
 /// The SDK entry point. Aliased so it can be injected (default: the real
@@ -401,6 +447,8 @@ export interface SandboxPolicy {
   /// The CLI's working directory.
   cwd: string;
   allowMcpActions: boolean;
+  /// The folders that the user lists as readable (`readableRoots`).
+  readableFolders: readonly string[];
   /// Injectable for tests; production resolves symlinks on the real filesystem.
   realpath?: (p: string) => string;
 }
@@ -452,11 +500,21 @@ export function toolDecision(toolName: string, input: unknown, policy: SandboxPo
     behavior: "deny",
     message: `Access denied: ${toolName} needs an absolute path to a non-sensitive file or folder in the home directory`,
   };
+  const notReadable: ToolDecision = {
+    behavior: "deny",
+    message:
+      `Access denied: ${toolName} reads only inside the folders that the user lists as readable ` +
+      `in Advisor's settings, and this path is in none of them`,
+  };
+  // The denylist first: its refusal names the real reason for a store that
+  // is also outside every readable folder.
+  const decide = (abs: string | null, permitted: typeof readPathAllowed): ToolDecision => {
+    if (abs === null || !permitted(home, cwd, abs, realpath)) return deniedPath;
+    return inReadableRoot(readableRoots(home, policy.readableFolders, realpath), abs, realpath) ? allow : notReadable;
+  };
   switch (toolName) {
-    case "Read": {
-      const file = absolutePath(args.file_path, home);
-      return file !== null && readPathAllowed(home, cwd, file, realpath) ? allow : deniedPath;
-    }
+    case "Read":
+      return decide(absolutePath(args.file_path, home), readPathAllowed);
     case "Grep":
     case "Glob": {
       if (!patternStaysInRoot(toolName === "Glob" ? args.pattern : args.glob)) {
@@ -465,8 +523,7 @@ export function toolDecision(toolName: string, input: unknown, policy: SandboxPo
           message: `Access denied: ${toolName} patterns must be relative — no absolute, ~ or .. patterns. Put the folder in \`path\`.`,
         };
       }
-      const root = absolutePath(args.path, home);
-      return root !== null && searchRootAllowed(home, cwd, root, realpath) ? allow : deniedPath;
+      return decide(absolutePath(args.path, home), searchRootAllowed);
     }
     default:
       return { behavior: "deny", message: `${toolName} is not permitted in Advisor` };
@@ -666,10 +723,16 @@ export class AgentSession implements Agent {
 
   /// The sandbox policy (toolDecision) for this session's working directory.
   private get policy(): SandboxPolicy {
+    const readable = this.opts.readableFolders ?? ((): readonly string[] => []);
     return {
       home: this.opts.home ?? HOME,
       cwd: this.opts.cwd ?? agentCwd(this.opts.home ?? HOME),
       allowMcpActions: this.opts.allowMcpActions ?? false,
+      // A getter: the gate keeps this object while the CLI runs, and the list
+      // must be the one that the user has now (code review 2026-11-10).
+      get readableFolders() {
+        return readable();
+      },
     };
   }
 

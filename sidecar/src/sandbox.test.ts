@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import type { HookInput } from "@anthropic-ai/claude-agent-sdk";
 import {
-  readPathAllowed, searchRootAllowed, mcpPermission, normaliseVerbName, bareMcpName, toolDecision, sandboxGate,
-  type SandboxPolicy,
+  readPathAllowed, searchRootAllowed, readableRoots, mcpPermission, normaliseVerbName, bareMcpName, toolDecision,
+  sandboxGate, type SandboxPolicy,
 } from "./agent.js";
 
 const HOME = "/home/u";
@@ -22,6 +22,18 @@ const linkFs = (p: string): string => {
 /// Identity realpath: keeps the lexical-logic tests pure and independent of the
 /// host filesystem (the real realpathSync would resolve /home via macOS autofs).
 const idFs = (p: string): string => p;
+
+/// The denylist refused the call. The allowlist refuses most denied paths as
+/// well, so a bare "deny" no longer shows that the denylist works.
+const DENYLIST = /non-sensitive file or folder/;
+const refusedBy = (reason: RegExp) => (tool: string, input: unknown, policy: SandboxPolicy): void => {
+  const d = toolDecision(tool, input, policy);
+  assert.equal(d.behavior, "deny", JSON.stringify(input));
+  assert.match(d.behavior === "deny" ? d.message : "", reason, JSON.stringify(input));
+};
+const denylisted = refusedBy(DENYLIST);
+/// The allowlist refused the call: the path is in no readable folder.
+const notReadable = refusedBy(/folders that the user lists as readable/);
 
 test("Read allows non-sensitive files under home (absolute and relative)", () => {
   assert.equal(readPathAllowed(HOME, HOME, "/home/u/Documents/notes.txt", idFs), true);
@@ -173,11 +185,18 @@ test("#sandbox-fold-spelling denies each spelling that the filesystem folds to a
   assert.deepEqual(files.filter((p) => readPathAllowed(home, home, path.join(home, p))), []);
   const roots = [".ſsh", ".ßh", ".conﬁg", ".conﬁg/gh"];
   assert.deepEqual(roots.filter((p) => searchRootAllowed(home, home, path.join(home, p))), []);
-  const policy: SandboxPolicy = { home, cwd: home, allowMcpActions: false };
-  assert.equal(toolDecision("Read", { file_path: "~/.ſsh/synthetic-key" }, policy).behavior, "deny");
-  assert.equal(toolDecision("Glob", { path: "~/.conﬁg", pattern: "**" }, policy).behavior, "deny");
+  const policy: SandboxPolicy = { home, cwd: home, allowMcpActions: false, readableFolders: ["~/Documents"] };
+  denylisted("Read", { file_path: "~/.ſsh/synthetic-key" }, policy);
+  denylisted("Glob", { path: "~/.conﬁg", pattern: "**" }, policy);
   // Control: an ordinary file in the same home is still readable.
   assert.equal(toolDecision("Read", { file_path: "~/Documents/notes.txt" }, policy).behavior, "allow");
+  // A readable folder listed in another case matches, because the stored
+  // names are compared.
+  const lower: SandboxPolicy = { ...policy, readableFolders: ["~/documents"] };
+  assert.equal(toolDecision("Read", { file_path: "~/DOCUMENTS/notes.txt" }, lower).behavior, "allow");
+  assert.equal(toolDecision("Glob", { path: "~/Documents", pattern: "*" }, lower).behavior, "allow");
+  // A readable folder listed in a folded spelling of a denied path is refused.
+  assert.deepEqual(readableRoots(home, ["~/.ſsh", "~/.ßh", "~/.conﬁg/gh", "~/.ſsh/sub"]), []);
 });
 
 test("#sandbox-fold-spelling a home folder stored in another Unicode form still reads", (t) => {
@@ -196,6 +215,12 @@ test("#sandbox-fold-spelling a home folder stored in another Unicode form still 
   assert.equal(readPathAllowed(home, home, path.join(home, "Documents", "notes.txt")), true);
   assert.equal(searchRootAllowed(home, home, path.join(home, "Documents")), true);
   assert.equal(readPathAllowed(home, home, path.join(home, ".ssh", "id")), false);
+  // A readable folder named in $HOME's form matches the stored form of a path.
+  const policy: SandboxPolicy = {
+    home, cwd: home, allowMcpActions: false, readableFolders: [path.join(home, "Documents")],
+  };
+  assert.equal(toolDecision("Read", { file_path: path.join(home, "Documents", "notes.txt") }, policy).behavior, "allow");
+  assert.equal(toolDecision("Glob", { path: path.join(home, "Documents"), pattern: "*" }, policy).behavior, "allow");
 });
 
 test("#sandbox-symlink-read a symlink followed by .. is judged where the kernel goes", (t) => {
@@ -212,8 +237,8 @@ test("#sandbox-symlink-read a symlink followed by .. is judged where the kernel 
   assert.equal(readPathAllowed(home, home, viaLink), false);
   assert.equal(readPathAllowed(home, home, viaLink + "-missing"), false);
   assert.equal(searchRootAllowed(home, home, path.join(home, "Documents") + "/k/.."), false);
-  const policy: SandboxPolicy = { home, cwd: home, allowMcpActions: false };
-  assert.equal(toolDecision("Read", { file_path: "~/Documents/k/../id" }, policy).behavior, "deny");
+  const policy: SandboxPolicy = { home, cwd: home, allowMcpActions: false, readableFolders: ["~/Documents"] };
+  denylisted("Read", { file_path: "~/Documents/k/../id" }, policy);
   // The lexical form too: the CLI normalises first, so it opens `~/.ssh/id` for
   // `~/deep/../.ssh/id`, while the kernel goes to `~/Documents/.ssh/id`.
   fs.symlinkSync(path.join(home, "Documents", "sub"), path.join(home, "deep"));
@@ -221,7 +246,7 @@ test("#sandbox-symlink-read a symlink followed by .. is judged where the kernel 
   const lexical = path.join(home, "deep") + "/../.ssh/id";
   assert.equal(readPathAllowed(home, home, lexical), false);
   assert.equal(searchRootAllowed(home, home, path.join(home, "deep") + "/../.ssh"), false);
-  assert.equal(toolDecision("Grep", { path: path.join(home, "deep") + "/../.ssh", pattern: "x" }, policy).behavior, "deny");
+  denylisted("Grep", { path: path.join(home, "deep") + "/../.ssh", pattern: "x" }, policy);
   // Control: an ordinary `..` still reads.
   assert.equal(readPathAllowed(home, home, path.join(home, ".ssh") + "/../Documents/notes.txt"), true);
 });
@@ -451,7 +476,9 @@ test("MCP gate allows everything when actions are enabled", () => {
   assert.equal(mcpPermission("mcp__unison__run", true), "allow");
 });
 
-const POLICY: SandboxPolicy = { home: HOME, cwd: HOME, allowMcpActions: false, realpath: idFs };
+const POLICY: SandboxPolicy = {
+  home: HOME, cwd: HOME, allowMcpActions: false, realpath: idFs, readableFolders: ["/home/u/Documents"],
+};
 const decide = (tool: string, input: unknown, policy = POLICY) => toolDecision(tool, input, policy).behavior;
 
 test("#sandbox-tool-allowlist allows web, read/search, ToolSearch and MCP resource tools", () => {
@@ -484,12 +511,14 @@ test("#sandbox-explicit-paths Read needs an absolute or ~ path to a permitted fi
   // CLI expands it.
   assert.equal(decide("Read", { file_path: "/home/u/Documents/notes.txt" }), "allow");
   assert.equal(decide("Read", { file_path: "~/Documents/notes.txt" }), "allow");
-  assert.equal(decide("Read", { file_path: "Documents/notes.txt" }), "deny");
-  assert.equal(decide("Read", { file_path: "~/.ssh/id_rsa" }), "deny");
-  assert.equal(decide("Read", { file_path: "~root/notes.txt" }), "deny");
-  assert.equal(decide("Read", { file_path: "/home/u/.ssh/id_rsa" }), "deny");
-  assert.equal(decide("Read", {}), "deny");
-  assert.equal(decide("Read", null), "deny");
+  // The denylist refuses these, so its message shows it: the allowlist would
+  // refuse each of them too.
+  for (const input of [
+    { file_path: "Documents/notes.txt" }, { file_path: "~/.ssh/id_rsa" }, { file_path: "~root/notes.txt" },
+    { file_path: "/home/u/.ssh/id_rsa" }, {}, null,
+  ]) {
+    denylisted("Read", input, POLICY);
+  }
 });
 
 test("#sandbox-explicit-paths Grep and Glob need an absolute, permitted root", () => {
@@ -505,8 +534,8 @@ test("#sandbox-explicit-paths Grep and Glob need an absolute, permitted root", (
     { path: "~", pattern: "*" }, // the whole home: at or above every denied path
     { path: "/home/u/.ssh", pattern: "*" },
   ]) {
-    assert.equal(decide("Glob", input), "deny", JSON.stringify(input));
-    assert.equal(decide("Grep", { ...input, pattern: "x" }), "deny", JSON.stringify(input));
+    denylisted("Glob", input, POLICY);
+    denylisted("Grep", { ...input, pattern: "x" }, POLICY);
   }
 });
 
@@ -527,6 +556,86 @@ test("#sandbox-glob-pattern keeps ordinary relative patterns", () => {
     assert.equal(decide("Glob", { path: "/home/u/Documents", pattern }), "allow", pattern);
     assert.equal(decide("Grep", { path: "/home/u/Documents", pattern: "x", glob: pattern }), "allow", pattern);
   }
+});
+
+// GHSA-6xc8-f55f-jxqr: a denylist fails open for each credential store that it
+// does not name, so Read, Grep and Glob reach only the folders that the user
+// lists as readable.
+const readable = (...folders: string[]): SandboxPolicy => ({ ...POLICY, readableFolders: folders });
+
+test("#sandbox-readable-folders reads only inside a readable folder", () => {
+  const policy = readable("/home/u/Documents", "~/work");
+  assert.equal(decide("Read", { file_path: "/home/u/Documents/notes.txt" }, policy), "allow");
+  assert.equal(decide("Read", { file_path: "~/work/sub/plan.md" }, policy), "allow");
+  assert.equal(decide("Glob", { path: "~/work", pattern: "**/*.md" }, policy), "allow");
+  assert.equal(decide("Grep", { path: "/home/u/Documents", pattern: "TODO" }, policy), "allow");
+  // In the home folder and in no named store, but in no readable folder: only
+  // the allowlist refuses these.
+  for (const file of [
+    "/home/u/.config/rclone/rclone.conf", "/home/u/notes.txt", "/home/u/Documentsx/a.txt",
+    "/home/u/Library/Mobile Documents/x.md",
+  ]) {
+    notReadable("Read", { file_path: file }, policy);
+  }
+  for (const root of ["/home/u/.config/rclone", "~/Library/Mobile Documents", "/home/u/Documentsx"]) {
+    notReadable("Glob", { path: root, pattern: "*" }, policy);
+    notReadable("Grep", { path: root, pattern: "x" }, policy);
+  }
+});
+
+test("#sandbox-readable-folders reads nothing when no folder is listed", () => {
+  const policy = readable();
+  notReadable("Read", { file_path: "/home/u/Documents/notes.txt" }, policy);
+  notReadable("Glob", { path: "/home/u/Documents", pattern: "*" }, policy);
+  notReadable("Grep", { path: "/home/u/Documents", pattern: "x" }, policy);
+  // The other tools do not read local files, so they keep their own rules.
+  assert.equal(decide("WebFetch", { url: "https://example.com" }, policy), "allow");
+});
+
+test("#sandbox-readable-folders refuses a listed folder at, under or above a denied path", () => {
+  const roots = (...folders: string[]) => readableRoots(HOME, folders, idFs);
+  // Above: the home folder, `/` and `~/Library` hold denied paths.
+  // At or under: a denied path itself, or a folder in it.
+  assert.deepEqual(roots(
+    "/home/u", "~", "/", "/home", "/home/u/Library", "/home/u/.config", "/home/u/Library/Application Support",
+    "/home/u/.ssh", "/home/u/.SSH", "/home/u/.ssh/sub", "~/.config/gh", "/home/u/Documents/..",
+  ), []);
+  // A folder inside a refused parent, beside the denied paths, is honoured.
+  assert.deepEqual(roots("/home/u/Library/Mobile Documents"), ["/home/u/Library/Mobile Documents"]);
+  const policy = readable("~/Library", "~/Library/Mobile Documents");
+  assert.equal(decide("Read", { file_path: "~/Library/Mobile Documents/x.md" }, policy), "allow");
+  notReadable("Read", { file_path: "~/Library/Preferences/x.plist" }, policy);
+});
+
+test("#sandbox-readable-folders matches a readable folder in its own letter case", () => {
+  // On a case-sensitive volume `~/public` is another folder than `~/Public`.
+  // (The fake filesystem keeps names as given, as such a volume does.)
+  const policy = readable("/home/u/Public");
+  notReadable("Read", { file_path: "/home/u/public/.env" }, policy);
+  notReadable("Glob", { path: "~/PUBLIC", pattern: "*" }, policy);
+  assert.equal(decide("Read", { file_path: "/home/u/Public/a.txt" }, policy), "allow");
+});
+
+test("#sandbox-readable-folders ignores a listed folder that is not absolute or not in the home folder", () => {
+  assert.deepEqual(readableRoots(HOME, ["Documents", "", "~root/x", "/etc", "/Volumes/Disk/notes"], idFs), []);
+  // The home check of the denylist refuses it first.
+  denylisted("Read", { file_path: "/etc/hosts" }, readable("/etc"));
+});
+
+test("#sandbox-readable-folders judges a listed folder, and each path in it, where its symlinks lead", () => {
+  // LINK (`~/Documents/link`) leads to `~/.ssh`, so listing it gives nothing.
+  assert.deepEqual(readableRoots(HOME, [LINK], linkFs), []);
+  // `~/Documents/out` leads to `~/other`, which no store holds and no
+  // readable folder holds: the allowlist alone refuses it.
+  const outFs = (p: string): string => p.replace(/^\/home\/u\/Documents\/out(?=\/|$)/, "/home/u/other");
+  const policy: SandboxPolicy = { ...readable("/home/u/Documents"), realpath: outFs };
+  notReadable("Read", { file_path: "/home/u/Documents/out/a.txt" }, policy);
+  notReadable("Glob", { path: "/home/u/Documents/out", pattern: "*" }, policy);
+  assert.equal(decide("Read", { file_path: "/home/u/Documents/a.txt" }, policy), "allow");
+  // A listed symlink that leads to an ordinary folder reads at its target.
+  const notesFs = (p: string): string => p.replace(/^\/home\/u\/Notes(?=\/|$)/, "/home/u/Documents/Notes");
+  const viaLink: SandboxPolicy = { ...readable("~/Notes"), realpath: notesFs };
+  assert.equal(decide("Read", { file_path: "~/Notes/a.md" }, viaLink), "allow");
 });
 
 function preToolUse(tool_name: string, tool_input: unknown): HookInput {

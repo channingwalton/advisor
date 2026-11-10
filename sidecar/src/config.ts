@@ -26,6 +26,11 @@ export interface AdvisorConfig {
   /// Write utterance text to the log, not only its length (the app's
   /// "Include transcript text in the log" preference).
   logTranscriptText: boolean;
+  /// The folders that the agents may read (absolute, or `~/…`). None by
+  /// default: a credential store that the denylist does not name stays out of
+  /// reach (GHSA-6xc8-f55f-jxqr). Claude only, for now. The policy reads it
+  /// from the file at each call (`loadReadableFolders`).
+  readableFolders: string[];
 }
 
 const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
@@ -38,6 +43,7 @@ const DEFAULTS: AdvisorConfig = {
   model: "",
   effort: "",
   logTranscriptText: false,
+  readableFolders: [],
 };
 
 /// The model id to pass to the SDK, or undefined to use the provider's default.
@@ -78,7 +84,22 @@ export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
     // reaching the SDK as an invalid option.
     effort: EFFORT_LEVELS.find((l) => l === raw.effort) ?? DEFAULTS.effort,
     logTranscriptText: bool(raw.logTranscriptText, DEFAULTS.logTranscriptText),
+    // Strings only: any other entry, or a value that is not a list, is dropped.
+    readableFolders: Array.isArray(raw.readableFolders)
+      ? raw.readableFolders.filter((f): f is string => typeof f === "string")
+      : [...DEFAULTS.readableFolders],
   };
+}
+
+/// The readable folders that config.json lists now. Each Read, Grep and Glob
+/// call reads them, so a folder that the user removes is refused at once, not
+/// at the next session (code review 2026-11-10). Any failure gives none.
+export function loadReadableFolders(file: string = CONFIG_PATH): string[] {
+  try {
+    return mergeConfig(JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>).readableFolders;
+  } catch {
+    return [];
+  }
 }
 
 export function loadConfig(): AdvisorConfig {

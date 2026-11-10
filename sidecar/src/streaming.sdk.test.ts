@@ -17,6 +17,8 @@ const ANSWER = "Cedar is the database migration.";
 
 let home: string;
 let server: http.Server;
+/// The tool results that the CLI sent back to the model, as JSON.
+const toolResults: string[] = [];
 
 type Message = { role: string; content: string | { type: string }[] };
 
@@ -38,6 +40,7 @@ before(async () => {
       const body = JSON.parse(raw) as { messages?: Message[]; tools?: unknown[] };
       const last = body.messages?.at(-1)?.content;
       const answered = Array.isArray(last) && last.some((b) => b.type === "tool_result");
+      if (answered) toolResults.push(JSON.stringify(last));
       if (!body.tools) sse(res, [{ type: "text", text: "ok" }], "end_turn");
       else if (answered) sse(res, [{ type: "text", text: ANSWER }], "end_turn");
       else if (raw.includes("REFUSED")) sse(res, [
@@ -53,6 +56,9 @@ before(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 });
 
+/// `~/Documents` is readable, so the sandbox allows the searches there.
+const documents = (): string[] => [path.join(home, "Documents")];
+
 after(() => {
   server.close();
   fs.rmSync(home, { recursive: true, force: true });
@@ -61,7 +67,7 @@ after(() => {
 test("#card-token-stream #card-activity the real CLI streams text word by word and reports the call it ran", async () => {
   const { port } = server.address() as { port: number };
   const s = new AgentSession(
-    { name: "sdk-stream", systemPrompt: "test", model: "claude-test", allowedTools: [], home },
+    { name: "sdk-stream", systemPrompt: "test", model: "claude-test", allowedTools: [], home, readableFolders: documents },
     fakeModelQuery(home, port)
   );
   const text: string[] = [];
@@ -91,10 +97,11 @@ test("#card-token-stream #card-activity the real CLI streams text word by word a
 test("#card-activity a call the user's settings refuse shows no activity line", async () => {
   const { port } = server.address() as { port: number };
   const s = new AgentSession(
-    { name: "sdk-stream", systemPrompt: "test", model: "claude-test", allowedTools: [], home },
+    { name: "sdk-stream", systemPrompt: "test", model: "claude-test", allowedTools: [], home, readableFolders: documents },
     fakeModelQuery(home, port)
   );
   const activity: string[] = [];
+  toolResults.length = 0;
   try {
     const r = await s.run("REFUSED: what is Cedar?", { onActivity: (a) => activity.push(a) }, 30_000);
     assert.equal(r.error, undefined, `${r.error}`);
@@ -102,4 +109,11 @@ test("#card-activity a call the user's settings refuse shows no activity line", 
     s.reset();
   }
   assert.deepEqual(activity, []);
+  // The user's settings refused the search, not the sandbox, whose refusals
+  // start "Access denied". Their deny rule removes the tool, so the CLI
+  // answers "No such tool available" and the gate never sees the call (seen
+  // 2026-11-10).
+  assert.equal(toolResults.length, 1, JSON.stringify(toolResults));
+  assert.ok(toolResults[0].includes("No such tool available"), toolResults[0]);
+  assert.ok(!toolResults[0].includes("Access denied"), toolResults[0]);
 });

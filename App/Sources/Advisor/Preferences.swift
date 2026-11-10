@@ -76,13 +76,21 @@ struct AdvisorConfig: Codable, Equatable {
     /// config.json at launch and at each session_start, and gets a change in a
     /// `config` frame.
     var logTranscriptText = false
+    /// The folders that the Claude agents may read: absolute paths, or `~/…`.
+    /// None by default, so a Claude agent reads no local file until the user
+    /// lists a folder (GHSA-6xc8-f55f-jxqr). Codex does not use the list yet:
+    /// it reads under its Seatbelt profile. The sidecar refuses a folder at,
+    /// under or above a credential store (`readableRoots` in
+    /// sidecar/src/agent.ts). Mirrors sidecar/src/config.ts, which reads the
+    /// file again at each file-tool call.
+    var readableFolders: [String] = []
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
         case provider, model, effort, sttLocale, authMode, appearance, contexts, tags, sessionDir
-        case logTranscriptText
+        case logTranscriptText, readableFolders
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -107,6 +115,19 @@ struct AdvisorConfig: Codable, Equatable {
         tags = try c.decodeIfPresent([SavedTag].self, forKey: .tags) ?? []
         sessionDir = try c.decodeIfPresent(String.self, forKey: .sessionDir) ?? ""
         logTranscriptText = try c.decodeIfPresent(Bool.self, forKey: .logTranscriptText) ?? false
+        // Strings only, as the sidecar keeps them. A value that is not a list
+        // gives no folders, rather than a failed decode that the next save
+        // turns into a reset of every setting.
+        readableFolders = (try? c.decodeIfPresent([LossyString].self, forKey: .readableFolders))?
+            .compactMap(\.value) ?? []
+    }
+
+    /// A list entry that is kept only when it is a string.
+    private struct LossyString: Decodable {
+        let value: String?
+        init(from decoder: Decoder) {
+            value = try? decoder.singleValueContainer().decode(String.self)
+        }
     }
 
     static var fileURL: URL {
@@ -115,26 +136,50 @@ struct AdvisorConfig: Codable, Equatable {
             .appendingPathComponent("Advisor/config.json")
     }
 
-    static func load() -> AdvisorConfig {
-        guard let data = try? Data(contentsOf: fileURL),
+    static func load(from url: URL = fileURL) -> AdvisorConfig {
+        guard let data = try? Data(contentsOf: url),
             let config = try? JSONDecoder().decode(AdvisorConfig.self, from: data)
         else { return AdvisorConfig() }
         return config
     }
 
-    func save() {
+    func save(to url: URL = AdvisorConfig.fileURL) {
         try? FileManager.default.createDirectory(
-            at: Self.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         do {
-            try encoder.encode(self).write(to: Self.fileURL, options: .atomic)
+            try encoder.encode(self).write(to: url, options: .atomic)
         } catch {
             // A non-atomic write could leave a corrupt file that `load()` then
             // silently resets to defaults; `.atomic` avoids that, and we surface
             // the failure rather than swallow it so a lost save is diagnosable.
             appLog.write("config save failed: \(error)")
         }
+    }
+
+    /// The Preferences window's save: this copy, with the readable folders
+    /// that the file holds now (none when there is no file). The window has no
+    /// control for the list, so its copy can be older than the file, and a
+    /// save of it would add back a folder that the user removed from the file
+    /// (code review 2026-11-10). A file that cannot be read or does not decode
+    /// is left as it is: its list is unknown, and either copy could delete the
+    /// user's list or add back a removed folder. The sidecar reads no folders
+    /// from it.
+    func saveFromPreferences(to url: URL = AdvisorConfig.fileURL) {
+        var c = self
+        if FileManager.default.fileExists(atPath: url.path) {
+            guard let data = try? Data(contentsOf: url),
+                let disk = try? JSONDecoder().decode(AdvisorConfig.self, from: data)
+            else {
+                appLog.write("config save skipped: config.json cannot be read or does not decode")
+                return
+            }
+            c.readableFolders = disk.readableFolders
+        } else {
+            c.readableFolders = []
+        }
+        c.save(to: url)
     }
 
     /// Persist only the saved-context library, leaving every other key as it is
@@ -640,7 +685,7 @@ struct PreferencesView: View {
         }
         .frame(width: 480, height: 420)
         .onChange(of: config) { _, new in
-            new.save()
+            new.saveFromPreferences()
             NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
         }
         // Contexts can also be saved from the recording window's Context popover.

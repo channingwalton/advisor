@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { effortArg, mergeConfig, modelArg } from "./config.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { effortArg, loadReadableFolders, mergeConfig, modelArg } from "./config.js";
 
 test("mergeConfig fills defaults for empty input", () => {
   const c = mergeConfig({});
@@ -88,4 +91,25 @@ test("mergeConfig keeps transcript text out of the log unless logTranscriptText 
   assert.equal(mergeConfig({}).logTranscriptText, false);
   assert.equal(mergeConfig({ logTranscriptText: "yes" }).logTranscriptText, false);
   assert.equal(mergeConfig({ logTranscriptText: true }).logTranscriptText, true);
+});
+
+test("#sandbox-readable-folders mergeConfig lists no readable folder by default and keeps only strings", () => {
+  assert.deepEqual(mergeConfig({}).readableFolders, []);
+  assert.deepEqual(mergeConfig({ readableFolders: ["/a", 5, null, "~/b"] }).readableFolders, ["/a", "~/b"]);
+  assert.deepEqual(mergeConfig({ readableFolders: "/a" }).readableFolders, []);
+});
+
+test("#sandbox-readable-folders loadReadableFolders reads the file as it is now, and gives none on any failure", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "advisor-config-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "config.json");
+  assert.deepEqual(loadReadableFolders(file), []); // no file
+  fs.writeFileSync(file, JSON.stringify({ provider: "claude", readableFolders: ["~/Notes", "/Users/x/dev"] }));
+  assert.deepEqual(loadReadableFolders(file), ["~/Notes", "/Users/x/dev"]);
+  fs.writeFileSync(file, JSON.stringify({ readableFolders: ["/Users/x/dev"] }));
+  assert.deepEqual(loadReadableFolders(file), ["/Users/x/dev"]); // a removal applies at once
+  for (const body of ["{not json", "null", "[]", "\"x\""]) {
+    fs.writeFileSync(file, body);
+    assert.deepEqual(loadReadableFolders(file), [], body);
+  }
 });
