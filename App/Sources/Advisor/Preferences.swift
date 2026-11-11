@@ -76,10 +76,11 @@ struct AdvisorConfig: Codable, Equatable {
     /// config.json at launch and at each session_start, and gets a change in a
     /// `config` frame.
     var logTranscriptText = false
-    /// The folders that the Claude agents may read: absolute paths, or `~/…`.
-    /// None by default, so a Claude agent reads no local file until the user
-    /// lists a folder (GHSA-6xc8-f55f-jxqr). Codex does not use the list yet:
-    /// it reads under its Seatbelt profile. The sidecar refuses a folder at,
+    /// The folders that the agents may read: absolute paths, or `~/…`.
+    /// None by default, so an agent reads no local file until the user lists
+    /// a folder (GHSA-6xc8-f55f-jxqr). Claude's file tools check it at each
+    /// call; Codex's Seatbelt profile is written from it before each turn
+    /// (sidecar/src/codexSandbox.ts). The sidecar refuses a folder at,
     /// under or above a credential store (`readableRoots` in
     /// sidecar/src/agent.ts). Mirrors sidecar/src/config.ts, which reads the
     /// file again at each file-tool call. Preferences → Files edits it in the
@@ -1037,7 +1038,7 @@ struct FilesSettingsView: View {
                 Button { addFolders() } label: { Label("Add folder…", systemImage: "plus") }
                     .focusEffectDisabled()
                     .disabled(unusable)
-                Text("Claude agents can read the files in these folders, but cannot change them. A credential folder such as ~/.ssh is not used, and nor is a folder inside one or a folder that holds one, such as ~ or ~/Library. A folder beside them, such as ~/Library/Mobile Documents (iCloud Drive), is used. A folder outside your home folder is not used. Codex does not use this list yet. Changes apply at once.")
+                Text("Agents can read the files in these folders, but cannot change them. A credential folder such as ~/.ssh is not used, and nor is a folder inside one or a folder that holds one, such as ~ or ~/Library. A folder beside them, such as ~/Library/Mobile Documents (iCloud Drive), is used. A folder outside your home folder is not used. A change applies to Claude at once, and to Codex from its next turn.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

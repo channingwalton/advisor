@@ -2,7 +2,8 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { deniedPaths } from "./agent.js";
+import { agentCwd, deniedPaths, readableRoots } from "./agent.js";
+import { loadReadableFolders } from "./config.js";
 
 /// Codex's own state stays reachable: the CLI reads `~/.codex/auth.json` to
 /// authenticate and persists threads in `~/.codex/sessions`, so denying it at
@@ -19,6 +20,15 @@ const PROVIDER_STATE = [".codex", ".codex-global-state.json"];
 export function realpathOrSelf(p: string): string {
   try {
     return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/// `p` with each name as the disk stores it, or `p` when it does not exist.
+function nativeOrSelf(p: string): string {
+  try {
+    return fs.realpathSync.native(p);
   } catch {
     return p;
   }
@@ -67,6 +77,76 @@ export function sandboxWriteDenials(home: string): string[] {
   ].map((f) => path.join(home, ".codex", f));
 }
 
+/// What the profile lets the sandboxed process read in the home folder
+/// (GHSA-6xc8-f55f-jxqr).
+export interface ReadAllowance {
+  /// The folders that the user lists as readable, as config.json holds them.
+  folders: readonly string[];
+  /// The folder that holds the Codex CLI and the helper programs that it runs.
+  cliRoot: string;
+  /// The CLI's working folder.
+  cwd: string;
+}
+
+/// The rules of the profile, each path as the kernel matches it.
+export interface SeatbeltPolicy {
+  /// The home folder: reads in it are refused, except `readRoots`, and the
+  /// metadata of `readMetadata`.
+  home: string[];
+  readRoots: string[];
+  /// The folders on the way from the home folder to a read root. The CLI
+  /// resolves its paths (`canonicalize`), which needs their metadata, not
+  /// their contents.
+  readMetadata: string[];
+  /// Refused in any case: the credential stores, as for the Claude agents.
+  readDenials: string[];
+  writableRoots: string[];
+  writeDenials: string[];
+}
+
+/// The paths of the home folder that the sandboxed process can read: the
+/// readable folders, the CLI and working folders and `writable` (the writable
+/// roots: what the process writes, it reads back), each only when the policy
+/// honours it as a listed folder (`readableRoots`). So a `TMPDIR` or a CLI
+/// folder at or above a store, such as `~/Library`, is not opened (code review
+/// 2026-11-11). And Codex's own state, which is a store by design. A denylist
+/// fails open for each store that it does not name, so the rest of the home
+/// folder is refused (GHSA-6xc8-f55f-jxqr). Each path in its listed and its
+/// resolved form: the CLI reads a symlink in the listed form itself, such as
+/// `~/.codex` when it leads into `~/dotfiles`.
+function sandboxReadRoots(home: string, reads: ReadAllowance, writable: string[]): string[] {
+  const state = PROVIDER_STATE.map((p) => path.join(home, p));
+  return [...new Set([
+    ...readableRoots(home, [...reads.folders, reads.cliRoot, reads.cwd, ...writable]),
+    ...state.flatMap((p) => [p, realpathLeaf(p)]),
+  ])];
+}
+
+/// The home folder in `homes` that holds `p`. Letter case is ignored, as the
+/// default volume and Seatbelt ignore it: a path can come in a spelling other
+/// than `$HOME`'s (code review 2026-11-11). On a case-sensitive volume this
+/// can only add a rule for a path outside the home folder, which the profile
+/// does not refuse anyway.
+function holdingHome(homes: string[], p: string): string | undefined {
+  return homes.find((h) => p.toLowerCase().startsWith((h + path.sep).toLowerCase()));
+}
+
+/// Each folder between a home folder in `homes` and a path in `roots`, that
+/// home folder included.
+function foldersOnTheWay(homes: string[], roots: string[]): string[] {
+  const folders = new Set<string>();
+  for (const root of roots) {
+    const home = holdingHome(homes, root);
+    if (home === undefined) continue;
+    for (let dir = path.dirname(root); ; dir = path.dirname(dir)) {
+      folders.add(dir);
+      // The root guard: a spelling that never reaches `home` stops at `/`.
+      if (dir.toLowerCase() === home.toLowerCase() || dir === path.dirname(dir)) break;
+    }
+  }
+  return [...folders];
+}
+
 /// The path lists as the kernel will match them: resolved, then deduped.
 ///
 /// Resolving is not cosmetic. Seatbelt matches the real path, so a rule naming
@@ -74,15 +154,30 @@ export function sandboxWriteDenials(home: string): string[] {
 /// setup that symlinks `~/.codex` to `~/dotfiles/.codex` silently loses its
 /// write allowance (Codex cannot log in); one that symlinks `~/.ssh` silently
 /// loses its read denial (the keys are readable). Found the first way round on
-/// a real machine; the second is the one that matters.
-export function sandboxPolicy(
-  home: string,
-  tmps: string[] = DEFAULT_TMPS
-): { readDenials: string[]; writableRoots: string[]; writeDenials: string[] } {
-  const resolve = (ps: string[]): string[] => [...new Set(ps.map(realpathOrSelf))];
+/// a real machine; the second is the one that matters. (Seatbelt matches the
+/// file, not its spelling: a rule for `.codex` holds for `.Codex`, for another
+/// Unicode normal form and for `.ſsh`, checked 2026-11-11. So the resolve need
+/// not be the native one.)
+export function sandboxPolicy(home: string, reads: ReadAllowance, tmps: string[] = DEFAULT_TMPS): SeatbeltPolicy {
+  // `realpathLeaf`, not `realpathOrSelf`: a path that does not exist yet, such
+  // as `~/.codex` on a first run, must still be named in its resolved form
+  // when the home folder is reached through a symlink (code review 2026-11-11).
+  const resolve = (ps: string[]): string[] => [...new Set(ps.map(realpathLeaf))];
+  // The native form too: `readableRoots` gives the stored spelling, which can
+  // differ in letter case from `$HOME`, and `foldersOnTheWay` compares
+  // spellings (code review 2026-11-11).
+  const homes = [...new Set([home, realpathOrSelf(home), nativeOrSelf(home)])];
+  const writableRoots = resolve(sandboxWritableRoots(home, tmps));
+  // `readableRoots` keeps only the writable roots inside the home folder: the
+  // rest are readable anyway, and a root that holds the home folder would open
+  // all of it.
+  const readRoots = sandboxReadRoots(home, reads, writableRoots);
   return {
+    home: homes,
+    readRoots,
+    readMetadata: foldersOnTheWay(homes, readRoots),
     readDenials: resolve(sandboxReadDenials(home)),
-    writableRoots: resolve(sandboxWritableRoots(home, tmps)),
+    writableRoots,
     writeDenials: [...new Set(sandboxWriteDenials(home).flatMap(inputDenialPaths))],
   };
 }
@@ -151,21 +246,21 @@ const LAUNCH_SERVICES_REGEX = "^com\\.apple\\.lsd";
 /// the MCP servers it spawns need not share this process's `TMPDIR`.
 const DEFAULT_TMPS = [os.tmpdir(), "/private/tmp", "/private/var/folders"];
 
-/// A macOS Seatbelt profile: everything allowed except reads of `readDenials`
-/// and writes outside `writableRoots`, less the `writeDenials` (files or
-/// folders) inside them. Seatbelt takes the LAST matching rule, so the write
-/// allowances must follow the blanket write denial, and the denials inside them
-/// must follow the allowances. Paths are matched against the resolved path, so a
-/// symlink out of an allowed directory cannot reach a denied one — the kernel
-/// does here what `realResolve` does for the Claude backend. `writeDenials` is
-/// not optional: a caller that forgot it would ship a profile without them.
-export function seatbeltProfile(
-  readDenials: string[],
-  writableRoots: string[],
-  writeDenials: string[]
-): string {
+/// A macOS Seatbelt profile: everything allowed except reads in the home
+/// folder outside `readRoots`, reads of `readDenials`, and writes outside
+/// `writableRoots`, less the `writeDenials` (files or folders) inside them.
+/// Seatbelt takes the LAST matching rule, so each allowance must follow the
+/// blanket denial that it narrows, and the denials inside an allowance must
+/// follow it. Paths are matched against the resolved path, so a symlink out of
+/// an allowed directory cannot reach a denied one — the kernel does here what
+/// `realResolve` does for the Claude backend. Every rule list is required: a
+/// caller that forgot one would ship a profile without it.
+export function seatbeltProfile(policy: SeatbeltPolicy): string {
+  const { home, readRoots, readMetadata, readDenials, writableRoots, writeDenials } = policy;
   const subpaths = (ps: string[]): string =>
     ps.map((p) => `(subpath "${escapeSexp(p)}")`).join(" ");
+  const literals = (ps: string[]): string =>
+    ps.map((p) => `(literal "${escapeSexp(p)}")`).join(" ");
   const lines = [
     "(version 1)",
     "(allow default)",
@@ -178,6 +273,10 @@ export function seatbeltProfile(
     `(deny process-exec ${LAUNCHERS.map((p) => `(literal "${p}")`).join(" ")})`,
     `(deny mach-lookup (global-name-regex "${LAUNCH_SERVICES_REGEX}"))`,
   ];
+  if (home.length > 0) lines.push(`(deny file-read* ${subpaths(home)})`);
+  if (readRoots.length > 0) lines.push(`(allow file-read* ${subpaths(readRoots)})`);
+  if (readMetadata.length > 0) lines.push(`(allow file-read-metadata ${literals(readMetadata)})`);
+  // Last of the read rules: a store stays refused inside an allowed folder.
   if (readDenials.length > 0) lines.push(`(deny file-read* ${subpaths(readDenials)})`);
   lines.push("(deny file-write*)");
   if (writableRoots.length > 0) lines.push(`(allow file-write* ${subpaths(writableRoots)})`);
@@ -204,18 +303,33 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/// Write the profile into `dir` and return its path. The write is atomic (a
+/// new file, then a rename), so a CLI that starts meanwhile reads the old
+/// profile or the new one, never a part of one.
+export function writeCodexProfile(
+  dir: string,
+  home: string,
+  reads: ReadAllowance,
+  tmps: string[] = DEFAULT_TMPS
+): string {
+  const profilePath = path.join(dir, "advisor.sb");
+  const temp = `${profilePath}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, seatbeltProfile(sandboxPolicy(home, reads, tmps)));
+  fs.renameSync(temp, profilePath);
+  return profilePath;
+}
+
 /// Write the profile and wrapper into `dir` and return the wrapper's path,
 /// suitable for `CodexOptions.codexPathOverride`.
 export function installCodexSandbox(
   dir: string,
   home: string,
   realCodex: string,
+  reads: ReadAllowance,
   tmps: string[] = DEFAULT_TMPS
 ): string {
-  const profilePath = path.join(dir, "advisor.sb");
   const wrapperPath = path.join(dir, "codex-sandboxed");
-  const policy = sandboxPolicy(home, tmps);
-  fs.writeFileSync(profilePath, seatbeltProfile(policy.readDenials, policy.writableRoots, policy.writeDenials));
+  const profilePath = writeCodexProfile(dir, home, reads, tmps);
   fs.writeFileSync(wrapperPath, codexWrapperScript(realCodex, profilePath), { mode: 0o755 });
   fs.chmodSync(wrapperPath, 0o755); // mode above is subject to umask
   return wrapperPath;
@@ -226,8 +340,7 @@ export function installCodexSandbox(
 /// not exported.
 export function vendoredCodexPath(resolve = createRequire(import.meta.url).resolve): string {
   const triple = process.arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
-  const pkg = process.arch === "arm64" ? "@openai/codex-darwin-arm64" : "@openai/codex-darwin-x64";
-  const root = path.dirname(resolve(`${pkg}/package.json`));
+  const root = vendoredCodexRoot(resolve);
   for (const candidate of [
     path.join(root, "vendor", triple, "bin", "codex"),
     path.join(root, "vendor", triple, "codex", "codex"),
@@ -237,18 +350,42 @@ export function vendoredCodexPath(resolve = createRequire(import.meta.url).resol
   throw new Error(`Codex CLI binary not found under ${root}`);
 }
 
+/// The platform package that holds the Codex CLI and the helper programs that
+/// it runs (`codex-code-mode-host`, ripgrep). The profile lets the CLI read
+/// it: in a dev checkout it is in the home folder.
+export function vendoredCodexRoot(resolve = createRequire(import.meta.url).resolve): string {
+  const pkg = process.arch === "arm64" ? "@openai/codex-darwin-arm64" : "@openai/codex-darwin-x64";
+  return path.dirname(resolve(`${pkg}/package.json`));
+}
+
 /// The wrapper the Codex backend must be spawned through, installed once per
 /// sidecar process. Throws rather than returning undefined: an unsandboxed
 /// Codex is the defect this closes, so failing to install the sandbox must
 /// fail the backend, not silently widen it.
-let cachedWrapper: string | undefined;
+let installed: { wrapper: string; dir: string; home: string; reads: () => ReadAllowance } | undefined;
 export function codexSandboxWrapper(home: string = os.homedir()): string {
-  if (cachedWrapper) return cachedWrapper;
+  if (installed) return installed.wrapper;
   if (process.platform !== "darwin") {
     throw new Error("the Codex backend requires macOS: its sandbox is Seatbelt-based");
   }
   const dir = path.join(home, "Library", "Application Support", "Advisor", "sandbox");
   fs.mkdirSync(dir, { recursive: true });
-  cachedWrapper = installCodexSandbox(dir, realpathOrSelf(home), vendoredCodexPath());
-  return cachedWrapper;
+  const cliRoot = vendoredCodexRoot();
+  const cwd = agentCwd(home);
+  const reads = (): ReadAllowance => ({ folders: loadReadableFolders(), cliRoot, cwd });
+  // The home as `$HOME` spells it, not resolved: a folder listed through a
+  // symlinked home must be in it, as for Claude (`readableRoots` checks both
+  // forms). `sandboxPolicy` resolves each path that it writes.
+  installed = { wrapper: installCodexSandbox(dir, home, vendoredCodexPath(), reads()), dir, home, reads };
+  return installed.wrapper;
+}
+
+/// Write the profile again with the readable folders that config.json lists
+/// now. Each Codex turn starts a new CLI, which reads the profile as it
+/// starts, so a turn reads the folders of that moment: a folder that the user
+/// removes is refused from the next turn on. Nothing to do before the wrapper
+/// is installed in this process. Node runs this to its end before any other
+/// session's turn, so a write with an older list cannot follow a newer one.
+export function refreshCodexSandbox(): void {
+  if (installed) writeCodexProfile(installed.dir, installed.home, installed.reads());
 }

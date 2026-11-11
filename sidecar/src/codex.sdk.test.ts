@@ -9,8 +9,8 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { Codex } from "@openai/codex-sdk";
 import type { AgentSessionOptions } from "./agent.js";
-import { CodexAgentSession, codexClientOptions, codexConfigServers } from "./codex.js";
-import { installCodexSandbox, realpathOrSelf, vendoredCodexPath } from "./codexSandbox.js";
+import { CodexAgentSession, codexClientOptions, codexConfigServers, codexWorkingDirectory } from "./codex.js";
+import { installCodexSandbox, realpathOrSelf, vendoredCodexPath, vendoredCodexRoot } from "./codexSandbox.js";
 import { mergeConfig } from "./config.js";
 import { STUB_MCP } from "./fakeModel.js";
 import { cardLaneOptions } from "./lanes.js";
@@ -42,6 +42,9 @@ import { classifierOptions } from "./trigger.js";
 const darwin = { skip: process.platform !== "darwin" ? "requires macOS and the darwin Codex CLI" : false };
 
 let home: string;
+/// The folder of the stub connector: a readable folder, or the Seatbelt
+/// profile refuses the connector its own script (GHSA-6xc8-f55f-jxqr).
+let connectorsDir: string;
 let server: http.Server;
 /// What a session could use, by the prompt that sent it: the names of the tools
 /// it was offered, what a read from the stub server's resources returned
@@ -118,10 +121,12 @@ const message = (text: string) => ({
 /// command instead. The probe's output arrives in the next request, and the
 /// turn then ends.
 function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: Tool[] }): void {
-  const prompt = JSON.stringify(body.input).match(/PROMPT:(\w+)/)?.[1];
+  // The last prompt: a resumed thread sends its earlier turns too.
+  const prompt = [...JSON.stringify(body.input).matchAll(/PROMPT:(\w+)/g)].at(-1)?.[1];
   const done = message('{"triggers":[]}');
   if (!prompt) return respond(res, done);
-  const result = (body.input ?? []).find((i) => i.type?.endsWith("_output") && i.call_id === PROBE);
+  // The last probe output: a resumed thread sends its earlier turns' too.
+  const result = (body.input ?? []).filter((i) => i.type?.endsWith("_output") && i.call_id === PROBE).at(-1);
   const entry = offered.get(prompt);
   if (result && entry && prompt.startsWith("shell")) {
     entry.shell = outputText(result.output);
@@ -174,7 +179,9 @@ before(async () => {
   fs.writeFileSync(note, `${NOTE}\n`);
   fs.writeFileSync(key, `${KEY}\n`);
   SHELL_COMMAND = `cat ${note}; cat ${key}`;
-  const stub = path.join(home, "stub-mcp.mjs");
+  connectorsDir = path.join(home, "connectors");
+  fs.mkdirSync(connectorsDir);
+  const stub = path.join(connectorsDir, "stub-mcp.mjs");
   fs.writeFileSync(stub, STUB_MCP);
   server = http.createServer((req, res) => {
     let raw = "";
@@ -217,8 +224,16 @@ after(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-/// Run one turn with `opts` and return what it could use.
-async function offeredTools(prompt: string, opts: AgentSessionOptions): Promise<Offered> {
+/// Run one turn with `opts` and return what it could use. The profile lets the
+/// CLI read `readable` in the synthetic home.
+async function offeredTools(
+  prompt: string,
+  given: AgentSessionOptions,
+  readable: string[] = [connectorsDir]
+): Promise<Offered> {
+  const opts = { ...given, home };
+  const cwd = codexWorkingDirectory(opts);
+  fs.mkdirSync(cwd, { recursive: true });
   const env = {
     PATH: process.env.PATH ?? "",
     TMPDIR: os.tmpdir(),
@@ -226,7 +241,9 @@ async function offeredTools(prompt: string, opts: AgentSessionOptions): Promise<
     CODEX_HOME: path.join(home, ".codex"),
     FAKE_API_KEY: "sk-test",
   };
-  const wrapper = installCodexSandbox(path.join(home, "sandbox"), home, vendoredCodexPath());
+  const wrapper = installCodexSandbox(path.join(home, "sandbox"), home, vendoredCodexPath(), {
+    folders: readable, cliRoot: vendoredCodexRoot(), cwd,
+  });
   const client = await codexClientOptions(opts, {}, wrapper, (cli, cwd) => codexConfigServers(cli, cwd, env));
   const s = new CodexAgentSession(opts, (threadOptions) => new Codex({ ...client, env }).startThread(threadOptions));
   try {
@@ -244,30 +261,50 @@ async function offeredTools(prompt: string, opts: AgentSessionOptions): Promise<
 /// it could use. This is the app's own path to a Codex client — the session sets
 /// it up — where offeredTools builds the client itself.
 async function sidecarTools(prompt: string, allowMcpActions: boolean): Promise<Offered> {
+  return (await sidecarTurns([{ prompt, readable: [connectorsDir] }], allowMcpActions))[0];
+}
+
+/// Ask the built sidecar one question for each step, in turn, and return what
+/// each could use. Before each question, config.json lists the step's readable
+/// folders, as an edit in the Files tab would leave it.
+async function sidecarTurns(
+  steps: { prompt: string; readable: string[] }[],
+  allowMcpActions: boolean
+): Promise<Offered[]> {
   const advisor = path.join(home, "Library", "Application Support", "Advisor");
   fs.mkdirSync(advisor, { recursive: true });
-  fs.writeFileSync(path.join(advisor, "config.json"), JSON.stringify({ provider: "codex", allowMcpActions }));
+  const listing = (readable: string[]): void => fs.writeFileSync(
+    path.join(advisor, "config.json"),
+    JSON.stringify({ provider: "codex", allowMcpActions, readableFolders: readable })
+  );
+  listing(steps[0]?.readable ?? []);
   const sidecar = spawn(process.execPath, [fileURLToPath(new URL("./main.js", import.meta.url))], {
     env: { PATH: process.env.PATH ?? "", TMPDIR: os.tmpdir(), HOME: home, FAKE_API_KEY: "sk-test" },
   });
+  let card: ((frame: { state: string; body: string }) => void) | undefined;
+  readline.createInterface({ input: sidecar.stdout }).on("line", (line) => {
+    const frame = JSON.parse(line) as { type: string; state?: string; body?: string };
+    if (frame.type === "card_update" && frame.state !== "pending" && frame.state !== "streaming") {
+      card?.({ state: frame.state ?? "", body: frame.body ?? "" });
+    }
+  });
+  const used: Offered[] = [];
   try {
-    const finished = new Promise<{ state: string; body: string }>((resolve) => {
-      readline.createInterface({ input: sidecar.stdout }).on("line", (line) => {
-        const frame = JSON.parse(line) as { type: string; state?: string; body?: string };
-        if (frame.type === "card_update" && frame.state !== "pending" && frame.state !== "streaming") {
-          resolve({ state: frame.state ?? "", body: frame.body ?? "" });
-        }
-      });
-    });
-    sidecar.stdin.write(JSON.stringify({ type: "query", id: "q", text: `PROMPT:${prompt}` }) + "\n");
-    const frame = await finished;
-    assert.equal(frame.state, "done", `${prompt}: ${frame.body}`);
+    for (const [i, step] of steps.entries()) {
+      listing(step.readable);
+      // The questions go one at a time, so the next finished card is this one.
+      const finished = new Promise<{ state: string; body: string }>((resolve) => (card = resolve));
+      sidecar.stdin.write(JSON.stringify({ type: "query", id: `q${i}`, text: `PROMPT:${step.prompt}` }) + "\n");
+      const frame = await finished;
+      assert.equal(frame.state, "done", `${step.prompt}: ${frame.body}`);
+      const tools = offered.get(step.prompt);
+      assert.ok(tools, `${step.prompt}: the CLI never called the model`);
+      used.push(tools);
+    }
   } finally {
     sidecar.kill();
   }
-  const tools = offered.get(prompt);
-  assert.ok(tools, `${prompt}: the CLI never called the model`);
-  return tools;
+  return used;
 }
 
 /// A model that reaches its tools through code mode's `exec`, as current models do.
@@ -298,6 +335,29 @@ test("#codex-connectors a card lane allowed connector actions is offered the stu
   // A classic model is offered MCP tools through tool_search, and the resource tools directly.
   const classic = await offeredTools("actionsClassic", cardLaneOptions(mergeConfig({ allowMcpActions: true, model: CLASSIC_MODEL }), "research0"));
   assert.ok(reachesStub(classic), show(classic));
+});
+
+// The cost of the read allowlist: a connector that reads its own files in the
+// home folder does not start unless they are in a readable folder. The turn
+// still runs.
+test("#codex-readable-folders a connector whose files are in no readable folder does not start", darwin, async () => {
+  const o = await offeredTools("unlistedConnector", cardLaneOptions(mergeConfig({ allowMcpActions: true, model: CODE_MODE_MODEL }), "research0"), []);
+  // Node cannot read the server's script, so the server closes before its
+  // handshake. (`reachesStub` counts that as a reach: the CLI asked for it.)
+  assert.match(o.stub ?? "", /MCP startup failed/, show(o));
+  assert.ok(!o.tools.includes("mcp__stub__lookup"), show(o));
+});
+
+// The sidecar writes the profile before each Codex turn, from config.json, and
+// each turn starts a new CLI with its connectors: a folder that the user
+// removes is refused from the next question on.
+test("#codex-readable-folders the sidecar's next Codex turn refuses a folder that the user removed", { ...darwin, timeout: 90_000 }, async () => {
+  const [listed, removed] = await sidecarTurns([
+    { prompt: "sidecarListed", readable: [connectorsDir] },
+    { prompt: "sidecarRemoved", readable: [] },
+  ], true);
+  assert.ok(reachesStub(listed) && !/MCP startup failed/.test(listed.stub ?? ""), show(listed));
+  assert.match(removed.stub ?? "", /MCP startup failed/, show(removed));
 });
 
 test("#codex-connectors a card lane without connector actions is offered no connectors", darwin, async () => {

@@ -14,6 +14,9 @@ import {
   sandboxReadDenials,
   sandboxWriteDenials,
   seatbeltProfile,
+  writeCodexProfile,
+  type ReadAllowance,
+  type SeatbeltPolicy,
 } from "./codexSandbox.js";
 
 /// Seatbelt is macOS-only; CI runs the sidecar on Linux.
@@ -29,7 +32,13 @@ function fakeHome(opts: { symlinkDotfiles?: boolean } = {}): {
   profile: string;
 } {
   const home = realpathOrSelf(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-sb-")));
-  for (const d of ["Documents", "tmp"]) fs.mkdirSync(path.join(home, d), { recursive: true });
+  for (const d of ["Documents", "tmp", "Private", "cli", "Library/cwd"]) {
+    fs.mkdirSync(path.join(home, d), { recursive: true });
+  }
+  // An ordinary folder that the user does not list as readable.
+  fs.writeFileSync(path.join(home, "Private", "plan.txt"), "private plan");
+  fs.writeFileSync(path.join(home, "cli", "helper.txt"), "cli file");
+  fs.writeFileSync(path.join(home, "Library", "cwd", "AGENTS.md"), "cwd file");
 
   // `.ssh` and `.codex` either sit directly in home or, as on a dotfiles-managed
   // machine, are symlinks into `~/dotfiles`. Seatbelt matches resolved paths, so
@@ -47,9 +56,19 @@ function fakeHome(opts: { symlinkDotfiles?: boolean } = {}): {
 
   const tmp = path.join(home, "tmp");
   const profile = path.join(tmp, "advisor.sb");
-  const policy = sandboxPolicy(home, [tmp]);
-  fs.writeFileSync(profile, seatbeltProfile(policy.readDenials, policy.writableRoots, policy.writeDenials));
+  fs.writeFileSync(profile, seatbeltProfile(sandboxPolicy(home, readsOf(home), [tmp])));
   return { home, tmp, profile };
+}
+
+/// What the fake home lets the sandboxed process read: `~/Documents`, the CLI
+/// folder and the working folder.
+function readsOf(home: string, folders = [path.join(home, "Documents")]): ReadAllowance {
+  return { folders, cliRoot: path.join(home, "cli"), cwd: path.join(home, "Library", "cwd") };
+}
+
+/// A policy with only the given rules, for tests of the profile text.
+function rules(given: Partial<SeatbeltPolicy>): SeatbeltPolicy {
+  return { home: [], readRoots: [], readMetadata: [], readDenials: [], writableRoots: [], writeDenials: [], ...given };
 }
 
 function sandboxed(profile: string, argv: string[]): { code: number; out: string; err: string } {
@@ -69,7 +88,7 @@ test("the OS sandbox denies every path the Claude backend denies, bar Codex's ow
 });
 
 test("the profile denies the read paths and confines writes to the writable roots", () => {
-  const profile = seatbeltProfile(["/home/u/.ssh"], ["/home/u/.codex"], []);
+  const profile = seatbeltProfile(rules({ readDenials: ["/home/u/.ssh"], writableRoots: ["/home/u/.codex"] }));
   assert.match(profile, /^\(version 1\)/);
   assert.match(profile, /\(deny file-read\* \(subpath "\/home\/u\/\.ssh"\)\)/);
   assert.match(profile, /\(deny file-write\*\)/);
@@ -84,7 +103,9 @@ test("the profile denies the read paths and confines writes to the writable root
 });
 
 test("the profile denies writes to Codex's inputs, after the folder allowance", () => {
-  const profile = seatbeltProfile([], ["/home/u/.codex"], ["/home/u/.codex/config.toml", "/home/u/.codex/skills"]);
+  const profile = seatbeltProfile(rules({
+    writableRoots: ["/home/u/.codex"], writeDenials: ["/home/u/.codex/config.toml", "/home/u/.codex/skills"],
+  }));
   assert.match(profile, /\(deny file-write\* \(subpath "\/home\/u\/\.codex\/config\.toml"\) \(subpath "\/home\/u\/\.codex\/skills"\)\)/);
   // Last matching rule wins: the input denials must follow the folder allowance.
   assert.ok(profile.indexOf("(allow file-write*") < profile.indexOf('(deny file-write* (subpath "/home/u/.codex/config.toml"'));
@@ -92,7 +113,7 @@ test("the profile denies writes to Codex's inputs, after the folder allowance", 
 
 test("the policy names every input as a write denial, resolved through the folder", () => {
   const { home } = fakeHome({ symlinkDotfiles: true });
-  const policy = sandboxPolicy(home, [path.join(home, "tmp")]);
+  const policy = sandboxPolicy(home, readsOf(home), [path.join(home, "tmp")]);
   const real = path.join(home, "dotfiles", ".codex");
   const inputs = sandboxWriteDenials(home);
   assert.ok(inputs.length >= 9, "the input list is not empty");
@@ -115,7 +136,7 @@ test("a relative symlink target is read from the folder the link really sits in"
   fs.writeFileSync(path.join(home, "dotfiles", "shared", "config.toml"), "");
   fs.unlinkSync(path.join(real, "config.toml"));
   fs.symlinkSync("../shared/config.toml", path.join(real, "config.toml"));
-  const policy = sandboxPolicy(home, [path.join(home, "tmp")]);
+  const policy = sandboxPolicy(home, readsOf(home), [path.join(home, "tmp")]);
   assert.ok(policy.writeDenials.includes(path.join(home, "dotfiles", "shared", "config.toml")), policy.writeDenials.join("\n"));
 });
 
@@ -123,7 +144,7 @@ test("a dangling link into a folder that does not exist yet is still denied at i
   const { home } = fakeHome({ symlinkDotfiles: true });
   const real = path.join(home, "dotfiles", ".codex");
   fs.symlinkSync(path.join(home, ".codex", "local", "hooks.json"), path.join(real, "hooks.json"));
-  const policy = sandboxPolicy(home, [path.join(home, "tmp")]);
+  const policy = sandboxPolicy(home, readsOf(home), [path.join(home, "tmp")]);
   assert.ok(policy.writeDenials.includes(path.join(real, "local", "hooks.json")), policy.writeDenials.join("\n"));
 });
 
@@ -136,14 +157,14 @@ test("an input that is itself a symlink is denied by name and at its target, dan
   fs.symlinkSync(target, path.join(codex, "config.toml"));
   const dangling = path.join(codex, "local", "hooks.json"); // not created
   fs.symlinkSync(dangling, path.join(codex, "hooks.json"));
-  const policy = sandboxPolicy(home, [path.join(home, "tmp")]);
+  const policy = sandboxPolicy(home, readsOf(home), [path.join(home, "tmp")]);
   for (const p of [path.join(codex, "config.toml"), target, path.join(codex, "hooks.json"), dangling]) {
     assert.ok(policy.writeDenials.includes(p), `${p} missing from\n${policy.writeDenials.join("\n")}`);
   }
 });
 
 test("profile paths are escaped so a quote cannot terminate the s-expression", () => {
-  const profile = seatbeltProfile(['/home/u/a"b\\c'], [], []);
+  const profile = seatbeltProfile(rules({ readDenials: ['/home/u/a"b\\c'] }));
   assert.match(profile, /\(subpath "\/home\/u\/a\\"b\\\\c"\)/);
 });
 
@@ -188,6 +209,205 @@ test("a sandboxed process can still read and write Codex's own state", darwin, (
   const write = sandboxed(profile, ["/bin/sh", "-c", `echo s > ${session}`]);
   assert.equal(write.code, 0);
   assert.equal(fs.existsSync(session), true);
+});
+
+// GHSA-6xc8-f55f-jxqr: a denylist fails open for each store that it does not
+// name, so Codex reads in the home folder only the folders that the user lists
+// as readable, and what the CLI needs to run.
+test("#codex-readable-folders the profile reads the home folder only where it allows, and the stores never", () => {
+  const profile = seatbeltProfile(rules({
+    home: ["/home/u"], readRoots: ["/home/u/Documents"], readMetadata: ["/home/u"], readDenials: ["/home/u/.ssh"],
+  }));
+  const at = (rule: string): number => {
+    assert.ok(profile.includes(rule), rule);
+    return profile.indexOf(rule);
+  };
+  const home = at('(deny file-read* (subpath "/home/u"))');
+  const roots = at('(allow file-read* (subpath "/home/u/Documents"))');
+  const metadata = at('(allow file-read-metadata (literal "/home/u"))');
+  const stores = at('(deny file-read* (subpath "/home/u/.ssh"))');
+  // Seatbelt takes the last matching rule.
+  assert.ok(home < roots && home < metadata, "the allowances follow the home denial");
+  assert.ok(roots < stores && metadata < stores, "the store denials come last");
+});
+
+test("#codex-readable-folders the policy allows the readable folders, Codex's state, the CLI and the working folder", () => {
+  const { home } = fakeHome({ symlinkDotfiles: true });
+  const listed = [path.join(home, "Documents"), "~", path.join(home, ".ssh"), "~/Library", "~/dotfiles"];
+  const policy = sandboxPolicy(home, readsOf(home, listed), [path.join(home, "tmp")]);
+  assert.deepEqual(policy.home, [home]);
+  for (const p of ["Documents", ".codex", "dotfiles/.codex", ".codex-global-state.json", "cli", "Library/cwd"]) {
+    assert.ok(policy.readRoots.includes(path.join(home, p)), p);
+  }
+  // The listed folders that the policy refuses: the home folder, a store, and
+  // folders above a store.
+  for (const p of [home, path.join(home, ".ssh"), path.join(home, "dotfiles", ".ssh"), path.join(home, "Library"),
+    path.join(home, "dotfiles")]) {
+    assert.ok(!policy.readRoots.includes(p), p);
+  }
+  // Only the metadata of the folders on the way, so that a path can be resolved.
+  assert.deepEqual(
+    [...policy.readMetadata].sort(),
+    [home, path.join(home, "Library"), path.join(home, "dotfiles")].sort()
+  );
+});
+
+test("#codex-readable-folders a sandboxed process reads in the home folder only the readable folders and what Codex needs", darwin, () => {
+  for (const layout of [{}, { symlinkDotfiles: true }]) {
+    const { home, profile } = fakeHome(layout);
+    const label = JSON.stringify(layout);
+    const refused = sandboxed(profile, ["/bin/cat", path.join(home, "Private", "plan.txt")]);
+    assert.notEqual(refused.code, 0, label);
+    assert.doesNotMatch(refused.out, /private plan/, label);
+    const listing = sandboxed(profile, ["/bin/ls", home]);
+    assert.notEqual(listing.code, 0, label);
+    assert.doesNotMatch(listing.out, /Private/, label);
+    for (const [file, text] of [
+      ["Documents/notes.txt", "hello"], ["cli/helper.txt", "cli file"], ["Library/cwd/AGENTS.md", "cwd file"],
+      [".codex/auth.json", "provider token"],
+    ]) {
+      const r = sandboxed(profile, ["/bin/cat", path.join(home, file)]);
+      assert.equal(r.code, 0, `${label} ${file}: ${r.err}`);
+      assert.match(r.out, new RegExp(text), `${label} ${file}`);
+    }
+    // A path to an allowed folder can be resolved: the folders on the way give
+    // their metadata.
+    const resolved = sandboxed(profile, ["/bin/realpath", path.join(home, ".codex", "auth.json")]);
+    assert.equal(resolved.code, 0, `${label}: ${resolved.err}`);
+  }
+});
+
+test("#codex-readable-folders a profile written again follows the folders that the user lists now", darwin, () => {
+  const { home, tmp } = fakeHome();
+  const notes = path.join(home, "Documents", "notes.txt");
+  const profile = writeCodexProfile(tmp, home, readsOf(home), [tmp]);
+  assert.match(sandboxed(profile, ["/bin/cat", notes]).out, /hello/);
+  // The user removes the folder: the next CLI that starts cannot read it.
+  assert.equal(writeCodexProfile(tmp, home, readsOf(home, []), [tmp]), profile);
+  const removed = sandboxed(profile, ["/bin/cat", notes]);
+  assert.notEqual(removed.code, 0);
+  assert.doesNotMatch(removed.out, /hello/);
+  // The user adds another folder, in the `~` form that the Files tab can store.
+  writeCodexProfile(tmp, home, readsOf(home, ["~/Private"]), [tmp]);
+  assert.match(sandboxed(profile, ["/bin/cat", path.join(home, "Private", "plan.txt")]).out, /private plan/);
+});
+
+// A temporary folder in the home folder (a `TMPDIR` such as `~/tmp`): what the
+// CLI and its connectors write there, they must read back (code review
+// 2026-11-11).
+test("#codex-readable-folders a sandboxed process reads back what it writes in a temporary folder in the home folder", darwin, () => {
+  const { tmp, profile } = fakeHome();
+  const scratch = path.join(tmp, "scratch.txt");
+  const r = sandboxed(profile, ["/bin/sh", "-c", `echo scratch > ${scratch} && /bin/cat ${scratch}`]);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /scratch/);
+  // A `TMPDIR` in another letter case than the home folder: the default
+  // volume and Seatbelt ignore the case, so the profile must too.
+  const { home: other } = fakeHome();
+  const spelt = path.join(path.dirname(other), path.basename(other).toUpperCase(), "TMP", "DEEP");
+  fs.mkdirSync(spelt, { recursive: true });
+  const caseProfile = path.join(other, "tmp", "case.sb");
+  fs.writeFileSync(caseProfile, seatbeltProfile(sandboxPolicy(other, readsOf(other), [spelt])));
+  const deep = path.join(spelt, "scratch.txt");
+  const back = sandboxed(caseProfile, ["/bin/sh", "-c", `echo scratch > ${deep} && /bin/cat ${deep} && /bin/realpath ${deep}`]);
+  assert.equal(back.code, 0, back.err);
+});
+
+// A `TMPDIR` that holds stores, such as `~/Library`, stays write-only: as a
+// read root it would open every store in it that the denylist does not name.
+// A writable root is judged as a listed folder is (`readableRoots`), and so
+// are the CLI and working folders (code review 2026-11-11).
+test("#codex-readable-folders a temporary folder that holds stores is not opened to reads", darwin, () => {
+  const { home } = fakeHome();
+  const library = path.join(home, "Library");
+  fs.mkdirSync(path.join(library, "Mail"));
+  fs.writeFileSync(path.join(library, "Mail", "inbox.txt"), "private mail");
+  const policy = sandboxPolicy(home, readsOf(home), [library]);
+  assert.ok(!policy.readRoots.includes(library), policy.readRoots.join("\n"));
+  const profile = path.join(home, "tmp", "library.sb");
+  fs.writeFileSync(profile, seatbeltProfile(policy));
+  const r = sandboxed(profile, ["/bin/cat", path.join(library, "Mail", "inbox.txt")]);
+  assert.notEqual(r.code, 0);
+  assert.doesNotMatch(r.out, /private mail/);
+  // A CLI or working folder that holds a store is not a read root either.
+  const wide = sandboxPolicy(home, { ...readsOf(home), cliRoot: library, cwd: home }, [path.join(home, "tmp")]);
+  assert.ok(!wide.readRoots.includes(library) && !wide.readRoots.includes(home), wide.readRoots.join("\n"));
+});
+
+// The first run in a home reached through a symlink: `~/.codex` does not exist
+// yet, and a rule that names it through the link would match nothing, because
+// the kernel matches resolved paths. Codex could then not log in (code review
+// 2026-11-11).
+test("#codex-readable-folders Codex makes and reads its state on a first run in a home reached through a symlink", darwin, () => {
+  const { home: real } = fakeHome();
+  fs.rmSync(path.join(real, ".codex"), { recursive: true });
+  const home = `${real}-link`;
+  fs.symlinkSync(real, home);
+  const tmp = path.join(home, "tmp");
+  const profile = writeCodexProfile(tmp, home, readsOf(home), [tmp]);
+  const auth = path.join(home, ".codex", "auth.json");
+  const make = sandboxed(profile, ["/bin/sh", "-c", `mkdir ${path.dirname(auth)} && echo token > ${auth}`]);
+  assert.equal(make.code, 0, make.err);
+  assert.match(sandboxed(profile, ["/bin/cat", auth]).out, /token/);
+});
+
+// `$HOME` in another letter case than the disk stores it, and a folder listed
+// in the stored spelling, as the folder picker gives it. The folders on the
+// way to it must still give their metadata, or no path in it can be resolved
+// (code review 2026-11-11).
+test("#codex-readable-folders a path in a readable folder resolves when $HOME is in another letter case", darwin, () => {
+  const { home: real } = fakeHome();
+  const notes = path.join(real, "Documents", "Notes");
+  fs.mkdirSync(notes);
+  fs.writeFileSync(path.join(notes, "a.md"), "note");
+  const home = path.join(path.dirname(real), path.basename(real).toUpperCase());
+  const tmp = path.join(home, "tmp");
+  const profile = writeCodexProfile(tmp, home, readsOf(home, [notes]), [tmp]);
+  const resolved = sandboxed(profile, ["/bin/realpath", path.join(notes, "a.md")]);
+  assert.equal(resolved.code, 0, resolved.err);
+  assert.match(sandboxed(profile, ["/bin/cat", path.join(notes, "a.md")]).out, /note/);
+});
+
+/// Run `script` in a new Node process whose home folder is `home`, as the
+/// sidecar runs: `codexSandboxWrapper` installs the sandbox there and reads
+/// that home's config.json. The script gets this module as `m`.
+function inSidecar(home: string, script: string): void {
+  const url = new URL("./codexSandbox.js", import.meta.url).href;
+  const r = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", `const m = await import(${JSON.stringify(url)});\n${script}`],
+    { env: { PATH: process.env.PATH ?? "", HOME: home, TMPDIR: os.tmpdir() }, encoding: "utf8" }
+  );
+  assert.equal(r.status, 0, r.stderr);
+}
+
+// The sidecar's own install and the write before each turn, with the list from
+// config.json. The home folder is reached through a symlink, and the folder is
+// listed in that form, as the folder picker gives it: Claude reads such a
+// folder, so Codex must too (code review 2026-11-11).
+test("#codex-readable-folders the sidecar's sandbox follows config.json at each turn, in a home reached through a symlink", darwin, () => {
+  const { home: real } = fakeHome();
+  const home = `${real}-link`;
+  fs.symlinkSync(real, home);
+  const advisor = path.join(home, "Library", "Application Support", "Advisor");
+  fs.mkdirSync(advisor, { recursive: true });
+  const config = path.join(advisor, "config.json");
+  const profile = path.join(advisor, "sandbox", "advisor.sb");
+  const notes = path.join(home, "Documents", "notes.txt");
+  fs.writeFileSync(config, JSON.stringify({ readableFolders: [path.join(home, "Documents")] }));
+  inSidecar(home, "m.codexSandboxWrapper();");
+  const listed = sandboxed(profile, ["/bin/cat", notes]);
+  assert.match(listed.out, /hello/, listed.err);
+  // The user removes the folder after the install: the next turn's write
+  // reads config.json again.
+  inSidecar(home, [
+    "m.codexSandboxWrapper();",
+    `(await import("node:fs")).writeFileSync(${JSON.stringify(config)}, '{"readableFolders":[]}');`,
+    "m.refreshCodexSandbox();",
+  ].join("\n"));
+  const removed = sandboxed(profile, ["/bin/cat", notes]);
+  assert.notEqual(removed.code, 0);
+  assert.doesNotMatch(removed.out, /hello/);
 });
 
 // The inputs that shape the CLI's next turn or session (see sandboxWriteDenials)
@@ -243,8 +463,7 @@ test("a config.toml that is a symlink cannot be written through the link, nor re
   fs.unlinkSync(link);
   fs.symlinkSync(target, link);
   const profile = path.join(tmp, "advisor.sb");
-  const policy = sandboxPolicy(home, [tmp]);
-  fs.writeFileSync(profile, seatbeltProfile(policy.readDenials, policy.writableRoots, policy.writeDenials));
+  fs.writeFileSync(profile, seatbeltProfile(sandboxPolicy(home, readsOf(home), [tmp])));
   const through = sandboxed(profile, ["/bin/sh", "-c", `echo '[mcp_servers.evil]' >> ${link}`]);
   assert.notEqual(through.code, 0);
   assert.equal(fs.readFileSync(target, "utf8"), 'model = "x"\n');
@@ -273,7 +492,7 @@ test("the profile denies the LaunchServices mach services", () => {
   // plus every `com.apple.lsd.*` sub-service) must be matched by regex, since an
   // explicit `com.apple.lsd`/`launchservicesd` list leaves resolution working
   // through the sub-services. Verified live below.
-  const profile = seatbeltProfile([], ["/home/u/.codex"], []);
+  const profile = seatbeltProfile(rules({ writableRoots: ["/home/u/.codex"] }));
   assert.match(profile, /\(deny mach-lookup \(global-name-regex "\^com\\\.apple\\\.lsd"\)\)/);
   // After the launcher exec denial, before the write rules — it is a deny, so
   // position only matters against a later allow, and there is no mach allow.
@@ -352,7 +571,7 @@ test("the installed wrapper runs the real CLI under the profile", darwin, () => 
   fs.writeFileSync(stub, '#!/bin/sh\nexec /bin/cat "$@"\n');
   fs.chmodSync(stub, 0o755);
 
-  const wrapper = installCodexSandbox(tmp, home, stub, [tmp]);
+  const wrapper = installCodexSandbox(tmp, home, stub, { ...readsOf(home), cliRoot: tmp }, [tmp]);
   assert.equal(fs.existsSync(wrapper), true);
   assert.ok(fs.statSync(wrapper).mode & 0o111, "wrapper must be executable");
   assert.match(codexWrapperScript(stub, "/p/advisor.sb"), /^#!\/bin\/sh/);

@@ -429,7 +429,9 @@ not drop a folder that the sidecar uses.
   an agent tried twelve other paths, such as `~/Documents/Obsidian` and
   `~/vault`, and then said that no notes were readable. The list goes in the
   task, not in the system prompt, because a warm session outlives a change to
-  it. Codex does not get the note: it does not use the list yet.
+  it. Codex does not get the note: it has no file tool of its own (*Codex
+  shell stays closed*), and its Seatbelt profile applies the list (*Codex
+  reads only the readable folders*).
 
 The rest of the Preferences window never writes the list (see *Readable
 folders in Preferences*), so it cannot add back a folder that the user
@@ -446,8 +448,8 @@ against the real CLI.
 
 Limits:
 
-- Claude only. Codex reads under its Seatbelt profile, which does not use the
-  readable folders yet.
+- Codex applies the list in its Seatbelt profile since 2026-11-11: see
+  *Codex reads only the readable folders*.
 - Connector arguments are still not checked. The Seatbelt profile for the
   Claude CLI and its stdio connectors will close that fault.
 
@@ -1511,7 +1513,9 @@ unknown tag on a new note.
 ## Codex runs under a Seatbelt profile (2026-08-10)
 
 Decision: the Codex CLI runs under a macOS Seatbelt profile. `codexSandbox.ts`
-builds the profile from the same `deniedPaths()` list as the Claude backend. A
+builds the profile from the same `deniedPaths()` list as the Claude backend.
+(Since 2026-11-11, reads in the home folder are an allowlist: see *Codex reads
+only the readable folders* below.) A
 wrapper that runs the vendored CLI under `sandbox-exec -f` goes to the SDK as
 `codexPathOverride`. Children inherit the profile, so MCP servers and shell
 commands are covered with no help from the CLI. Writes are denied except to
@@ -1545,6 +1549,67 @@ Residual risks:
 
 If the sandbox install fails, the backend fails. There is no fallback, because
 an unsandboxed Codex is the defect that this closes. Commit: `6aec82b`.
+
+### Codex reads only the readable folders (2026-11-11, GHSA-6xc8-f55f-jxqr)
+
+Decision: the profile refuses reads in the home folder, then allows only these:
+the readable folders that `readableRoots` honours, the Codex state (`~/.codex`
+and `~/.codex-global-state.json`, in the listed and the resolved form), the
+platform package of the CLI, the agent working folder, and each writable root
+in the home folder (what the CLI writes, it reads back). Each of these except
+the state is a read root only when `readableRoots` honours it as a listed
+folder, so a `TMPDIR` of `~/Library` stays write-only and does not open the
+stores in it that the denylist does not name (code review 2026-11-11). (The
+write side is older: since 2026-08-10, such a `TMPDIR` is writable.) It allows the
+metadata of each folder on the way to these, by exact path, because the CLI
+resolves its paths (`canonicalize`). The denylist stays as the last read
+rule. The CLI now runs in the agent working folder, not in `$HOME`.
+
+Reason: a denylist fails open for each store that it does not name, and the
+Claude agents moved to an allowlist on 2026-11-10 (*Readable folders*). Codex
+has no file tool of its own (*Codex shell stays closed*), but its connectors
+and `view_image` read with the rights of the CLI, and MCP tools bypass its
+own sandbox mode (openai/codex#4152).
+
+- **The profile follows the list at each turn.** Each turn starts a new
+  `codex exec` process, which reads the profile as it starts.
+  `CodexAgentSession` calls `refreshCodexSandbox` before each turn, which
+  writes the profile from `config.json` (a new file, then a rename). So a
+  folder that the user removes is refused from the next turn on. A profile
+  that cannot be written fails the turn. The write is synchronous, so one
+  session cannot write an older list after another session wrote a newer one.
+- **Seatbelt matches the file, not its spelling** (checked 2026-11-11). A rule
+  for `.codex` holds for `.Codex`, for another Unicode normal form, and for
+  `.ſsh`. So the paths in the profile need their symlinks resolved, but not
+  the native realpath that the Claude policy uses.
+- **Seatbelt lets a program start when it refuses reads of its file**
+  (checked 2026-11-11). A connector program in `~/.local/bin` starts, and then
+  reads only what the profile allows. A script cannot start, because its
+  interpreter must read it.
+
+Verified: `codexSandbox.test.ts` on a fake home, in both home layouts: reads
+in a readable folder, in the state, in the CLI folder and in the working
+folder; refusals of an unlisted folder, of a listing of the home folder, and
+of a removed folder after the profile is written again. `codex.sdk.test.ts`
+against the real CLI 0.166.0: each turn still runs, a connector whose script
+is in no readable folder fails at startup, and in the real sidecar a
+connector folder that is removed between two questions fails at the second.
+(The fake model there now reads the last prompt and the last probe output of
+a request, because a resumed thread sends its earlier turns too. Before, the
+second turn's result was the first turn's.) On the real home folder,
+with no model call: `codex mcp list` ran under the profile, the two readable
+folders were read, and `~`, `~/Desktop` and `~/.zshrc` were refused.
+
+Cost (accepted 2026-11-11): with "Allow connector actions" on, a Codex
+connector that reads its own code or data in the home folder fails at
+startup, unless the user lists that folder as readable. That also lets the
+agents read the folder. On the development machine, one of five connectors
+failed (its database is in the home folder), and a connector program in
+`~/.local/bin` saw only the readable folders.
+
+Rejected: an allowance for the folder of each configured connector program.
+It helps only a connector that is a script, not one whose data is elsewhere in
+the home folder, and it opens more of the home folder.
 
 ## DMG built with `diskutil image` (2026-10-02)
 

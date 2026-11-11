@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
+import fs from "node:fs";
 import { homedir } from "node:os";
 import { Codex, type CodexOptions, type Thread, type ThreadOptions } from "@openai/codex-sdk";
-import type { Agent, AgentSessionOptions, RunProgress, TaskResult } from "./agent.js";
-import { codexSandboxWrapper } from "./codexSandbox.js";
+import { agentCwd, type Agent, type AgentSessionOptions, type RunProgress, type TaskResult } from "./agent.js";
+import { codexSandboxWrapper, refreshCodexSandbox } from "./codexSandbox.js";
 import { log } from "./protocol.js";
 
 /// Codex client auth. With an explicit `apiKey` the SDK talks to the OpenAI API
@@ -21,6 +22,14 @@ export function codexConstructorOptions(
     ...(apiKey ? { apiKey } : {}),
     ...(codexPathOverride ? { codexPathOverride } : {}),
   };
+}
+
+/// The CLI's working folder: the agent working folder, as for Claude. The
+/// Seatbelt profile refuses reads in the rest of the home folder
+/// (GHSA-6xc8-f55f-jxqr), and the CLI reads instructions such as `AGENTS.md`
+/// from its working folder.
+export function codexWorkingDirectory(opts: AgentSessionOptions): string {
+  return opts.cwd ?? agentCwd(opts.home ?? homedir());
 }
 
 /// Map an Advisor agent spec onto Codex thread options.
@@ -47,7 +56,7 @@ export function codexThreadOptions(opts: AgentSessionOptions): ThreadOptions {
     sandboxMode: "read-only",
     approvalPolicy: "never",
     skipGitRepoCheck: true,
-    workingDirectory: opts.cwd ?? homedir(),
+    workingDirectory: codexWorkingDirectory(opts),
     webSearchEnabled: web,
     networkAccessEnabled: web,
   };
@@ -91,7 +100,7 @@ export async function codexClientOptions(
     // whatever the features say. Only `[agents] enabled = false` overrides it.
     config.agents = { enabled: false };
   }
-  const servers = await listServers(codexPath, opts.cwd ?? homedir());
+  const servers = await listServers(codexPath, codexWorkingDirectory(opts));
   // The SDK writes each override as a dotted path, so a name with any other
   // character would disable some other key and leave this server running.
   const unsafe = servers.find((name) => !/^[A-Za-z0-9_-]+$/.test(name));
@@ -169,7 +178,10 @@ export class CodexAgentSession implements Agent {
       // is the right outcome: an unsandboxed Codex would read every secret in
       // $HOME and, via MCP tools that bypass its own `read-only` mode
       // (openai/codex#4152), write anywhere too.
-      new Codex(await codexClientOptions(opts, process.env, codexSandboxWrapper()))
+      new Codex(await codexClientOptions(opts, process.env, codexSandboxWrapper())),
+    /// Run before each turn's CLI starts: writes the Seatbelt profile with the
+    /// readable folders of that moment (`refreshCodexSandbox`).
+    private readonly prepareTurn: () => void = refreshCodexSandbox
   ) {}
 
   reset(): void {
@@ -196,6 +208,8 @@ export class CodexAgentSession implements Agent {
 
   private async newThread(): Promise<Thread> {
     if (this.threadFactory) return this.threadFactory(codexThreadOptions(this.opts));
+    // The CLI cannot start in a missing folder; agentCwd is made on first use.
+    fs.mkdirSync(codexWorkingDirectory(this.opts), { recursive: true });
     if (!this.client) {
       const client = this.createClient();
       this.client = client;
@@ -273,6 +287,9 @@ export class CodexAgentSession implements Agent {
           ? `${this.opts.systemPrompt}\n\n${task.recap ?? ""}${task.task}`
           : task.task;
         this.firstTurn = false;
+        // A profile that cannot be written fails the turn: the CLI would
+        // start with the readable folders of an earlier turn.
+        this.prepareTurn();
         const { events } = await thread.runStreamed(input, { signal: controller.signal });
         for await (const ev of events) {
           if (settled) break;

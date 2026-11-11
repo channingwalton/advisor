@@ -12,7 +12,7 @@ import {
   codexConstructorOptions,
   codexThreadOptions,
 } from "./codex.js";
-import { AsyncQueue, type Agent } from "./agent.js";
+import { AsyncQueue, agentCwd, type Agent } from "./agent.js";
 import { AutoPipeline } from "./autoPipeline.js";
 import { handleCancel } from "./cancel.js";
 import { guardedRun } from "./guardedRun.js";
@@ -616,12 +616,49 @@ test("#codex-connectors a listed server without a name fails the session", async
   await assert.rejects(codexConfigServers(cli, os.tmpdir()), /name/);
 });
 
-test("codexThreadOptions passes the model through and defaults cwd to home", () => {
+// The CLI runs in the agent working folder, as Claude does, not in the home
+// folder: the Seatbelt profile refuses reads there (GHSA-6xc8-f55f-jxqr).
+test("codexThreadOptions passes the model through and defaults cwd to the agent working folder", () => {
   const o = codexThreadOptions({ ...base, model: "gpt-5-codex", cwd: "/tmp/work" });
   assert.equal(o.model, "gpt-5-codex");
   assert.equal(o.workingDirectory, "/tmp/work");
   assert.equal(codexThreadOptions(base).model, undefined);
-  assert.notEqual(codexThreadOptions(base).workingDirectory, undefined);
+  assert.equal(codexThreadOptions({ ...base, home: "/home/u" }).workingDirectory, agentCwd("/home/u"));
+  assert.equal(codexThreadOptions(base).workingDirectory, agentCwd(os.homedir()));
+});
+
+// Each turn starts a new CLI, which reads the Seatbelt profile then. Writing
+// it before each turn makes the turn use the folders that the user lists now.
+// A profile that cannot be written fails the turn, and the CLI does not start.
+test("#codex-readable-folders each Codex turn writes the profile before the CLI starts", async () => {
+  const { calls, factory } = controlledThreads();
+  const order: string[] = [];
+  let fail = false;
+  const session = new CodexAgentSession(base, (options) => {
+    const thread = factory(options);
+    const run = thread.runStreamed.bind(thread);
+    thread.runStreamed = (input, turn) => {
+      order.push("turn");
+      return run(input, turn);
+    };
+    return thread;
+  }, undefined, () => {
+    order.push("profile");
+    if (fail) throw new Error("profile not written");
+  });
+  const first = session.run("first");
+  await setImmediate();
+  complete(calls[0], "one");
+  assert.equal((await first).text, "one");
+  const second = session.run("second");
+  await setImmediate();
+  complete(calls[1], "two");
+  assert.equal((await second).text, "two");
+  assert.deepEqual(order, ["profile", "turn", "profile", "turn"]);
+  fail = true;
+  const third = await session.run("third");
+  assert.match(third.error ?? "", /profile not written/);
+  assert.equal(calls.length, 2, "no CLI starts without the profile");
 });
 
 test("successful run releases its timeout and controller state", async () => {

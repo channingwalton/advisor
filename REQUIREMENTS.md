@@ -135,6 +135,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - When the user closes the recording window (close button or ⌘W), the app logs whether agent tasks were running, the first responder of each visible window and, when the prompt appears, the choice. A close while the window is already finishing is ignored and not logged. `#close-log`
 - N12. **Codex shell (issue #118):**
   - Under the Seatbelt profile, a Codex card lane runs no shell command: the CLI cannot apply its own sandbox inside the profile, so a command fails before it reads an ordinary file or a denied path (such as `~/.ssh`). The user guide says that Codex cards cannot run shell commands. `#codex-shell`
+- N13. **Codex reads (GHSA-6xc8-f55f-jxqr):**
+  - In the home folder, the Codex CLI and each process that it starts read only the readable folders, Codex's own state, the CLI's program files and its working folder; the credential paths stay refused. A folder that the user removes is refused from the next turn. A connector that reads its own files in no readable folder does not start. `#codex-readable-folders`
 
 ## Risks
 

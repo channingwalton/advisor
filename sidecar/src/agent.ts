@@ -351,8 +351,8 @@ export interface AgentSessionOptions {
   home?: string;
   /// The folders that Read, Grep and Glob may reach (`readableRoots`), read
   /// again at each call, so a folder that the user removes is refused at once.
-  /// None by default. The Claude backend only: Codex still reads under its
-  /// Seatbelt profile, which this list does not yet build.
+  /// None by default. The Claude backend only: the Codex backend writes its
+  /// Seatbelt profile from config.json before each turn (`refreshCodexSandbox`).
   readableFolders?: () => readonly string[];
 }
 
