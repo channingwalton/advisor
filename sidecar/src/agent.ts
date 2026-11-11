@@ -177,28 +177,57 @@ function deniedRoots(home: string, realpath: (p: string) => string): string[] {
 
 /// The readable folders that the policy honours (GHSA-6xc8-f55f-jxqr): Read,
 /// Grep and Glob reach only paths inside one. The user lists them in
-/// `readableFolders` in config.json, and the default is none, so an agent reads no local file until
-/// the user lists a folder. A folder is refused when it is not in the home
-/// folder, or when it is at, under or above a denied path, in its listed or its
-/// resolved form: `~`, `~/Library` and a symlink into `~/.ssh` give nothing,
-/// while `~/Library/Mobile Documents` is honoured. An entry that is not
-/// absolute after `~` expansion is ignored. Each honoured folder is returned in
-/// its listed and its resolved forms.
+/// Preferences → Files (`readableFolders` in config.json), and the default is
+/// none, so an agent reads no local file until the user lists a folder. A
+/// folder is refused when it is not in the home folder, or when it is at,
+/// under or above a denied path, in its listed or its resolved form: `~`,
+/// `~/Library` and a symlink into `~/.ssh` give nothing, while
+/// `~/Library/Mobile Documents` is honoured. An entry that is not absolute
+/// after `~` expansion is ignored. Each honoured folder is returned in its
+/// listed and its resolved forms.
 export function readableRoots(
   home: string,
   folders: readonly string[],
   realpath: (p: string) => string = REALPATH
 ): string[] {
+  return [...new Set(honouredFolders(home, folders, realpath).flatMap((h) => h.forms))];
+}
+
+/// Each listed folder that the policy honours (`readableRoots`): its absolute
+/// path, and its forms.
+function honouredFolders(
+  home: string,
+  folders: readonly string[],
+  realpath: (p: string) => string
+): { folder: string; forms: string[] }[] {
   const homes = [home, canonical(home, realpath)];
   const denied = deniedRoots(home, realpath);
-  return [...new Set(folders.flatMap((folder) => {
-    const abs = absolutePath(folder, home);
+  return folders.flatMap((listed) => {
+    const abs = absolutePath(listed, home);
     if (abs === null) return [];
-    const forms = [...new Set([path.resolve(abs), ...judgedForms(abs, realpath)])];
+    const folder = path.resolve(abs);
+    const forms = [...new Set([folder, ...judgedForms(abs, realpath)])];
     const inHome = forms.every((f) => homes.some((h) => isUnder(f, h)));
     const clash = forms.some((f) => denied.some((d) => isUnder(f, d) || isUnder(d, f)));
-    return inHome && !clash ? forms : [];
-  }))];
+    return inHome && !clash ? [{ folder, forms }] : [];
+  });
+}
+
+/// The folders that the agent can read, as one sentence. Advisor is the only
+/// source of this list for the agent, so each run of a session that reads
+/// files starts with it, and each refusal of a local path ends with it.
+/// Without it, an agent tried twelve other paths and never the notes folder
+/// that the user listed (2026-11-11). Each folder is in quotes, because a
+/// folder name can hold a comma.
+export function readableFoldersNote(
+  home: string,
+  folders: readonly string[],
+  realpath: (p: string) => string = REALPATH
+): string {
+  const honoured = [...new Set(honouredFolders(home, folders, realpath).map((h) => h.folder))];
+  return honoured.length > 0
+    ? `Advisor lets you read local files only inside these folders: ${honoured.map((f) => JSON.stringify(f)).join(", ")}.`
+    : `You can read no local file: Advisor's Preferences (Files) list no folder that Advisor lets you read.`;
 }
 
 /// Each form of `abs` is in a readable root.
@@ -496,21 +525,25 @@ export function toolDecision(toolName: string, input: unknown, policy: SandboxPo
   }
   const args = (input !== null && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const { home, cwd, realpath = REALPATH } = policy;
-  const deniedPath: ToolDecision = {
+  // A refusal of a local path names the folders that the agent can read
+  // (`readableFoldersNote`). `readableFolders` reads the file, so only once.
+  const refused = (message: string, folders = policy.readableFolders): ToolDecision => ({
     behavior: "deny",
-    message: `Access denied: ${toolName} needs an absolute path to a non-sensitive file or folder in the home directory`,
-  };
-  const notReadable: ToolDecision = {
-    behavior: "deny",
-    message:
-      `Access denied: ${toolName} reads only inside the folders that the user lists as readable ` +
-      `in Advisor's settings, and this path is in none of them`,
-  };
+    message: `${message} ${readableFoldersNote(home, folders, realpath)}`,
+  });
   // The denylist first: its refusal names the real reason for a store that
   // is also outside every readable folder.
   const decide = (abs: string | null, permitted: typeof readPathAllowed): ToolDecision => {
-    if (abs === null || !permitted(home, cwd, abs, realpath)) return deniedPath;
-    return inReadableRoot(readableRoots(home, policy.readableFolders, realpath), abs, realpath) ? allow : notReadable;
+    if (abs === null || !permitted(home, cwd, abs, realpath)) {
+      return refused(`Access denied: ${toolName} needs an absolute path to a non-sensitive file or folder in the home directory.`);
+    }
+    const folders = policy.readableFolders;
+    if (inReadableRoot(readableRoots(home, folders, realpath), abs, realpath)) return allow;
+    return refused(
+      `Access denied: ${toolName} reads only inside the folders that the user lists as readable ` +
+        `in Advisor's Preferences (Files), and this path is in none of them.`,
+      folders
+    );
   };
   switch (toolName) {
     case "Read":
@@ -518,10 +551,9 @@ export function toolDecision(toolName: string, input: unknown, policy: SandboxPo
     case "Grep":
     case "Glob": {
       if (!patternStaysInRoot(toolName === "Glob" ? args.pattern : args.glob)) {
-        return {
-          behavior: "deny",
-          message: `Access denied: ${toolName} patterns must be relative — no absolute, ~ or .. patterns. Put the folder in \`path\`.`,
-        };
+        return refused(
+          `Access denied: ${toolName} patterns must be relative — no absolute, ~ or .. patterns. Put the folder in \`path\`.`
+        );
       }
       return decide(absolutePath(args.path, home), searchRootAllowed);
     }
@@ -696,9 +728,14 @@ export class AgentSession implements Agent {
     // The first task after a spawn starts the conversation, so it carries the
     // recap. A recycle or a dead CLI spawns again (ensure), so it counts too.
     if (cold && recap) log(`${this.opts.name}: new conversation, recap ${recap.length} chars`);
+    // A session that reads local files starts each task with the folders that
+    // it can read now (`readableFoldersNote`): a warm session outlives a
+    // change to the list, so its system prompt cannot hold it.
+    const folders = this.opts.readableFolders;
+    const note = folders ? `${readableFoldersNote(this.policy.home, folders())}\n\n` : "";
     this.input!.push({
       type: "user",
-      message: { role: "user", content: cold && recap ? recap + task : task },
+      message: { role: "user", content: note + (cold && recap ? recap + task : task) },
       parent_tool_use_id: null,
       session_id: "",
     } as SDKUserMessage);

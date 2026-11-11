@@ -74,7 +74,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Logging.** All app and sidecar diagnostics go through `FileLog` (`Log.swift`) to `~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so the file shows up under Console.app → Log Reports and survives a packaged run (where stderr goes nowhere). The app is the *sole* writer: its own lines arrive via `appLog.write`, the sidecar's stderr is captured by `SidecarManager` and funnelled in via `appLog.appendSidecar` (lines reassembled across chunk boundaries, each wall-clock-timestamped). One serial queue → no write contention and a single chronological timeline that interleaves app and `[sidecar +Xs]` lines. Mirrored to stderr too for dev runs. Rotates by size (5 MB), keeping one previous file (`advisor.log.1`). A watchdog (`MainThreadWatchdog.swift`), started in `applicationDidFinishLaunching`, pings the main queue each second from its own queue; when a ping goes unanswered for 5 s it logs the stall and runs `/usr/bin/sample` on the app into `hang-<n>-<UTC time>.txt` beside the log. It measures from the unanswered ping, not from the last answer, so a late tick under App Nap is not a stall, and the logged length counts from the ping, not from the start of the stall. A stall of about 7 s or more is caught: its first ping goes out up to 1 s after it starts, and a ping tick that fires late moves the report one tick later. App Nap can delay ticks more. If `sample` fails, the log gives its exit status or the launch error, and the file can be missing or incomplete. After a sample is saved, it keeps the newest five by `n`, because the clock can go back. The recording window's close guard logs each window's first responder. Both came from a hang on close (2026-10-31) that left no trace in the log and that could not be reproduced.
 
-**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, saved contexts and tags never reach the sidecar; `logTranscriptText` does, for the sidecar's utterance line). Tabs: Agent (provider, model, effort, authentication, connector actions), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
+**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, saved contexts and tags never reach the sidecar; `logTranscriptText` does, for the sidecar's utterance line). Tabs: Agent (provider, model, effort, authentication, connector actions), Files (the folders that Claude agents may read), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
 
 ### TS sidecar
 
@@ -422,21 +422,25 @@ not drop a folder that the sidecar uses.
   a lane kept the list of the config that made it, until the next recording
   session. A decision takes about 1 to 1.5 ms (measured 2026-11-10), mostly
   the realpath of each denied path.
+- **The agent is told the folders** (`readableFoldersNote`, 2026-11-11). Each
+  task of a Claude session that reads files starts with the folders that the
+  policy honours at that moment, and each refusal of a local path ends with
+  them. Before this, nothing told the agent: with `~/Documents/Notes` listed,
+  an agent tried twelve other paths, such as `~/Documents/Obsidian` and
+  `~/vault`, and then said that no notes were readable. The list goes in the
+  task, not in the system prompt, because a warm session outlives a change to
+  it. Codex does not get the note: it does not use the list yet.
 
-The Preferences window saves its whole copy of the config on each change, and
-it has no control for the list yet. Its save keeps the list that the file
-holds (`saveFromPreferences`), so it cannot add back a folder that the user
-removed from the file. It does not write over a file that cannot be read or
-does not decode:
-the window's copy could add back a removed folder, and the defaults would
-delete the list. The sidecar reads no folders from such a file.
+The rest of the Preferences window never writes the list (see *Readable
+folders in Preferences*), so it cannot add back a folder that the user
+removed. The sidecar reads no folders from a file that cannot be read or is
+not a JSON object.
 
 Rejected: a default list, such as `~/Documents`. A store that the denylist does
 not name can be in any folder, and only the user knows where the notes are.
 
 Cost: after the upgrade, an agent reads no local note until the user lists the
-note folder. Preferences gets the list next; until then, `config.json` holds
-it. `sandbox.sdk.test.ts` checks the unnamed store, an empty list, a list of
+note folder in Preferences → **Files**. `sandbox.sdk.test.ts` checks the unnamed store, an empty list, a list of
 only `~`, a folder removed in a live session and a search past a symlink
 against the real CLI.
 
@@ -446,6 +450,105 @@ Limits:
   readable folders yet.
 - Connector arguments are still not checked. The Seatbelt profile for the
   Claude CLI and its stdio connectors will close that fault.
+
+### Readable folders in Preferences (2026-11-10)
+
+Preferences has a **Files** tab: the list, a Remove button on each folder, and
+**Add folder…**, a folder panel that takes several folders. The tab does not
+bind the window's copy of the config. Each edit goes through
+`ReadableFolders.update`, which reads the list from `config.json` at that
+moment, applies the edit and saves. So a copy that the window loaded earlier
+never writes the list. The tab reloads the list when it appears and on each
+`advisorConfigChanged`.
+
+**Every save writes only the settings that changed** (`ConfigFile`). The
+window's save writes the keys in which its copy differs from the copy that it
+last read or wrote (`AdvisorConfig.saveChanges`, through `PreferencesFile`),
+never `readableFolders`. The recording window's context save
+(`AdvisorConfig.saveContext`) applies the new context to the library that the
+file holds at that moment and writes only `contexts`. Every other key stays as
+the file holds it, also a key that this version does not know. Before this, the window saved its whole copy on each
+change. Three code-review rounds found a new way for a copy that was older
+than the file to write old values over it: a context saved from the
+recording window, a reload after the file was deleted, and the window's own
+sync of the contexts. A field-level save closes the whole class. Limits: a key
+is the unit. A library edit in Preferences (**Contexts**, **Tags**, a trigger)
+writes the window's whole value for that key, so a hand edit of the same key
+while the window is open is lost. Nothing watches the file. A written key gets
+the app's value whole, so a field inside it that this version does not know
+is lost. A file with two top-level keys that differ only in Unicode normal
+form counts as unusable, because Swift's dictionary merges them.
+
+- **The tab reads and writes the list in the raw JSON object**, by the
+  sidecar's rule (`mergeConfig`: the string entries of a list, else none), not
+  through the `AdvisorConfig` decode. A key that the app cannot decode then
+  neither hides the list nor blocks an edit, and an edit leaves every other
+  key as the file holds it. Before this, one mistyped key made the tab show no
+  folders while the sidecar still used them. A tolerant decode of every key
+  was rejected: a default in place of a bad value reaches the file at the next
+  save, and one bad entry would empty the context library.
+- **A file that cannot be read or is not a JSON object** is left as it is by
+  the tab. The tab says so in red and disables **Add folder…**.
+- **JSON that the sidecar reads in another way counts as unusable**
+  (`ConfigFile.readsAsTheSidecar`). Swift's parser takes UTF-16 and UTF-32
+  text, a leading byte-order mark and a trailing comma, which the sidecar
+  refuses (it reads the file as UTF-8 for Node's `JSON.parse`), and keeps the
+  first of two equal keys where Node keeps the last (checked 2026-11-10). The
+  tab would show folders that the sidecar does not use, or hide one that it
+  uses. The reverse case remains: Node takes a lone surrogate escape, and
+  the sidecar reads a byte that is not UTF-8 as U+FFFD, where Swift refuses
+  both. The tab then calls the file unusable while the sidecar uses its list,
+  so the tab does not say that agents read nothing.
+- **A file that the `AdvisorConfig` decode refuses** is left as it is by the
+  window's save and by `saveContext`. The window then holds the defaults or
+  an older copy, not the file's settings, so the controls for the file's
+  settings take no edits, and it offers **Reload**. A change there would show
+  a value that the file does not hold, and a library edit would replace the
+  file's list. The parallel-agent count and system-audio capture
+  (UserDefaults) and the API key (Keychain) stay editable, and so does the
+  Files tab. **Reload** posts `advisorConfigChanged`, so the Files tab and the
+  other windows take the corrected file. A context that the recording window
+  cannot save shows in its status line and not in the popover.
+- **A view that reloads on `advisorConfigChanged` keeps what it shows** when
+  the file cannot be used (`loadIfUsable`). The Files tab posts the notice for
+  such a file, and the defaults would reset the appearance, the triggers and
+  the libraries.
+- **Opening the window or a reload writes only a change that failed.** The
+  window takes the file's settings on appear and on each
+  `advisorConfigChanged`. After the file is deleted, a reload shows the
+  defaults. A provider that the user picks clears the model; a provider that a
+  reload sets keeps the file's model (an `onChange` of the provider cleared
+  it, and the save wrote that).
+- **A change that could not be written stays in the window** (2026-11-11).
+  Each setting in which the window differs from `saved` is such a change. A
+  reload keeps the window's value of it over the file's newer settings
+  (`reload(keeping:)`), and writes it again. The "not saved" notice stays until
+  a write succeeds, or until the user undoes the change. A write that finds the
+  file unusable keeps the change too, and the reload after the user corrects
+  the file writes it. Before, a reload showed the file's value, and the
+  `commit` of that value cleared the notice, so the change was lost with no
+  notice. A key is the unit here too: a failed change to one context, written
+  after a reload, replaces a context that another writer added meanwhile.
+- **A failed write** shows the list that the file still holds, with a red
+  line, so a removed folder never looks removed while agents can still read
+  it.
+- **Remove takes the folder out in every spelling** (`~/Notes`,
+  `/Users/x/Notes/`, a symlink to it, another letter case), because the
+  sidecar grants each entry at its resolved path. An entry goes when any
+  folder that the sidecar grants for it is one of the removed folder's: with
+  `Link -> a/Real`, `Link/../Notes` grants both `Notes` and `a/Notes`. The
+  compare folds case as APFS does (`Noteſ` opens `Notes`), because the
+  sidecar resolves a folder that does not exist yet once it exists. A
+  relative entry, which the sidecar ignores, matches only itself.
+- **An entry is stored as the panel gives it**, an absolute path, and shown
+  with `~` for the home folder. Add skips a folder whose resolved path is on
+  the list already. A folder that does not exist yet keeps the letter case
+  that it was given, so two spellings of it can both be added; the sidecar
+  grants the same folder for each.
+- **The tab does not mark a folder that the sidecar refuses**, such as `~` or
+  `~/Library`. Its caption gives the rule. A mark needs the denylist on the
+  app side, through the protocol or a copy of the list, and a copy could
+  differ from the rule that the sidecar enforces.
 
 ## Connector tools (2026-06-13)
 
@@ -882,10 +985,12 @@ bookkeeping of that start.
 Saved contexts (`SavedContext {id, name, text}`) are in `config.json` as
 `contexts`. They are App-side only: the sidecar receives only the resolved
 context text. `ContextLibrary` holds the pure list operations. Preferences and
-the recording window both edit the list. `AdvisorConfig.persistContexts` writes
-only the `contexts` key, so it cannot overwrite preferences that it does not
-hold. Each window reloads on `advisorConfigChanged` only when the list differs,
-so no save loop occurs. Accepted limit: Preferences adds by id, so a duplicate
+the recording window both edit the list. `AdvisorConfig.saveContext` applies a
+save to the list that the file holds and writes only the `contexts` key, so it
+cannot overwrite preferences that it does not hold. On `advisorConfigChanged`,
+the recording window takes the list, and the Preferences window takes the
+file's settings and writes nothing, so no save loop occurs (2026-11-10:
+before, the context save wrote the whole config, with the window's list). Accepted limit: Preferences adds by id, so a duplicate
 name there gives two entries that the by-name **Save…** cannot tell apart.
 
 ## Cmd-N, no Sessions title panel (2026-06-19, issue #11)

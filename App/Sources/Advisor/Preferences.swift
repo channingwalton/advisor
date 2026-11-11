@@ -82,7 +82,8 @@ struct AdvisorConfig: Codable, Equatable {
     /// it reads under its Seatbelt profile. The sidecar refuses a folder at,
     /// under or above a credential store (`readableRoots` in
     /// sidecar/src/agent.ts). Mirrors sidecar/src/config.ts, which reads the
-    /// file again at each file-tool call.
+    /// file again at each file-tool call. Preferences → Files edits it in the
+    /// file (`ReadableFolders`); `saveChanges` never writes it.
     var readableFolders: [String] = []
 
     init() {}
@@ -97,6 +98,10 @@ struct AdvisorConfig: Codable, Equatable {
     /// ignored. No migration of older shapes — a stale config.json is just
     /// partially overridden. Without this custom init, a synthesised `Decodable`
     /// would throw on any missing key and the next save would wipe every setting.
+    /// A key of the wrong type still fails the decode: a default in its place
+    /// would reach the file at the next save (a bad entry would empty the whole
+    /// context library). The Files tab reads its list without this decode
+    /// (`ReadableFolders`).
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         triggerSensitivity = try c.decodeIfPresent(String.self, forKey: .triggerSensitivity) ?? "balanced"
@@ -143,52 +148,148 @@ struct AdvisorConfig: Codable, Equatable {
         return config
     }
 
-    func save(to url: URL = AdvisorConfig.fileURL) {
+    /// Write this config to `url`; false when the write failed.
+    @discardableResult
+    func save(to url: URL = AdvisorConfig.fileURL) -> Bool {
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         do {
             try encoder.encode(self).write(to: url, options: .atomic)
+            return true
         } catch {
             // A non-atomic write could leave a corrupt file that `load()` then
             // silently resets to defaults; `.atomic` avoids that, and we surface
             // the failure rather than swallow it so a lost save is diagnosable.
             appLog.write("config save failed: \(error)")
+            return false
         }
     }
 
-    /// The Preferences window's save: this copy, with the readable folders
-    /// that the file holds now (none when there is no file). The window has no
-    /// control for the list, so its copy can be older than the file, and a
-    /// save of it would add back a folder that the user removed from the file
-    /// (code review 2026-11-10). A file that cannot be read or does not decode
-    /// is left as it is: its list is unknown, and either copy could delete the
-    /// user's list or add back a removed folder. The sidecar reads no folders
-    /// from it.
-    func saveFromPreferences(to url: URL = AdvisorConfig.fileURL) {
-        var c = self
-        if FileManager.default.fileExists(atPath: url.path) {
-            guard let data = try? Data(contentsOf: url),
-                let disk = try? JSONDecoder().decode(AdvisorConfig.self, from: data)
-            else {
-                appLog.write("config save skipped: config.json cannot be read or does not decode")
-                return
-            }
-            c.readableFolders = disk.readableFolders
-        } else {
-            c.readableFolders = []
-        }
-        c.save(to: url)
+    /// The config file as the app's decode sees it.
+    enum FileState {
+        case missing
+        /// It exists, but cannot be read or does not decode: its settings are
+        /// unknown.
+        case unusable
+        case decoded(AdvisorConfig)
     }
 
-    /// Persist only the saved-context library, leaving every other key as it is
-    /// on disk. Used by the recording window's Context popover, which mustn't
-    /// clobber preference settings it doesn't hold in view state.
-    static func persistContexts(_ contexts: [SavedContext]) {
-        var c = load()
-        c.contexts = contexts
-        c.save()
+    /// A file that the sidecar reads in another way counts as one that
+    /// cannot be used (`ConfigFile.readsAsTheSidecar`).
+    static func fileState(at url: URL = fileURL) -> FileState {
+        switch ConfigFile.read(at: url) {
+        case .missing: return .missing
+        case .unusable: return .unusable
+        case .object(_, let data):
+            guard let config = try? JSONDecoder().decode(AdvisorConfig.self, from: data) else { return .unusable }
+            return .decoded(config)
+        }
+    }
+
+    /// The window's save: the settings in which this copy differs from
+    /// `base`, the copy as the window last read or wrote the file. Every
+    /// other key stays as the file holds it, so a copy that is older than the
+    /// file writes no setting that the user did not change (code review
+    /// 2026-11-10). A key is the unit: a change to one context, tag or
+    /// trigger writes the window's whole `contexts`, `tags` or `triggers`. The readable folders are never written: the Files tab
+    /// edits them in the file (`ReadableFolders`). With no change, nothing is
+    /// written. False when nothing was saved, so the window can say so.
+    @discardableResult
+    func saveChanges(from base: AdvisorConfig, to url: URL = AdvisorConfig.fileURL) -> Bool {
+        guard let mine = encoded(), let theirs = base.encoded() else { return false }
+        let keys = Self.changedKeys(mine, from: theirs)
+        if keys.isEmpty { return true }
+        return write(keys: keys, to: url)
+    }
+
+    /// `target` with this config's values for the settings in which this
+    /// config differs from `base`, as `saveChanges` finds them: the changes
+    /// that the Preferences window could not write, over a newer file. Nil
+    /// when the encode or the decode fails.
+    func applyingChanges(from base: AdvisorConfig, to target: AdvisorConfig) -> AdvisorConfig? {
+        guard let mine = encoded(), let theirs = base.encoded(), var json = target.encoded() else { return nil }
+        for key in Self.changedKeys(mine, from: theirs) { json[key] = mine[key] }
+        guard let data = try? JSONSerialization.data(withJSONObject: json) else { return nil }
+        return try? JSONDecoder().decode(AdvisorConfig.self, from: data)
+    }
+
+    /// The keys whose values differ, the readable folders excepted: the window
+    /// has no control for them, and the Files tab edits them in the file.
+    private static func changedKeys(_ mine: [String: Any], from theirs: [String: Any]) -> Set<String> {
+        Set(mine.keys.filter { key in
+            key != CodingKeys.readableFolders.stringValue && !sameJSON(mine[key], theirs[key])
+        })
+    }
+
+    /// The recording window's **Save…**: `text` as the context `name` in the
+    /// library that the file holds now (`ContextLibrary.saving`), not in the
+    /// window's copy, which can be older (code review 2026-11-10). Only
+    /// `contexts` is written. The new library, or nil when nothing was saved.
+    static func saveContext(named name: String, text: String, at url: URL = fileURL) -> [SavedContext]? {
+        var c = AdvisorConfig()
+        switch fileState(at: url) {
+        case .missing: break
+        case .unusable:
+            appLog.write("context not saved: config.json cannot be read or does not decode")
+            return nil
+        case .decoded(let disk): c.contexts = disk.contexts
+        }
+        c.contexts = ContextLibrary.saving(c.contexts, name: name, text: text)
+        return c.write(keys: [CodingKeys.contexts.stringValue], to: url) ? c.contexts : nil
+    }
+
+    /// Write the values of `keys` from this config into the file at `url`. A
+    /// file that cannot be read or does not decode is left as it is: the
+    /// window then holds the defaults or an older copy, not the file's
+    /// settings, and the user corrects the file first.
+    private func write(keys: Set<String>, to url: URL) -> Bool {
+        var json: [String: Any] = [:]
+        switch ConfigFile.read(at: url) {
+        case .missing: break
+        case .object(let disk, let data) where (try? JSONDecoder().decode(AdvisorConfig.self, from: data)) != nil:
+            json = disk
+        default:
+            appLog.write("config not saved: config.json cannot be read or does not decode")
+            return false
+        }
+        // No write without every value: a key without one would be deleted.
+        guard let values = encoded(), keys.allSatisfy({ values[$0] != nil }) else { return false }
+        for key in keys { json[key] = values[key] }
+        return ConfigFile.write(json, to: url)
+    }
+
+    /// This config as a JSON object, as `save(to:)` writes it; nil when the
+    /// encode fails.
+    private func encoded() -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(self),
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            appLog.write("config encode failed")
+            return nil
+        }
+        return json
+    }
+
+    /// Two JSON values as the same text, which keeps `1` and `true` apart.
+    private static func sameJSON(_ a: Any?, _ b: Any?) -> Bool {
+        guard let a, let b else { return a == nil && b == nil }
+        let text = { (v: Any) in try? JSONSerialization.data(withJSONObject: [v], options: [.sortedKeys]) }
+        return text(a) != nil && text(a) == text(b)
+    }
+
+    /// The file's settings, for a view that reloads on `advisorConfigChanged`:
+    /// the defaults when there is no file, nil when it cannot be read or does
+    /// not decode. The view then keeps what it shows: the defaults would
+    /// reset the appearance, the triggers and the libraries, and the Files
+    /// tab posts the notice for such a file (code review 2026-11-10).
+    static func loadIfUsable(from url: URL = fileURL) -> AdvisorConfig? {
+        switch fileState(at: url) {
+        case .missing: AdvisorConfig()
+        case .unusable: nil
+        case .decoded(let config): config
+        }
     }
 }
 
@@ -240,13 +341,27 @@ struct AgentBackendView: View {
     }
 
     var body: some View {
-        Picker("Provider", selection: $provider) {
+        Picker("Provider", selection: Self.picked(provider: $provider, clearing: $model)) {
             ForEach(AgentProvider.all) { Text($0.label).tag($0.id) }
         }
-        .onChange(of: provider) { _, _ in model = "" }
         Picker("Model", selection: $model) {
             ForEach(models, id: \.0) { Text($0.1).tag($0.0) }
         }
+    }
+
+    /// The provider picker's selection: a provider that the user picks clears
+    /// the model, which belongs to the old provider. A provider set from the
+    /// file, by a reload of the Preferences window, keeps the file's model,
+    /// so a reload writes nothing (code review 2026-11-10). An `onChange` of
+    /// the provider ran for both.
+    static func picked(provider: Binding<String>, clearing model: Binding<String>) -> Binding<String> {
+        Binding(
+            get: { provider.wrappedValue },
+            set: { new in
+                guard new != provider.wrappedValue else { return }
+                provider.wrappedValue = new
+                model.wrappedValue = ""
+            })
     }
 }
 
@@ -257,6 +372,9 @@ struct AgentBackendView: View {
 struct AuthModeView: View {
     let provider: String
     @Binding var authMode: String
+    /// The mode is in config.json, which cannot be used; the key is in the
+    /// Keychain and stays editable.
+    var modeLocked = false
     @State private var apiKey = ""
     /// Editable buffer used only while entering/replacing a key. `apiKey` holds
     /// only the persisted key and is never cleared just to enter edit mode.
@@ -358,6 +476,7 @@ struct AuthModeView: View {
                 Text("Subscription (\(loginLabel))").tag("subscription")
                 Text("API key").tag("apiKey")
             }
+            .disabled(modeLocked)
             if authMode == "apiKey" {
                 if editing {
                     VStack(alignment: .leading, spacing: 6) {
@@ -646,55 +765,184 @@ private struct TagEditorSheet: View {
     }
 }
 
+/// The Preferences window's link to config.json, apart from the view so that
+/// tests can drive it. A change writes only the settings that differ from
+/// `saved`, the copy as the window last read or wrote the file
+/// (`AdvisorConfig.saveChanges`). So a window copy that is older than the file
+/// writes nothing that the user did not change (code review 2026-11-10).
+/// Opening the window or a reload writes only a change that the window could
+/// not write before (code review 2026-11-11).
+struct PreferencesFile {
+    let url: URL
+    /// The settings as the window last read or wrote them.
+    private(set) var saved = AdvisorConfig()
+    /// The file cannot be read or does not decode, so the window's copy is
+    /// not the file's: the defaults, or an older copy. The window takes no
+    /// edits until a reload finds a file that it can use. The Files tab edits
+    /// its list in the raw file, so it stays usable.
+    private(set) var unusable = false
+    /// The window shows a change that the file does not hold, because its
+    /// write failed. The next change, or a reload, writes it again.
+    private(set) var notSaved = false
+
+    init(url: URL = AdvisorConfig.fileURL) {
+        self.url = url
+        _ = reload(keeping: saved)
+    }
+
+    /// The file's settings now, for the window to show: the defaults when
+    /// there is no file. `shown` is what the window shows: each setting in
+    /// which it differs from `saved` is a change that could not be written,
+    /// and it keeps the window's value over the file's, so that the next
+    /// `commit` writes it again. Before, a reload showed the file's value, and
+    /// the change was lost (code review 2026-11-11). Nil when the file cannot
+    /// be used: the window keeps what it shows.
+    mutating func reload(keeping shown: AdvisorConfig) -> AdvisorConfig? {
+        guard let disk = AdvisorConfig.loadIfUsable(from: url) else {
+            unusable = true
+            return nil
+        }
+        unusable = false
+        if shown == saved {
+            saved = disk
+            return disk
+        }
+        // The encode cannot fail for this type. If it did, the window keeps
+        // what it shows and the `saved` that goes with it, so that its next
+        // change writes only the window's changes, not its older copy of the
+        // other settings.
+        guard let kept = shown.applyingChanges(from: saved, to: disk) else {
+            notSaved = true
+            return nil
+        }
+        saved = disk
+        return kept
+    }
+
+    /// Save `shown`, the window's copy after a change or a reload. True when
+    /// the file now holds the change, so the window posts
+    /// `advisorConfigChanged`. False when there is no change or nothing was
+    /// saved.
+    mutating func commit(_ shown: AdvisorConfig) -> Bool {
+        if shown == saved {
+            // Nothing to write: the change that failed was undone, or the
+            // file holds it.
+            notSaved = false
+            return false
+        }
+        if !unusable, shown.saveChanges(from: saved, to: url) {
+            saved = shown
+            notSaved = false
+            return true
+        }
+        // The window keeps the change, and a reload keeps it over the file.
+        notSaved = true
+        if case .unusable = AdvisorConfig.fileState(at: url) { unusable = true }
+        return false
+    }
+}
+
 /// The preferences window: one tab per subject area (issue #22), replacing the
 /// former single scrolling form. `config` and the persistence wiring live here
 /// so a change made in any tab rides the same save + notification; each tab is a
 /// thin `Form` over the relevant bindings.
 struct PreferencesView: View {
-    @State private var config = AdvisorConfig.load()
+    @State private var file: PreferencesFile
+    @State private var config: AdvisorConfig
     @AppStorage("agentLanes") private var agentLanes = 3
     @AppStorage("captureSystem") private var captureSystem = true
+
+    init() {
+        let file = PreferencesFile()
+        _file = State(initialValue: file)
+        _config = State(initialValue: file.saved)
+    }
 
     var body: some View {
         TabView {
             AgentSettingsView(
                 provider: $config.provider, model: $config.model, effort: $config.effort,
                 authMode: $config.authMode, allowMcpActions: $config.allowMcpActions,
-                agentLanes: $agentLanes
+                agentLanes: $agentLanes, locked: file.unusable
             )
             .tabItem { Label("Agent", systemImage: "brain") }
+
+            FilesSettingsView()
+                .tabItem { Label("Files", systemImage: "folder") }
 
             TriggersSettingsView(
                 sensitivity: $config.triggerSensitivity, triggers: $config.triggers
             )
+            .disabled(file.unusable)
             .tabItem { Label("Triggers", systemImage: "bolt") }
 
-            TranscriptionSettingsView(captureSystem: $captureSystem, sttLocale: $config.sttLocale)
+            TranscriptionSettingsView(
+                captureSystem: $captureSystem, sttLocale: $config.sttLocale, locked: file.unusable)
                 .tabItem { Label("Transcription", systemImage: "waveform") }
 
             ContextsSettingsView(contexts: $config.contexts)
+                .disabled(file.unusable)
                 .tabItem { Label("Contexts", systemImage: "text.book.closed") }
 
             TagsSettingsView(tags: $config.tags)
+                .disabled(file.unusable)
                 .tabItem { Label("Tags", systemImage: "tag") }
 
             GeneralSettingsView(
                 appearance: $config.appearance, sessionDir: $config.sessionDir,
                 logTranscriptText: $config.logTranscriptText)
+                .disabled(file.unusable)
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
-        .frame(width: 480, height: 420)
-        .onChange(of: config) { _, new in
-            new.saveFromPreferences()
-            NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+        .safeAreaInset(edge: .bottom) {
+            if file.unusable {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(file.notSaved
+                        ? "config.json cannot be read, or holds a value that Advisor cannot use, so your last change is not saved. The settings below can differ from the file and cannot be changed. Correct or delete the file, then reload to save your change."
+                        : "config.json cannot be read, or holds a value that Advisor cannot use. The settings from it below can differ from the file and cannot be changed. Correct or delete the file, then reload.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Button("Reload") {
+                        reloadFromFile()
+                        // The Files tab and the other windows kept what they
+                        // showed while the file could not be used.
+                        NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+                    }
+                    .focusEffectDisabled()
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+            } else if file.notSaved {
+                Text("Advisor could not write config.json, so your last change is not saved. Advisor tries again at your next change.")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+            }
         }
-        // Contexts can also be saved from the recording window's Context popover.
-        // Pull any such on-disk change in so a later Preferences edit doesn't
-        // write back a stale (context-less) config. Guarded on inequality so it
-        // never reacts to this view's own posts (no save loop).
+        .frame(width: 480, height: 420)
+        .onAppear(perform: reloadFromFile)
+        .onChange(of: config) { _, new in
+            if file.commit(new) {
+                NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+            }
+        }
+        // Another writer: a context saved from the recording window, a
+        // Files-tab edit, or this window's own save.
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
-            let disk = AdvisorConfig.load().contexts
-            if disk != config.contexts { config.contexts = disk }
+            reloadFromFile()
+        }
+    }
+
+    /// Show the file's settings, with each change that the window could not
+    /// write kept over them, and write those changes again. With every change
+    /// in the file, this writes nothing.
+    private func reloadFromFile() {
+        guard let shown = file.reload(keeping: config) else { return }
+        if shown != config {
+            config = shown // `onChange` commits it
+        } else if file.commit(shown) {
+            NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
         }
     }
 }
@@ -708,20 +956,26 @@ private struct AgentSettingsView: View {
     @Binding var authMode: String
     @Binding var allowMcpActions: Bool
     @Binding var agentLanes: Int
+    /// config.json cannot be used, so its settings take no edits. The lane
+    /// count (UserDefaults) and the API key (Keychain) stay editable.
+    let locked: Bool
 
     var body: some View {
         Form {
             Section("Agent backend") {
                 AgentBackendView(provider: $provider, model: $model)
+                    .disabled(locked)
                 Picker("Effort", selection: $effort) {
                     ForEach(AgentEffort.levels, id: \.0) { Text($0.1).tag($0.0) }
                 }
+                .disabled(locked)
                 Text("How much Claude thinks before answering a card. Lower is faster; a level the model can't use is lowered to one it can. Claude only.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                AuthModeView(provider: provider, authMode: $authMode)
+                AuthModeView(provider: provider, authMode: $authMode, modeLocked: locked)
                 Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
                 Toggle("Allow connector actions", isOn: $allowMcpActions)
+                    .disabled(locked)
                 Text("Off: connectors (Slack, Jira, …) are read/search only; Codex, which can't tell the two apart, gets no connectors. On: agents may also send, create, and update — use with care.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -732,6 +986,107 @@ private struct AgentSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Files tab: the folders that the Claude agents may read (GHSA-6xc8-f55f-jxqr).
+/// Its edits go to the file through `ReadableFolders`, which reads the file's
+/// list at each edit; the window's own copy of the config never writes it.
+struct FilesSettingsView: View {
+    /// The config file; a test can give a file of its own.
+    var configURL = AdvisorConfig.fileURL
+    @State private var folders: [String] = []
+    /// Set when the file cannot be read or does not decode: the list is unknown.
+    @State private var unusable = false
+    /// Set when the last edit could not be written.
+    @State private var notSaved = false
+
+    var body: some View {
+        Form {
+            Section("Readable folders") {
+                if unusable {
+                    Text("config.json cannot be read, is not valid JSON, or is JSON that Advisor and its agents could read in different ways. Correct the file to change this list.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else if folders.isEmpty {
+                    Text("No folders yet, so agents read no local files.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if notSaved {
+                    Text("Advisor could not write config.json, so the list below is the one that the file still holds.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                // By position: a hand-edited list can hold the same entry twice.
+                ForEach(Array(folders.enumerated()), id: \.offset) { _, folder in
+                    HStack(spacing: 8) {
+                        Text(ReadableFolders.display(folder))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(folder)
+                        Spacer(minLength: 8)
+                        Button(role: .destructive) {
+                            show(ReadableFolders.remove(folder, at: configURL))
+                        } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
+                            .focusEffectDisabled()
+                            .help("Remove")
+                    }
+                }
+                Button { addFolders() } label: { Label("Add folder…", systemImage: "plus") }
+                    .focusEffectDisabled()
+                    .disabled(unusable)
+                Text("Claude agents can read the files in these folders, but cannot change them. A credential folder such as ~/.ssh is not used, and nor is a folder inside one or a folder that holds one, such as ~ or ~/Library. A folder beside them, such as ~/Library/Mobile Documents (iCloud Drive), is used. A folder outside your home folder is not used. Codex does not use this list yet. Changes apply at once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear(perform: reload)
+        // A save from this app. Nothing watches the file, so a hand edit shows
+        // when the tab appears again; an edit reads the file first in any case.
+        .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in reload() }
+    }
+
+    /// The file's list now. It replaces any notice of a failed write: the list
+    /// shown is then the one that the file holds.
+    private func reload() {
+        let loaded = ReadableFolders.load(from: configURL)
+        unusable = loaded == nil
+        notSaved = false
+        folders = loaded ?? []
+    }
+
+    private func show(_ outcome: ReadableFolders.Outcome) {
+        switch outcome {
+        case .unusable:
+            unusable = true
+            notSaved = false
+            folders = []
+        case .notSaved(let onDisk):
+            unusable = false
+            notSaved = true
+            folders = onDisk
+        case .saved(let new):
+            unusable = false
+            notSaved = false
+            folders = new
+            NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+        }
+    }
+
+    private func addFolders() {
+        let panel = NSOpenPanel()
+        panel.title = "Add Readable Folders"
+        panel.prompt = "Add"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+        guard panel.runModal() == .OK else { return }
+        show(ReadableFolders.add(panel.urls.map(\.path), at: configURL))
     }
 }
 
@@ -762,6 +1117,9 @@ private struct TriggersSettingsView: View {
 private struct TranscriptionSettingsView: View {
     @Binding var captureSystem: Bool
     @Binding var sttLocale: String
+    /// config.json cannot be used: the locale takes no edits. System-audio
+    /// capture is in UserDefaults and stays editable.
+    let locked: Bool
 
     /// On-device locales the speech model supports, loaded asynchronously.
     @State private var locales: [Locale] = []
@@ -778,6 +1136,7 @@ private struct TranscriptionSettingsView: View {
                     }
                 }
                 .frame(maxWidth: 320)
+                .disabled(locked)
                 Text("Speech recognition language. Applies on next Listen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -881,7 +1240,8 @@ private struct GeneralSettingsView: View {
     /// unchanged. The same folder by another path, through a symlink, has
     /// nothing to move, so the path switches with no prompt (issue #114).
     /// Writing `sessionDir` fires the parent form's `onChange` →
-    /// `save()` + `advisorConfigChanged`, which the Sessions browser reloads on.
+    /// `PreferencesFile.commit`, which posts `advisorConfigChanged` after a
+    /// save; the Sessions browser reloads on it.
     private func chooseSessionFolder() {
         let panel = NSOpenPanel()
         panel.title = "Choose Session Folder"

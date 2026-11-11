@@ -116,7 +116,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - File tools take absolute or `~` paths (not relative ones), so the policy judges the file the CLI opens. `#sandbox-explicit-paths`
   - A spelling that the filesystem treats as a denied path (such as `~/.ſsh` for `~/.ssh` on APFS) is denied. `#sandbox-fold-spelling`
   - Common credential stores are denied: shell history, cloud and registry credentials, the configuration of other MCP clients, and browser and app profiles. `#sandbox-credential-stores`
-  - File tools read only inside the folders that the user lists as readable, none by default. A listed folder at, under or above a denied path, or outside the home folder, is not used. A folder removed from the list is refused at once. `#sandbox-readable-folders`
+  - File tools read only inside the folders that the user lists as readable (Preferences → Files), none by default. A listed folder at, under or above a denied path, or outside the home folder, is not used. A folder removed from the list is refused at once. Each Claude task, and each refusal of a local path, names the folders that the agent can read. `#sandbox-readable-folders`
 - N8. **Codex session ordering (issue #81):**
   - Warm-ups and requests execute FIFO per session, preserving initial instructions and the conversation thread on later requests. `#codex-session-fifo`
   - Reset cancels active and queued work; subsequent requests start fresh and ignore late events from abandoned turns. `#codex-session-reset`

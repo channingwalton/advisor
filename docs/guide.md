@@ -240,6 +240,8 @@ Ask box.
 - **Agent:** the backend (one provider and model for the classifier, the
   research lanes and the query lane), the card **effort**, authentication, the
   number of parallel agents, and connector actions.
+- **Files:** the folders that Claude agents may read (see [Safety](#safety)).
+  A change applies at once.
 - **Triggers:** sensitivity (conservative, balanced or eager), and a toggle for
   each card kind.
 - **Transcription:** system-audio capture and the speech-recognition locale.
@@ -295,13 +297,12 @@ On **Claude**, a tool policy limits each research agent call:
 - Your MCP connectors (Slack, Jira, …) can read and search. Other connector
   tools, and tools that the policy does not recognise, need **Allow connector
   actions**.
-- Files can be read, but not changed, only inside your readable folders. List
-  them in `readableFolders` in
-  `~/Library/Application Support/Advisor/config.json`, as absolute or `~/`
-  paths. There are none by default, so the agents read no local file until you
-  list a folder. A change applies at once, also to a card that is in progress.
-  A folder outside your home folder is not used, and nor is a symlink that
-  leads out of it.
+- Files can be read, but not changed, only inside your readable folders. Add
+  and remove them in Preferences → **Files**. There are none by default, so the
+  agents read no local file until you add a folder. A change applies at once,
+  also to a card that is in progress. Each Claude task names the readable
+  folders to the agent, so it searches there first. A folder outside your home
+  folder is not used, and nor is a symlink that leads out of it.
 - A readable folder that is, holds or sits inside a credential path is not
   used. Credential paths are `~/.ssh`, `~/.aws`, `~/.claude`, `~/.codex`,
   keychains, shell history, browser profiles and more. So `~` and `~/Library`

@@ -33,7 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Delivered on the main queue, so this is on the main actor — the
             // closure's type just can't say so.
             MainActor.assumeIsolated {
-                self?.applyAppearance(AdvisorConfig.load().appearance)
+                // A file that cannot be used keeps the appearance as it is.
+                guard let config = AdvisorConfig.loadIfUsable() else { return }
+                self?.applyAppearance(config.appearance)
             }
         }
     }

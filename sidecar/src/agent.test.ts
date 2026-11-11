@@ -218,6 +218,31 @@ test("#classifier-bounded a reset Claude session opens its next conversation wit
   await r2;
 });
 
+// A session that reads local files starts each run with the folders that it
+// can read at that moment. A warm session lives across changes to the list,
+// so the system prompt cannot hold it (2026-11-11).
+test("#sandbox-readable-folders each run names the folders that the agent can read now", async () => {
+  const notes = path.join(home, "Notes");
+  fs.mkdirSync(notes, { recursive: true });
+  let folders = [notes, "~/Library"];
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession({ ...opts, readableFolders: () => folders }, queryFn);
+
+  const r1 = session.run("task1", undefined, 1000, "RECAP ");
+  const first = await nextPrompt(spawns[0]);
+  assert.ok(first.endsWith(`: ${JSON.stringify(notes)}.\n\nRECAP task1`), first);
+  assert.doesNotMatch(first, /Library/);
+  spawns[0].messages.push(success("a1"));
+  await r1;
+
+  folders = [];
+  const r2 = session.run("task2", undefined, 1000);
+  const second = await nextPrompt(spawns[0]);
+  assert.match(second, /^You can read no local file\b[^\n]*\n\ntask2$/);
+  spawns[0].messages.push(success("a2"));
+  await r2;
+});
+
 /// The automatic-card classifier over `session`: `say` hears a line, and
 /// `pass` lets the debounce fire and the classify reach the session. Needs the
 /// test's setTimeout mocked.

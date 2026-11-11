@@ -638,6 +638,36 @@ test("#sandbox-readable-folders judges a listed folder, and each path in it, whe
   assert.equal(decide("Read", { file_path: "~/Notes/a.md" }, viaLink), "allow");
 });
 
+// Advisor is the only source that tells the agent which folders it can read.
+// Each refusal of a local path names them, so that the next call goes there.
+// Without this, an agent tried twelve other paths and never the notes folder
+// that the user listed (2026-11-11).
+test("#sandbox-readable-folders each path refusal names the folders that the agent can read", () => {
+  const policy = readable("/home/u/Documents", "~/work", "~/Library", "relative", "/home/u/Documents");
+  const calls: [string, unknown][] = [
+    ["Read", { file_path: "/home/u/notes.txt" }], // in no readable folder
+    ["Read", { file_path: "/home/u/.ssh/id_rsa" }], // the denylist
+    ["Read", { file_path: "notes.txt" }], // not absolute
+    ["Glob", { path: "/home/u", pattern: "*" }], // a search above the stores
+    ["Glob", { path: "/home/u/Documents", pattern: "/etc/*" }], // an absolute pattern
+    ["Grep", { path: "/home/u/other", pattern: "x" }],
+  ];
+  for (const [tool, input] of calls) {
+    const d = toolDecision(tool, input, policy);
+    const message = d.behavior === "deny" ? d.message : "";
+    assert.match(message, /: "\/home\/u\/Documents", "\/home\/u\/work"\.$/, JSON.stringify(input));
+    assert.doesNotMatch(message, /"[^"]*(Library|relative)"/, JSON.stringify(input));
+  }
+  // The folders that the user lists, but that the policy refuses, are no help.
+  const none = toolDecision("Read", { file_path: "/home/u/a.txt" }, readable("~/Library", "/etc"));
+  assert.match(none.behavior === "deny" ? none.message : "", /You can read no local file/);
+  // A refusal that is not about a local path names no folder.
+  for (const [tool, input] of [["Skill", {}], ["mcp__s__delete_file", {}]] as const) {
+    const d = toolDecision(tool, input, policy);
+    assert.doesNotMatch(d.behavior === "deny" ? d.message : "", /Documents|no local file/, tool);
+  }
+});
+
 function preToolUse(tool_name: string, tool_input: unknown): HookInput {
   return {
     hook_event_name: "PreToolUse", tool_name, tool_input, tool_use_id: "toolu_1",

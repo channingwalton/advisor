@@ -34,6 +34,8 @@ let currentCase = "";
 /// in one session.
 let toolUseCount = 0;
 const results = new Map<string, string>();
+/// The text of the user message that started each case, as the model got it.
+const prompts = new Map<string, string>();
 const sessions: AgentSession[] = [];
 
 /// Tool call the fake model makes for each case, keyed by the prompt `CASE:<id>`.
@@ -106,9 +108,11 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, raw: string
     sse(res, [{ type: "text", text: "done" }], "end_turn");
     return;
   }
-  const id = blocks.map((b) => b.text ?? "").join("\n").match(/CASE:(\w+)/)?.[1];
+  const text = blocks.map((b) => b.text ?? "").join("\n");
+  const id = text.match(/CASE:(\w+)/)?.[1];
   if (id && body.tools) {
     currentCase = id;
+    prompts.set(id, text);
     const call = scripted(id);
     sse(res, [{ type: "tool_use", id: `toolu_${id}_${++toolUseCount}`, ...call }], "tool_use");
     return;
@@ -284,6 +288,20 @@ test("#sandbox-readable-folders a folder removed from the list is refused at onc
   const after = await toolResult(s, "notes");
   assert.ok(!after.includes(NOTES), after);
   assert.ok(after.includes(NOT_READABLE), after);
+});
+
+// The model learns the readable folders from the task and from each refusal
+// of a local path, as the CLI passes them on (2026-11-11). A folder that the
+// policy refuses is not named.
+test("#sandbox-readable-folders the model gets the readable folders in the task and in a refusal", async () => {
+  const documents = path.join(home, "Documents");
+  const named = `: ${JSON.stringify(documents)}.`;
+  const refused = await toolResult(session(work, [documents, "~/.ssh"]), "unnamedStore");
+  assert.ok(refused.includes(NOT_READABLE), refused);
+  assert.ok(refused.includes(JSON.stringify(named).slice(1, -1)), refused);
+  const task = prompts.get("unnamedStore") ?? "";
+  assert.ok(task.includes(`Advisor lets you read local files only inside these folders${named}`), task);
+  assert.ok(!task.includes(".ssh"), task);
 });
 
 test("#sandbox-readable-folders a search of a readable folder does not follow a symlink out of it", async () => {

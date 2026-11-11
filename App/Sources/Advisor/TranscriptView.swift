@@ -177,8 +177,9 @@ struct TranscriptView: View {
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
             // Preference toggles for triggers must reflect in the right-click
             // action menu immediately, not only after a relaunch; likewise the
-            // saved-context library edited in Preferences.
-            let cfg = AdvisorConfig.load()
+            // saved-context library edited in Preferences. A file that cannot
+            // be used leaves the window as it is (`loadIfUsable`).
+            guard let cfg = AdvisorConfig.loadIfUsable() else { return }
             triggers = cfg.triggers
             savedContexts = cfg.contexts
             tagLibrary = cfg.tags
@@ -623,10 +624,13 @@ struct TranscriptView: View {
     /// (issue #10), persisting to config.json and posting the config-changed
     /// notification so Preferences (if open) and this view reflect it.
     private func saveContext(named name: String) {
-        savedContexts = ContextLibrary.saving(
-            savedContexts, name: name, text: recordingDraft.context)
-        AdvisorConfig.persistContexts(savedContexts)
-        NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+        // The popover shows the context only when the file holds it.
+        if let updated = AdvisorConfig.saveContext(named: name, text: recordingDraft.context) {
+            savedContexts = updated
+            NotificationCenter.default.post(name: .advisorConfigChanged, object: nil)
+        } else {
+            store.status = "context not saved: config.json cannot be read, holds a value that Advisor cannot use, or cannot be written"
+        }
     }
 
     private func submitQuery() {

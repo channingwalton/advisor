@@ -98,7 +98,8 @@ struct SessionsView: View {
         // Tag library edits in Preferences (rename, recolour, delete) must
         // recolour/hide pills and refresh folder defaults without a relaunch.
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
-            let config = AdvisorConfig.load()
+            // A file that cannot be used leaves the browser as it is.
+            guard let config = AdvisorConfig.loadIfUsable() else { return }
             let library = config.tags
             tagLibrary = library
             savedContexts = config.contexts

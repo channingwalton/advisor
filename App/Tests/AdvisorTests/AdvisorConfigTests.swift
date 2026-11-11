@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import Advisor
@@ -90,49 +91,102 @@ import Testing
     #expect(c.readableFolders == [])
 }
 
-// The Preferences window saves its whole copy of the config, and it has no
-// control for the readable folders. Its save must keep the file's list, or a
-// folder that the user removed from the file comes back.
-@Test func preferencesSaveKeepsTheReadableFoldersOnDisk() throws {
+private func tempConfigFile() -> (dir: URL, file: URL) {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    return (dir, dir.appendingPathComponent("config.json"))
+}
+
+private func rawJSON(_ file: URL) throws -> [String: Any] {
+    try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+}
+
+/// A JSON value as sorted JSON text, so `1` and `true` compare unequal.
+private func canonical(_ json: Any) throws -> Data {
+    try JSONSerialization.data(withJSONObject: [json], options: [.sortedKeys])
+}
+
+// The Preferences window writes only the settings that the user changed. Its
+// copy can be older than the file (a hand edit, a context saved from the
+// recording window, a Files-tab edit), and a save of the whole copy wrote the
+// old values over the file's (code review 2026-11-10). Every other key stays
+// as the file holds it, including a key that this version does not know and a
+// value that the decode drops.
+@Test func preferencesSaveWritesOnlyTheChangedSettings() throws {
+    let (dir, file) = tempConfigFile()
     defer { try? FileManager.default.removeItem(at: dir) }
-    let file = dir.appendingPathComponent("config.json")
+    var disk = AdvisorConfig()
+    disk.triggerSensitivity = "eager"
+    disk.contexts = [SavedContext(name: "Standup", text: "Daily standup")]
+    disk.readableFolders = ["~/Notes"]
+    disk.save(to: file)
+    var raw = try rawJSON(file)
+    raw["effort"] = "ultra"
+    raw["futureKey"] = ["a": [1, true, NSNull()]]
+    try JSONSerialization.data(withJSONObject: raw).write(to: file)
+    let window = AdvisorConfig() // the window's older copy
+    var edited = window
+    edited.appearance = "dark"
+    #expect(edited.saveChanges(from: window, to: file))
+    var expected = raw
+    expected["appearance"] = "dark"
+    #expect(try canonical(rawJSON(file)) == canonical(expected))
+}
+
+// A copy with no change writes nothing, and the window has no control for the
+// readable folders: a difference there is never written.
+@Test func preferencesSaveWithNoChangeWritesNothing() {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let window = AdvisorConfig()
+    var foldersOnly = window
+    foldersOnly.readableFolders = ["~/Private"]
+    #expect(window.saveChanges(from: window, to: file))
+    #expect(foldersOnly.saveChanges(from: window, to: file))
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+}
+
+// The window never writes the readable folders, or a folder that the user
+// removed from the file comes back.
+@Test func preferencesSaveKeepsTheReadableFoldersOnDisk() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
     // The window opened with two folders; the user then removed one by hand.
     var window = AdvisorConfig()
     window.readableFolders = ["~/Notes", "~/Private"]
     var disk = window
     disk.readableFolders = ["~/Notes"]
     disk.save(to: file)
-    window.appearance = "dark" // the change in the window that triggers its save
-    window.saveFromPreferences(to: file)
+    var edited = window
+    edited.appearance = "dark" // the change in the window that triggers its save
+    edited.readableFolders = []
+    #expect(edited.saveChanges(from: window, to: file))
     let saved = AdvisorConfig.load(from: file)
     #expect(saved.readableFolders == ["~/Notes"])
     #expect(saved.appearance == "dark")
 }
 
-// A file that does not decode (a hand edit cut off before its end) has no
-// list that the save could keep. The save leaves the file as it is: the
-// window's copy could add back a removed folder, and the defaults would delete
-// the list. (The decoder accepts trailing commas, so they are no such case.)
+// A file that does not decode (a hand edit cut off before its end, or a value
+// of the wrong type) is left as it is: the window's copy is not the file's.
+// (The decoder accepts trailing commas, so they are no such case.)
 @Test func preferencesSaveLeavesAnUndecodableFileAsItIs() throws {
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let (dir, file) = tempConfigFile()
     defer { try? FileManager.default.removeItem(at: dir) }
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let file = dir.appendingPathComponent("config.json")
-    let broken = Data(#"{"readableFolders":["~/Notes"]"#.utf8)
-    try broken.write(to: file)
-    var window = AdvisorConfig()
-    window.readableFolders = ["~/Notes", "~/Private"]
-    window.saveFromPreferences(to: file)
-    #expect(try Data(contentsOf: file) == broken)
+    let window = AdvisorConfig()
+    var edited = window
+    edited.appearance = "dark"
+    for body in [#"{"readableFolders":["~/Notes"]"#, #"{"model":5,"readableFolders":["~/Notes"]}"#] {
+        let broken = Data(body.utf8)
+        try broken.write(to: file)
+        #expect(!edited.saveChanges(from: window, to: file), "\(body)")
+        #expect(try Data(contentsOf: file) == broken, "\(body)")
+    }
 }
 
 // A file that exists but cannot be read is not a missing file: the save must
-// not write an empty list over it.
+// not write a new file over it.
 @Test func preferencesSaveLeavesAnUnreadableFileAsItIs() throws {
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let file = dir.appendingPathComponent("config.json")
+    let (dir, file) = tempConfigFile()
     var disk = AdvisorConfig()
     disk.readableFolders = ["~/Notes"]
     disk.save(to: file)
@@ -142,24 +196,327 @@ import Testing
         try? FileManager.default.removeItem(at: dir)
     }
     #expect((try? Data(contentsOf: file)) == nil) // the precondition: unreadable
-    AdvisorConfig().saveFromPreferences(to: file)
+    var edited = AdvisorConfig()
+    edited.appearance = "dark"
+    #expect(!edited.saveChanges(from: AdvisorConfig(), to: file))
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-    #expect(AdvisorConfig.load(from: file).readableFolders == ["~/Notes"])
+    #expect(AdvisorConfig.load(from: file) == disk)
 }
 
-// With no file there is no list, so the save writes none, whatever the
-// window's copy holds.
-@Test func preferencesSaveWithNoFileWritesNoReadableFolders() throws {
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+// With no file, the save makes one that holds only the change.
+@Test func preferencesSaveWithNoFileWritesOnlyTheChange() throws {
+    let (dir, file) = tempConfigFile()
     defer { try? FileManager.default.removeItem(at: dir) }
-    let file = dir.appendingPathComponent("config.json")
     var window = AdvisorConfig()
     window.readableFolders = ["~/Private"]
-    window.appearance = "dark"
-    window.saveFromPreferences(to: file)
+    var edited = window
+    edited.appearance = "dark"
+    #expect(edited.saveChanges(from: window, to: file))
+    #expect(try canonical(rawJSON(file)) == canonical(["appearance": "dark"]))
+}
+
+// A view that reloads on advisorConfigChanged keeps what it shows when the
+// file cannot be used. The defaults would reset the appearance, the triggers
+// and the libraries, and the Files tab posts the notice for such a file.
+@Test func loadIfUsableGivesNothingForAnUnusableFile() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    #expect(AdvisorConfig.loadIfUsable(from: file) == AdvisorConfig())
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    for body in [#"{"appearance":"dark""#, #"{"appearance":"dark","model":5}"#] {
+        try Data(body.utf8).write(to: file)
+        #expect(AdvisorConfig.loadIfUsable(from: file) == nil, "\(body)")
+    }
+    var disk = AdvisorConfig()
+    disk.appearance = "dark"
+    disk.save(to: file)
+    #expect(AdvisorConfig.loadIfUsable(from: file) == disk)
+}
+
+// The window's link to the file (`PreferencesFile`). Opening the window and a
+// reload write nothing when every change is in the file. Each test drives a
+// reload as the window does: `reload(keeping:)`, then `commit` of what it
+// gives. (A test macro cannot call a mutating method, so each result is taken
+// first.)
+@Test func preferencesFileOpeningWritesNothing() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    var window = PreferencesFile(url: file)
+    #expect(window.saved == AdvisorConfig())
+    let reloaded = window.reload(keeping: window.saved)
+    let shown = try #require(reloaded)
+    let wrote = window.commit(shown)
+    #expect(shown == AdvisorConfig())
+    #expect(!wrote)
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+    var disk = AdvisorConfig()
+    disk.appearance = "dark"
+    disk.save(to: file)
+    let before = try Data(contentsOf: file)
+    window = PreferencesFile(url: file)
+    #expect(window.saved == disk)
+    let reloadedDisk = window.reload(keeping: window.saved)
+    let shownDisk = try #require(reloadedDisk)
+    let wroteDisk = window.commit(shownDisk)
+    #expect(shownDisk == disk)
+    #expect(!wroteDisk)
+    #expect(try Data(contentsOf: file) == before)
+}
+
+// A context saved from the recording window, or a hand edit, after the window
+// read the file: the next change in the window writes only itself.
+@Test func preferencesFileKeepsWhatChangedOnDiskSinceItsRead() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    AdvisorConfig().save(to: file)
+    var window = PreferencesFile(url: file)
+    var shown = window.saved
+    var newer = shown
+    newer.contexts = [SavedContext(name: "Standup", text: "Daily standup")]
+    newer.triggerSensitivity = "eager"
+    newer.save(to: file)
+    shown.appearance = "dark"
+    let wrote = window.commit(shown)
+    #expect(wrote)
     let saved = AdvisorConfig.load(from: file)
-    #expect(saved.readableFolders == [])
+    #expect(saved.contexts == newer.contexts)
+    #expect(saved.triggerSensitivity == "eager")
     #expect(saved.appearance == "dark")
+}
+
+// A change that the window wrote is not written again: another writer can
+// change the same setting later, and the window's next change is another one.
+@Test func preferencesFileWritesEachChangeOnce() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    AdvisorConfig().save(to: file)
+    var window = PreferencesFile(url: file)
+    var shown = window.saved
+    shown.appearance = "dark"
+    let first = window.commit(shown)
+    let again = window.commit(shown)
+    #expect(first)
+    #expect(!again)
+    var other = AdvisorConfig.load(from: file)
+    other.appearance = "light"
+    other.save(to: file)
+    shown.triggerSensitivity = "eager"
+    let next = window.commit(shown)
+    #expect(next)
+    let saved = AdvisorConfig.load(from: file)
+    #expect(saved.appearance == "light")
+    #expect(saved.triggerSensitivity == "eager")
+}
+
+// A file that cannot be used: the window writes nothing. After the user
+// corrects the file, a reload takes it, and the next change writes only
+// itself, not the defaults that the window held (code review 2026-11-10).
+@Test func preferencesFileAfterACorrectionWritesOnlyTheChange() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let broken = Data(#"{"appearance":"dark""#.utf8)
+    try broken.write(to: file)
+    var window = PreferencesFile(url: file)
+    #expect(window.unusable)
+    let held = window.saved // the defaults, which the locked controls show
+    let failedReload = window.reload(keeping: held)
+    #expect(failedReload == nil)
+    #expect(try Data(contentsOf: file) == broken)
+    // The user corrects the file.
+    var fixed = AdvisorConfig()
+    fixed.triggerSensitivity = "eager"
+    fixed.contexts = [SavedContext(name: "Standup", text: "Daily standup")]
+    fixed.save(to: file)
+    let reloaded = window.reload(keeping: held)
+    let disk = try #require(reloaded)
+    let wroteReload = window.commit(disk)
+    #expect(!window.unusable)
+    #expect(disk == fixed)
+    #expect(!wroteReload)
+    var edited = disk
+    edited.appearance = "dark"
+    let wrote = window.commit(edited)
+    #expect(wrote)
+    let saved = AdvisorConfig.load(from: file)
+    #expect(saved.triggerSensitivity == "eager")
+    #expect(saved.contexts == fixed.contexts)
+    #expect(saved.appearance == "dark")
+}
+
+// After the file is deleted, a reload shows the defaults and writes nothing.
+// The next change makes a file that holds only that change, not the copy that
+// the window held before.
+@Test func preferencesFileReloadAfterTheFileIsDeleted() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    var disk = AdvisorConfig()
+    disk.appearance = "dark"
+    disk.contexts = [SavedContext(name: "Standup", text: "Daily standup")]
+    disk.save(to: file)
+    var window = PreferencesFile(url: file)
+    #expect(window.saved == disk)
+    try FileManager.default.removeItem(at: file)
+    let reloaded = window.reload(keeping: window.saved)
+    #expect(reloaded == AdvisorConfig())
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+    var edited = AdvisorConfig()
+    edited.triggerSensitivity = "eager"
+    let wrote = window.commit(edited)
+    #expect(wrote)
+    #expect(try canonical(rawJSON(file)) == canonical(["triggerSensitivity": "eager"]))
+}
+
+// A change that cannot be written is written with the next change.
+@Test func preferencesFileWritesAFailedChangeWithTheNextOne() throws {
+    let (dir, file) = tempConfigFile()
+    AdvisorConfig().save(to: file)
+    var window = PreferencesFile(url: file)
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+    defer {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        try? FileManager.default.removeItem(at: dir)
+    }
+    var shown = window.saved
+    shown.appearance = "dark"
+    let failed = window.commit(shown)
+    #expect(!failed)
+    #expect(window.notSaved)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+    shown.triggerSensitivity = "eager"
+    let wrote = window.commit(shown)
+    #expect(wrote)
+    #expect(!window.notSaved)
+    let saved = AdvisorConfig.load(from: file)
+    #expect(saved.appearance == "dark")
+    #expect(saved.triggerSensitivity == "eager")
+}
+
+// A change that could not be written stays in the window across a reload,
+// over the file's newer settings, and the reload writes it again. The notice
+// stays until a write succeeds. Before, the reload showed the file's value,
+// and its `commit` of that value cleared the notice (code review 2026-11-11).
+@Test func preferencesFileKeepsAFailedChangeAcrossAReload() throws {
+    let (dir, file) = tempConfigFile()
+    AdvisorConfig().save(to: file)
+    var window = PreferencesFile(url: file)
+    let readOnly = { try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path) }
+    let writable = { try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
+    try readOnly()
+    defer {
+        try? writable()
+        try? FileManager.default.removeItem(at: dir)
+    }
+    var shown = window.saved
+    shown.appearance = "dark"
+    let failed = window.commit(shown)
+    #expect(!failed)
+    #expect(window.notSaved)
+    // Another writer saves a context while the folder is writable for it.
+    try writable()
+    var other = AdvisorConfig.load(from: file)
+    other.contexts = [SavedContext(name: "Standup", text: "Daily standup")]
+    other.save(to: file)
+    try readOnly()
+    let reloaded = window.reload(keeping: shown)
+    let kept = try #require(reloaded)
+    let failedAgain = window.commit(kept)
+    #expect(kept.appearance == "dark")
+    #expect(kept.contexts == other.contexts)
+    #expect(!failedAgain)
+    #expect(window.notSaved)
+    // The folder is writable again: the next reload writes the change.
+    try writable()
+    let reloadedAgain = window.reload(keeping: kept)
+    let keptAgain = try #require(reloadedAgain)
+    let wrote = window.commit(keptAgain)
+    #expect(keptAgain == kept)
+    #expect(wrote)
+    #expect(!window.notSaved)
+    let saved = AdvisorConfig.load(from: file)
+    #expect(saved.appearance == "dark")
+    #expect(saved.contexts == other.contexts)
+}
+
+// A change whose write finds the file broken stays in the window. After the
+// user corrects the file, the reload writes it over the corrected file. Before,
+// the reload showed the file's value, and the change was lost with no notice
+// (code review 2026-11-11).
+@Test func preferencesFileKeepsAChangeThatFindsTheFileUnusable() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    AdvisorConfig().save(to: file)
+    var window = PreferencesFile(url: file)
+    var shown = window.saved
+    shown.appearance = "dark"
+    let broken = Data(#"{"appearance":"light",}"#.utf8)
+    try broken.write(to: file)
+    let failed = window.commit(shown)
+    #expect(!failed)
+    #expect(window.unusable)
+    #expect(window.notSaved)
+    #expect(try Data(contentsOf: file) == broken)
+    let stillBroken = window.reload(keeping: shown)
+    #expect(stillBroken == nil)
+    #expect(window.notSaved)
+    // The user corrects the file.
+    var fixed = AdvisorConfig()
+    fixed.appearance = "light"
+    fixed.triggerSensitivity = "eager"
+    fixed.save(to: file)
+    let reloaded = window.reload(keeping: shown)
+    let kept = try #require(reloaded)
+    let wrote = window.commit(kept)
+    #expect(kept.appearance == "dark")
+    #expect(kept.triggerSensitivity == "eager")
+    #expect(wrote)
+    #expect(!window.unusable)
+    #expect(!window.notSaved)
+    let saved = AdvisorConfig.load(from: file)
+    #expect(saved.appearance == "dark")
+    #expect(saved.triggerSensitivity == "eager")
+}
+
+// The provider picker clears the model only for a provider that the user
+// picks. A provider that a reload sets keeps the file's model, so the reload
+// writes nothing (code review 2026-11-10).
+@Test func agentBackendClearsTheModelOnlyForAPickedProvider() {
+    final class Box { var provider = "claude"; var model = "claude-opus" }
+    let box = Box()
+    let provider = Binding(get: { box.provider }, set: { box.provider = $0 })
+    let model = Binding(get: { box.model }, set: { box.model = $0 })
+    let picked = AgentBackendView.picked(provider: provider, clearing: model)
+    picked.wrappedValue = "claude" // the same provider again
+    #expect(box.model == "claude-opus")
+    picked.wrappedValue = "codex"
+    #expect(box.provider == "codex")
+    #expect(box.model == "")
+    // A reload sets the provider and the model through the plain bindings.
+    provider.wrappedValue = "claude"
+    model.wrappedValue = "claude-sonnet"
+    #expect(picked.wrappedValue == "claude")
+    #expect(box.model == "claude-sonnet")
+}
+
+// The user undoes a change that could not be written: the window and the file
+// agree again, so the notice goes.
+@Test func preferencesFileClearsTheNoticeWhenTheFailedChangeIsUndone() throws {
+    let (dir, file) = tempConfigFile()
+    AdvisorConfig().save(to: file)
+    var window = PreferencesFile(url: file)
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+    defer {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        try? FileManager.default.removeItem(at: dir)
+    }
+    var shown = window.saved
+    shown.appearance = "dark"
+    let failed = window.commit(shown)
+    #expect(!failed)
+    #expect(window.notSaved)
+    let undone = window.commit(window.saved)
+    #expect(!undone)
+    #expect(!window.notSaved)
 }
 
 // The sidecar keeps the string entries of a mixed list (mergeConfig). The app
