@@ -9,6 +9,12 @@ import type { QueryFn } from "./agent.js";
 
 let messages = 0;
 
+/// Where a test makes its synthetic home. On macOS not in a temp folder: the
+/// profiles let a process write the temp folders, but not one above the home
+/// folder (`writableTemps`), and the CLI needs its `TMPDIR` as in production.
+/// Linux (CI) has no `/private/var/tmp` and no profile.
+export const SYNTHETIC_HOME_ROOT = process.platform === "darwin" ? "/private/var/tmp" : os.tmpdir();
+
 /// Answer one Messages API request as a server-sent event stream of `content`
 /// blocks (text or tool_use), ending with `stop`. Each response is a new
 /// message, and text arrives a word at a time, as from the real API.

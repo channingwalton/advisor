@@ -2,8 +2,13 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { agentCwd, deniedPaths, readableRoots } from "./agent.js";
+import { agentCwd } from "./agent.js";
 import { loadReadableFolders } from "./config.js";
+import {
+  homeReadRules, realpathLeaf, realpathOrSelf, seatbeltProfile, storeDenials, TEMP_ROOTS, writableTemps, type SeatbeltPolicy,
+} from "./seatbelt.js";
+
+export { realpathOrSelf, seatbeltProfile, type SeatbeltPolicy } from "./seatbelt.js";
 
 /// Codex's own state stays reachable: the CLI reads `~/.codex/auth.json` to
 /// authenticate and persists threads in `~/.codex/sessions`, so denying it at
@@ -12,42 +17,12 @@ import { loadReadableFolders } from "./config.js";
 /// Claude backend's in-process denylist can. Recorded in DESIGN.md.
 const PROVIDER_STATE = [".codex", ".codex-global-state.json"];
 
-/// Resolve symlinks so the profile names the path the kernel will match
-/// (`/tmp` is a symlink to `/private/tmp` on macOS, and a profile written
-/// against the unresolved path matches nothing). Non-existent paths are kept
-/// as-is: they can hold no symlink, and denying a path that may be created
-/// later is the safe direction.
-export function realpathOrSelf(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return p;
-  }
-}
-
-/// `p` with each name as the disk stores it, or `p` when it does not exist.
-function nativeOrSelf(p: string): string {
-  try {
-    return fs.realpathSync.native(p);
-  } catch {
-    return p;
-  }
-}
-
-/// Paths the OS-level sandbox must keep unreadable — the same list the Claude
-/// backend's `canUseTool` enforces, minus Codex's own state (see above), so one
-/// denylist drives both backends.
-export function sandboxReadDenials(home: string): string[] {
-  const keep = new Set(PROVIDER_STATE.map((p) => path.join(home, p)));
-  return deniedPaths(home).filter((p) => !keep.has(p));
-}
-
 /// The only paths the sandboxed process may write to: Codex's own state (thread
 /// persistence, logs), the temp dir it and its MCP servers scratch in, and
 /// /dev. Everything else — the user's documents, code, dotfiles — is read-only
 /// to the process, whatever the CLI's own `sandboxMode` does or does not honour.
 export function sandboxWritableRoots(home: string, tmps: string[] = DEFAULT_TMPS): string[] {
-  return [path.join(home, ".codex"), ...tmps, "/dev"];
+  return [path.join(home, ".codex"), ...writableTemps(home, tmps), "/dev"];
 }
 
 /// What in Codex's own folder the agent may not write, folder allowance
@@ -88,65 +63,6 @@ export interface ReadAllowance {
   cwd: string;
 }
 
-/// The rules of the profile, each path as the kernel matches it.
-export interface SeatbeltPolicy {
-  /// The home folder: reads in it are refused, except `readRoots`, and the
-  /// metadata of `readMetadata`.
-  home: string[];
-  readRoots: string[];
-  /// The folders on the way from the home folder to a read root. The CLI
-  /// resolves its paths (`canonicalize`), which needs their metadata, not
-  /// their contents.
-  readMetadata: string[];
-  /// Refused in any case: the credential stores, as for the Claude agents.
-  readDenials: string[];
-  writableRoots: string[];
-  writeDenials: string[];
-}
-
-/// The paths of the home folder that the sandboxed process can read: the
-/// readable folders, the CLI and working folders and `writable` (the writable
-/// roots: what the process writes, it reads back), each only when the policy
-/// honours it as a listed folder (`readableRoots`). So a `TMPDIR` or a CLI
-/// folder at or above a store, such as `~/Library`, is not opened (code review
-/// 2026-11-11). And Codex's own state, which is a store by design. A denylist
-/// fails open for each store that it does not name, so the rest of the home
-/// folder is refused (GHSA-6xc8-f55f-jxqr). Each path in its listed and its
-/// resolved form: the CLI reads a symlink in the listed form itself, such as
-/// `~/.codex` when it leads into `~/dotfiles`.
-function sandboxReadRoots(home: string, reads: ReadAllowance, writable: string[]): string[] {
-  const state = PROVIDER_STATE.map((p) => path.join(home, p));
-  return [...new Set([
-    ...readableRoots(home, [...reads.folders, reads.cliRoot, reads.cwd, ...writable]),
-    ...state.flatMap((p) => [p, realpathLeaf(p)]),
-  ])];
-}
-
-/// The home folder in `homes` that holds `p`. Letter case is ignored, as the
-/// default volume and Seatbelt ignore it: a path can come in a spelling other
-/// than `$HOME`'s (code review 2026-11-11). On a case-sensitive volume this
-/// can only add a rule for a path outside the home folder, which the profile
-/// does not refuse anyway.
-function holdingHome(homes: string[], p: string): string | undefined {
-  return homes.find((h) => p.toLowerCase().startsWith((h + path.sep).toLowerCase()));
-}
-
-/// Each folder between a home folder in `homes` and a path in `roots`, that
-/// home folder included.
-function foldersOnTheWay(homes: string[], roots: string[]): string[] {
-  const folders = new Set<string>();
-  for (const root of roots) {
-    const home = holdingHome(homes, root);
-    if (home === undefined) continue;
-    for (let dir = path.dirname(root); ; dir = path.dirname(dir)) {
-      folders.add(dir);
-      // The root guard: a spelling that never reaches `home` stops at `/`.
-      if (dir.toLowerCase() === home.toLowerCase() || dir === path.dirname(dir)) break;
-    }
-  }
-  return [...folders];
-}
-
 /// The path lists as the kernel will match them: resolved, then deduped.
 ///
 /// Resolving is not cosmetic. Seatbelt matches the real path, so a rule naming
@@ -163,21 +79,19 @@ export function sandboxPolicy(home: string, reads: ReadAllowance, tmps: string[]
   // as `~/.codex` on a first run, must still be named in its resolved form
   // when the home folder is reached through a symlink (code review 2026-11-11).
   const resolve = (ps: string[]): string[] => [...new Set(ps.map(realpathLeaf))];
-  // The native form too: `readableRoots` gives the stored spelling, which can
-  // differ in letter case from `$HOME`, and `foldersOnTheWay` compares
-  // spellings (code review 2026-11-11).
-  const homes = [...new Set([home, realpathOrSelf(home), nativeOrSelf(home)])];
   const writableRoots = resolve(sandboxWritableRoots(home, tmps));
-  // `readableRoots` keeps only the writable roots inside the home folder: the
-  // rest are readable anyway, and a root that holds the home folder would open
-  // all of it.
-  const readRoots = sandboxReadRoots(home, reads, writableRoots);
+  const state = PROVIDER_STATE.map((p) => path.join(home, p));
   return {
-    home: homes,
-    readRoots,
-    readMetadata: foldersOnTheWay(homes, readRoots),
-    readDenials: resolve(sandboxReadDenials(home)),
+    // The writable roots too: what the process writes, it reads back. Each is
+    // judged as a listed folder is, so a `TMPDIR` at or above a store, such as
+    // `~/Library`, is not read (code review 2026-11-11), and `writableTemps`
+    // leaves it out of the writable roots (code review 2026-11-14).
+    ...homeReadRules(home, [...reads.folders, reads.cliRoot, reads.cwd, ...writableRoots], state),
+    readDenials: storeDenials(home, state),
+    readPatterns: [],
+    confineWrites: true,
     writableRoots,
+    writePatterns: [],
     writeDenials: [...new Set(sandboxWriteDenials(home).flatMap(inputDenialPaths))],
   };
 }
@@ -202,95 +116,9 @@ function inputDenialPaths(p: string): string[] {
   }
 }
 
-/// `realpathOrSelf` for a path that may not exist: the deepest existing ancestor
-/// resolved, the rest appended as written (not existing, it can hold no symlink).
-function realpathLeaf(p: string): string {
-  const tail: string[] = [];
-  let cur = p;
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync(cur), ...tail.reverse());
-    } catch {
-      const parent = path.dirname(cur);
-      if (parent === cur) return p;
-      tail.push(path.basename(cur));
-      cur = parent;
-    }
-  }
-}
-
-/// Programs that start another program outside the profile, through launchd or
-/// Apple Events: refused outright. The exec denial is by path, but a copy of
-/// one of these system binaries will not run either — macOS launch constraints
-/// pin them to their canonical location and kill a copy with a Launch
-/// Constraint Violation (verified on macOS 27, sandboxed and not). What the
-/// exec denial cannot reach is the library route: a process can call
-/// LaunchServices directly (`LSOpenCFURLRef` over mach/XPC) and hand a program
-/// to launchd without running any launcher binary. `LAUNCH_SERVICES_REGEX`
-/// closes that route at the mach port.
-const LAUNCHERS = ["/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl", "/usr/bin/shortcuts"];
-
-/// The `com.apple.lsd` mach services — the LaunchServices daemon — matched as a
-/// family: the bare `com.apple.lsd` and every `com.apple.lsd.*` sub-service. The
-/// family is what resolves a URL or bundle id to the app to launch; deny the
-/// whole lookup and LaunchServices is unreachable, so neither `open` nor a
-/// direct `LSOpenCFURLRef` call can resolve a handler, let alone launch it. A
-/// regex rather than a name list because resolution has fallbacks: an explicit
-/// `com.apple.lsd`/`launchservicesd` denial still resolves through the
-/// sub-services (verified against the kernel). Nothing the CLI or an MCP server
-/// does needs to launch an app — the real CLI completes its turns regardless
-/// (`codex.sdk.test.ts`). Code review #88.
-const LAUNCH_SERVICES_REGEX = "^com\\.apple\\.lsd";
-
 /// The sidecar's own `TMPDIR` plus the two macOS temp roots, because the CLI and
 /// the MCP servers it spawns need not share this process's `TMPDIR`.
-const DEFAULT_TMPS = [os.tmpdir(), "/private/tmp", "/private/var/folders"];
-
-/// A macOS Seatbelt profile: everything allowed except reads in the home
-/// folder outside `readRoots`, reads of `readDenials`, and writes outside
-/// `writableRoots`, less the `writeDenials` (files or folders) inside them.
-/// Seatbelt takes the LAST matching rule, so each allowance must follow the
-/// blanket denial that it narrows, and the denials inside an allowance must
-/// follow it. Paths are matched against the resolved path, so a symlink out of
-/// an allowed directory cannot reach a denied one — the kernel does here what
-/// `realResolve` does for the Claude backend. Every rule list is required: a
-/// caller that forgot one would ship a profile without it.
-export function seatbeltProfile(policy: SeatbeltPolicy): string {
-  const { home, readRoots, readMetadata, readDenials, writableRoots, writeDenials } = policy;
-  const subpaths = (ps: string[]): string =>
-    ps.map((p) => `(subpath "${escapeSexp(p)}")`).join(" ");
-  const literals = (ps: string[]): string =>
-    ps.map((p) => `(literal "${escapeSexp(p)}")`).join(" ");
-  const lines = [
-    "(version 1)",
-    "(allow default)",
-    // `osascript -e 'tell app "Finder" to do shell script "cat ~/.ssh/id_rsa"'`
-    // would run the script inside Finder, outside this profile (gated only by
-    // a TCC prompt), and `open`/`launchctl`/`shortcuts` hand a program to
-    // launchd the same way. Nothing the CLI or an MCP server does needs Apple
-    // Events or those launchers.
-    "(deny appleevent-send)",
-    `(deny process-exec ${LAUNCHERS.map((p) => `(literal "${p}")`).join(" ")})`,
-    `(deny mach-lookup (global-name-regex "${LAUNCH_SERVICES_REGEX}"))`,
-  ];
-  if (home.length > 0) lines.push(`(deny file-read* ${subpaths(home)})`);
-  if (readRoots.length > 0) lines.push(`(allow file-read* ${subpaths(readRoots)})`);
-  if (readMetadata.length > 0) lines.push(`(allow file-read-metadata ${literals(readMetadata)})`);
-  // Last of the read rules: a store stays refused inside an allowed folder.
-  if (readDenials.length > 0) lines.push(`(deny file-read* ${subpaths(readDenials)})`);
-  lines.push("(deny file-write*)");
-  if (writableRoots.length > 0) lines.push(`(allow file-write* ${subpaths(writableRoots)})`);
-  if (writeDenials.length > 0) lines.push(`(deny file-write* ${subpaths(writeDenials)})`);
-  return lines.join("\n") + "\n";
-}
-
-/// Escape a path for a Seatbelt string literal. A `"` in a filename would
-/// otherwise close the literal early and the rest of the path would be parsed
-/// as profile syntax — at best a load failure, at worst a rule that does not
-/// mean what it reads as.
-function escapeSexp(p: string): string {
-  return p.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
+const DEFAULT_TMPS = [...TEMP_ROOTS];
 
 /// A shell wrapper that execs the real Codex CLI under `profilePath`. The SDK
 /// spawns `codexPathOverride` directly (no shell) and pipes stdio, so a shebang

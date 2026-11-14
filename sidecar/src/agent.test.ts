@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { setImmediate } from "node:timers/promises";
+import { setImmediate, setTimeout as sleep } from "node:timers/promises";
 import { AgentSession, AsyncQueue, agentCwd, type Agent, type QueryFn } from "./agent.js";
+import { claudeWriteFolders } from "./claudeSandbox.js";
 import { AutoPipeline } from "./autoPipeline.js";
 import { runCard, Transcript, type Lane } from "./lanes.js";
 import { classifyOn } from "./trigger.js";
@@ -230,16 +231,22 @@ test("#sandbox-readable-folders each run names the folders that the agent can re
 
   const r1 = session.run("task1", undefined, 1000, "RECAP ");
   const first = await nextPrompt(spawns[0]);
-  assert.ok(first.endsWith(`: ${JSON.stringify(notes)}.\n\nRECAP task1`), first);
+  assert.ok(first.includes(`: ${JSON.stringify(notes)}. `), first);
+  // Glob finds nothing for a pattern that starts with a folder name, so the
+  // note says how to call it (2026-11-12).
+  assert.match(first, /put the folder in `path`[^\n]*`\*\*\/\*\.md`[^\n]*\n\nRECAP task1$/);
   assert.doesNotMatch(first, /Library/);
   spawns[0].messages.push(success("a1"));
   await r1;
 
   folders = [];
   const r2 = session.run("task2", undefined, 1000);
-  const second = await nextPrompt(spawns[0]);
+  // On macOS the changed list starts a new CLI, under a profile of its own.
+  const latest = spawns[spawns.length - 1];
+  const second = await nextPrompt(latest);
   assert.match(second, /^You can read no local file\b[^\n]*\n\ntask2$/);
-  spawns[0].messages.push(success("a2"));
+  assert.doesNotMatch(second, /Glob/, "no folder, no search advice");
+  latest.messages.push(success("a2"));
   await r2;
 });
 
@@ -390,6 +397,152 @@ test("#context-lane-recycle a lane whose Claude CLI stopped while idle sends its
   assert.match(warmAgain, /them: Thanks/);
   spawns[1].messages.push(success("ok"));
   await fourth;
+});
+
+// On macOS the session starts the CLI itself, under its Seatbelt profile, and
+// the SDK cannot reach that process's stderr: the session's hook must log it
+// (code review 2026-11-11).
+test("the sandboxed spawn logs the CLI's stderr", { skip: process.platform !== "darwin" && "requires macOS Seatbelt" }, async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const r1p = session.run("task1", undefined, 5000);
+  type SpawnHook = (o: { command: string; args: string[]; cwd?: string; env: Record<string, string>; signal: AbortSignal }) =>
+    { stdin: NodeJS.WritableStream };
+  const { options } = spawns[0].args as { options: { spawnClaudeCodeProcess?: SpawnHook } };
+  const spawnHook = options.spawnClaudeCodeProcess;
+  assert.equal(typeof spawnHook, "function");
+  const written: string[] = [];
+  const orig = process.stderr.write;
+  process.stderr.write = ((chunk: unknown) => {
+    written.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  const logged = (): boolean => written.some((line) => line.includes("test: cli stderr: CLI_STDERR_MARK"));
+  try {
+    const child = spawnHook!({
+      command: "/bin/sh", args: ["-c", "echo CLI_STDERR_MARK >&2"], cwd: os.tmpdir(),
+      env: { PATH: "/usr/bin:/bin" }, signal: new AbortController().signal,
+    });
+    child.stdin.end();
+    // The log line itself, not the process's exit: Node can emit `exit`
+    // before the last stderr data.
+    for (let waited = 0; !logged() && waited < 5000; waited += 10) await sleep(10);
+  } finally {
+    process.stderr.write = orig;
+  }
+  assert.ok(logged(), JSON.stringify(written));
+  spawns[0].messages.push(success("done"));
+  await r1p;
+});
+
+// The profile lets the CLI write its transcripts and its connectors' logs only
+// in its own folders, which it cannot create there, so the session creates
+// them before it starts the CLI (decided 2026-11-14).
+test("#claude-seatbelt the sandboxed spawn creates the CLI's transcript and log folders", { skip: process.platform !== "darwin" && "requires macOS Seatbelt" }, async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const r1p = session.run("task1", undefined, 5000);
+  type SpawnHook = (o: { command: string; args: string[]; cwd?: string; env: Record<string, string>; signal: AbortSignal }) =>
+    { stdin: NodeJS.WritableStream; once: (e: "exit", f: () => void) => void };
+  const { options } = spawns[0].args as { options: { spawnClaudeCodeProcess: SpawnHook } };
+  const folders = claudeWriteFolders(home, agentCwd(home));
+  assert.equal(folders.length, 2);
+  for (const dir of folders) fs.rmSync(dir, { recursive: true, force: true });
+  const child = options.spawnClaudeCodeProcess({
+    command: "/bin/sh", args: ["-c", "exit 0"], cwd: agentCwd(home), env: { PATH: "/usr/bin:/bin" }, signal: new AbortController().signal,
+  });
+  child.stdin.end();
+  await new Promise<void>((resolve) => child.once("exit", resolve));
+  for (const dir of folders) assert.ok(fs.statSync(dir).isDirectory(), dir);
+  spawns[0].messages.push(success("done"));
+  await r1p;
+});
+
+// The CLI's Seatbelt profile is fixed when it starts. After a change to the
+// readable folders, an idle session starts a new CLI; a busy one keeps its CLI,
+// so that the running task is not cut off (decided 2026-11-11).
+test("#claude-seatbelt a folder change starts a new CLI only when the session is idle", { skip: process.platform !== "darwin" && "requires macOS Seatbelt" }, async () => {
+  type SpawnHook = (o: { command: string; args: string[]; cwd?: string; env: Record<string, string>; signal: AbortSignal }) =>
+    { kill: (signal?: NodeJS.Signals) => boolean };
+  const { queryFn, spawns } = makeFakeQuery();
+  let folders = [path.join(home, "A")];
+  const session = new AgentSession({ ...opts, readableFolders: () => folders }, queryFn);
+  const clis: { kill: (signal?: NodeJS.Signals) => boolean }[] = [];
+  /// The SDK starts the newest spawn's CLI through the session's hook.
+  const started = (): void => {
+    const { options } = spawns[spawns.length - 1].args as { options: { spawnClaudeCodeProcess: SpawnHook } };
+    clis.push(options.spawnClaudeCodeProcess({
+      command: "/bin/cat", args: [], cwd: os.tmpdir(), env: { PATH: "/usr/bin:/bin" }, signal: new AbortController().signal,
+    }));
+  };
+  const a = JSON.stringify(path.join(home, "A"));
+  const b = JSON.stringify(path.join(home, "B"));
+  try {
+    const r1 = session.run("task1", undefined, 5000);
+    started();
+    assert.ok((await nextPrompt(spawns[0])).includes(a));
+    folders = [path.join(home, "A"), path.join(home, "B")];
+    const r2 = session.run("task2", undefined, 5000);
+    assert.equal(spawns.length, 1, "a busy session keeps its CLI");
+    // The running CLI's profile does not allow B, so the note leaves it out.
+    const queued = await nextPrompt(spawns[0]);
+    assert.ok(queued.includes(a) && !queued.includes(b), queued);
+    // The gate agrees with the kernel: it refuses B, and its refusal names
+    // only A, so the agent gets a refusal, not an `EPERM` (code review
+    // 2026-11-14).
+    const { options } = spawns[0].args as { options: { hooks: { PreToolUse: { hooks: ((...a: unknown[]) => Promise<unknown>)[] }[] } } };
+    const gate = options.hooks.PreToolUse[0].hooks[0];
+    const read = (await gate(
+      { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: path.join(home, "B", "x.md") } },
+      "toolu_b",
+      { signal: new AbortController().signal },
+    )) as { hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string } };
+    assert.equal(read.hookSpecificOutput?.permissionDecision, "deny", "B is refused until a new CLI starts");
+    const reason = read.hookSpecificOutput?.permissionDecisionReason ?? "";
+    assert.ok(reason.includes(a) && !reason.includes(b), reason);
+    spawns[0].messages.push(success("a1"));
+    assert.equal((await r1).text, "a1", "the running task is not cut off");
+    spawns[0].messages.push(success("a2"));
+    await r2;
+    const r3 = session.run("task3", undefined, 5000);
+    assert.equal(spawns.length, 2, "an idle session starts a new CLI after the change");
+    started();
+    assert.ok((await nextPrompt(spawns[1])).includes(b), "the new CLI can read B, and the note says so");
+    spawns[1].messages.push(success("a3"));
+    await r3;
+    const r4 = session.run("task4", undefined, 5000);
+    assert.equal(spawns.length, 2, "an unchanged list keeps the CLI");
+    spawns[1].messages.push(success("a4"));
+    await r4;
+  } finally {
+    session.reset();
+    for (const cli of clis) cli.kill("SIGKILL");
+  }
+});
+
+// The same folder in another spelling (`~/A`, then its absolute path) is the
+// same grant: the CLI keeps running, and the note still names the folder
+// (code review 2026-11-11).
+test("#claude-seatbelt a folder listed in another spelling keeps the CLI and stays in the note", { skip: process.platform !== "darwin" && "requires macOS Seatbelt" }, async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  let folders = ["~/A"];
+  const session = new AgentSession({ ...opts, readableFolders: () => folders }, queryFn);
+  const a = JSON.stringify(path.join(home, "A"));
+  try {
+    const r1 = session.run("task1", undefined, 5000);
+    assert.ok((await nextPrompt(spawns[0])).includes(a));
+    spawns[0].messages.push(success("a1"));
+    await r1;
+    folders = [path.join(home, "A")];
+    const r2 = session.run("task2", undefined, 5000);
+    assert.equal(spawns.length, 1, "the same grant keeps the CLI");
+    const second = await nextPrompt(spawns[0]);
+    assert.ok(second.includes(a), second);
+    spawns[0].messages.push(success("a2"));
+    await r2;
+  } finally {
+    session.reset();
+  }
 });
 
 // The CLI subprocess's stderr was dropped, so a spawn-time crash surfaced only

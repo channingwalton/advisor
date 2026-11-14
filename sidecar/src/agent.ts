@@ -5,11 +5,14 @@ import {
   type SDKPartialAssistantMessage,
   type SDKResultMessage,
   type SDKUserMessage,
+  type SpawnedProcess,
+  type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
 import { homedir } from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { describeToolUse, THINKING } from "./activity.js";
+import { claudeSandboxProfile, claudeWriteFolders, spawnClaudeSandboxed } from "./claudeSandbox.js";
 import { log } from "./protocol.js";
 
 type PermissionResult =
@@ -18,11 +21,16 @@ type PermissionResult =
 
 const HOME = homedir();
 
+/// The Claude CLI runs under a Seatbelt profile on macOS (`claudeSandbox.ts`).
+/// CI runs the sidecar on Linux, which has no Seatbelt: there the CLI starts as
+/// the SDK starts it.
+const SEATBELT = process.platform === "darwin";
+
 /// The Claude agents' working directory: an empty folder of Advisor's own. The
 /// CLI approves reads inside its working directory without consulting the
 /// sandbox, so this must not be $HOME — the PreToolUse gate catches those reads
 /// anyway; this keeps the implicit approval pointing at nothing. Created on
-/// first spawn. (Codex keeps $HOME: its sandbox is the Seatbelt profile.)
+/// first spawn. Codex runs here too (`codexWorkingDirectory`).
 export function agentCwd(home: string): string {
   return path.join(home, "Library", "Application Support", "Advisor", "agent-cwd");
 }
@@ -218,7 +226,12 @@ function honouredFolders(
 /// files starts with it, and each refusal of a local path ends with it.
 /// Without it, an agent tried twelve other paths and never the notes folder
 /// that the user listed (2026-11-11). Each folder is in quotes, because a
-/// folder name can hold a comma.
+/// folder name can hold a comma. The note also says how to call Glob: with
+/// a notes folder in `path`, the CLI's Glob found nothing for a pattern that
+/// started with folder names (`A/B/*.md`), with or without the Seatbelt
+/// profile, while `*.md` with `A/B` in `path` found its 12 notes. An agent
+/// then decided that the notes did not exist, and searched for a minute
+/// (2026-11-12).
 export function readableFoldersNote(
   home: string,
   folders: readonly string[],
@@ -226,7 +239,9 @@ export function readableFoldersNote(
 ): string {
   const honoured = [...new Set(honouredFolders(home, folders, realpath).map((h) => h.folder))];
   return honoured.length > 0
-    ? `Advisor lets you read local files only inside these folders: ${honoured.map((f) => JSON.stringify(f)).join(", ")}.`
+    ? `Advisor lets you read local files only inside these folders: ${honoured.map((f) => JSON.stringify(f)).join(", ")}. ` +
+      "To find files with Glob, put the folder in `path`, and start the pattern with `*` or `**`, such as `**/*.md`: " +
+      "a pattern that starts with a folder name can find nothing."
     : `You can read no local file: Advisor's Preferences (Files) list no folder that Advisor lets you read.`;
 }
 
@@ -351,8 +366,10 @@ export interface AgentSessionOptions {
   home?: string;
   /// The folders that Read, Grep and Glob may reach (`readableRoots`), read
   /// again at each call, so a folder that the user removes is refused at once.
-  /// None by default. The Claude backend only: the Codex backend writes its
-  /// Seatbelt profile from config.json before each turn (`refreshCodexSandbox`).
+  /// None by default. The CLI's Seatbelt profile takes the list when the CLI
+  /// starts (`spawnSandboxed`). The Claude backend only: the Codex backend
+  /// writes its Seatbelt profile from config.json before each turn
+  /// (`refreshCodexSandbox`).
   readableFolders?: () => readonly string[];
 }
 
@@ -648,6 +665,13 @@ export class AgentSession implements Agent {
   private input?: AsyncQueue<SDKUserMessage>;
   private pending: PendingTask[] = [];
   private firstRunAfterSpawn = false;
+  /// The readable folders that the running CLI's Seatbelt profile allows, as
+  /// listed, and as one string (`readableKey`). Recorded when the session
+  /// starts a CLI, before the SDK calls the spawn hook, so the profile, this
+  /// record and the next note agree.
+  private spawnedList?: readonly string[];
+  private spawnedRoots?: ReadonlySet<string>;
+  private spawnedFolders?: string;
 
   constructor(
     private readonly opts: AgentSessionOptions,
@@ -700,6 +724,16 @@ export class AgentSession implements Agent {
       log(`${this.opts.name}: recycling session (abandoned task at queue head)`);
       this.reset();
     }
+    // The CLI's Seatbelt profile is fixed when it starts. After a change to
+    // the readable folders, an idle session starts a new CLI, so that a folder
+    // that the user adds can be read. The recap replays the transcript, not
+    // the lane's own earlier answers, as after any recycle. A busy session
+    // keeps its CLI until it is idle (decided 2026-11-11).
+    if (this.input && this.pending.length === 0 && this.spawnedFolders !== undefined
+        && this.spawnedFolders !== this.readableKey()) {
+      log(`${this.opts.name}: readable folders changed; starting a new CLI`);
+      this.reset();
+    }
     try {
       this.ensure();
     } catch (err) {
@@ -731,8 +765,7 @@ export class AgentSession implements Agent {
     // A session that reads local files starts each task with the folders that
     // it can read now (`readableFoldersNote`): a warm session outlives a
     // change to the list, so its system prompt cannot hold it.
-    const folders = this.opts.readableFolders;
-    const note = folders ? `${readableFoldersNote(this.policy.home, folders())}\n\n` : "";
+    const note = this.opts.readableFolders ? `${readableFoldersNote(this.policy.home, this.readableNow())}\n\n` : "";
     this.input!.push({
       type: "user",
       message: { role: "user", content: note + (cold && recap ? recap + task : task) },
@@ -758,9 +791,75 @@ export class AgentSession implements Agent {
     return Promise.race([answer, timeout]).finally(() => clearTimeout(timer));
   }
 
+  /// The CLI's stderr, to the log. Without this the CLI's stderr is dropped
+  /// and a spawn-time crash surfaces only as "exited with code 1" (the v0.2.0
+  /// DMG entitlement break was invisible for exactly this reason). Per line,
+  /// not per chunk: a crash dump arrives as one multi-KB chunk with the actual
+  /// error at the end — a chunk-level cap would log only its prefix.
+  private logStderr = (data: string): void => {
+    for (const raw of data.split("\n")) {
+      const line = raw.trim();
+      if (line) log(`${this.opts.name}: cli stderr: ${line.slice(0, 400)}`);
+    }
+  };
+
+  /// The folders that the agent can read now: those listed now that the
+  /// running CLI's Seatbelt profile also allows. A folder added while the
+  /// session is busy is left out until a new CLI starts, so the note never
+  /// names a folder that the kernel refuses (code review 2026-11-11).
+  /// A folder is judged by its resolved forms, not by its spelling: `~/Notes`
+  /// and its absolute path are the same grant.
+  private readableNow(): readonly string[] {
+    const now = this.opts.readableFolders?.() ?? [];
+    const roots = this.spawnedRoots;
+    if (!roots) return now;
+    return honouredFolders(this.policy.home, now, REALPATH)
+      .filter((h) => h.forms.every((form) => roots.has(form)))
+      .map((h) => h.folder);
+  }
+
+  /// The readable folders as the policy honours them now, as one string.
+  private readableKey(): string {
+    return JSON.stringify(readableRoots(this.policy.home, this.opts.readableFolders?.() ?? []));
+  }
+
+  /// Start the CLI under a Seatbelt profile of its own (GHSA-6xc8-f55f-jxqr,
+  /// fault 2): the kernel holds the CLI and its stdio connectors to the
+  /// readable folders, behind the tool gate. The subscription login needs the
+  /// keychain; an API key, which the app passes in the environment, does not.
+  /// The CLI writes only its transcripts and its connectors' logs in the home
+  /// folder, in folders that it cannot create under the profile, so they are
+  /// created here. Without them the CLI still answers, but keeps no
+  /// transcript.
+  private spawnSandboxed = (o: SpawnOptions): SpawnedProcess => {
+    const { home } = this.policy;
+    const cwd = o.cwd ?? this.policy.cwd;
+    // The CLI takes an empty value as unset (`CLAUDE_CONFIG_DIR || homedir()`).
+    const configDir = o.env.CLAUDE_CONFIG_DIR || undefined;
+    for (const dir of claudeWriteFolders(home, cwd, configDir)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch (err) {
+        log(`${this.opts.name}: could not create ${dir}: ${err}`);
+      }
+    }
+    const profile = claudeSandboxProfile(home, {
+      folders: this.spawnedList ?? [],
+      cliRoot: path.dirname(o.command),
+      cwd,
+      keychain: !o.env.ANTHROPIC_API_KEY,
+      configDir,
+    });
+    return spawnClaudeSandboxed(o, profile, this.logStderr);
+  };
+
   /// The sandbox policy (toolDecision) for this session's working directory.
   private get policy(): SandboxPolicy {
-    const readable = this.opts.readableFolders ?? ((): readonly string[] => []);
+    // The folders that the running CLI's profile also allows: a folder added
+    // while the session is busy is refused by the gate too, so the agent gets
+    // a refusal that names what it can read, not an `EPERM` (code review
+    // 2026-11-14). A removed folder is refused at once.
+    const readable = (): readonly string[] => this.readableNow();
     return {
       home: this.opts.home ?? HOME,
       cwd: this.opts.cwd ?? agentCwd(this.opts.home ?? HOME),
@@ -847,6 +946,12 @@ export class AgentSession implements Agent {
     fs.mkdirSync(this.policy.cwd, { recursive: true });
     log(`${this.opts.name}: spawning SDK subprocess (cold-start)`);
     this.firstRunAfterSpawn = true;
+    if (SEATBELT) {
+      this.spawnedList = this.opts.readableFolders?.() ?? [];
+      const roots = readableRoots(this.policy.home, this.spawnedList);
+      this.spawnedRoots = new Set(roots);
+      this.spawnedFolders = JSON.stringify(roots);
+    }
     const q = new AsyncQueue<SDKUserMessage>();
     this.input = q;
     // Give this spawn its own pending queue, captured by the loop below. After a
@@ -879,6 +984,7 @@ export class AgentSession implements Agent {
           if (line && current && !current.settled) current.progress?.onActivity?.(line);
         })] }] },
         canUseTool: this.canUseTool,
+        ...(SEATBELT ? { spawnClaudeCodeProcess: this.spawnSandboxed } : {}),
         // Load the user's own Claude configuration (CLAUDE.md etc.) — that is
         // where personal context like vault locations belongs, not in Advisor.
         // Components that don't need it (the classifier) pass [] to skip it.
@@ -891,17 +997,8 @@ export class AgentSession implements Agent {
         // Text deltas as the model writes, so a card fills in word by word
         // rather than one whole block at the end of the turn.
         includePartialMessages: true,
-        // Without this the CLI's stderr is dropped and a spawn-time crash
-        // surfaces only as "exited with code 1" (the v0.2.0 DMG entitlement
-        // break was invisible for exactly this reason). Per line, not per
-        // chunk: a crash dump arrives as one multi-KB chunk with the actual
-        // error at the end — a chunk-level cap would log only its prefix.
-        stderr: (data: string) => {
-          for (const raw of data.split("\n")) {
-            const line = raw.trim();
-            if (line) log(`${this.opts.name}: cli stderr: ${line.slice(0, 400)}`);
-          }
-        },
+        // The sandboxed spawn passes the same handler itself.
+        stderr: this.logStderr,
       },
     });
     this.stream = stream;

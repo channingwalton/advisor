@@ -2,11 +2,10 @@ import { test, after, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
-import os from "node:os";
 import path from "node:path";
 import { AgentSession, type AgentSessionOptions } from "./agent.js";
 import { mergeConfig } from "./config.js";
-import { fakeModelQuery, sse, STUB_MCP } from "./fakeModel.js";
+import { fakeModelQuery, sse, STUB_MCP, SYNTHETIC_HOME_ROOT } from "./fakeModel.js";
 import { cardLaneOptions } from "./lanes.js";
 import { classifierOptions } from "./trigger.js";
 
@@ -19,6 +18,9 @@ import { classifierOptions } from "./trigger.js";
 // user's connectors; no real credentials or network.
 
 let home: string;
+/// The stub's folder, listed as readable: on macOS the CLI's Seatbelt profile
+/// lets a connector read its own script only in a readable folder.
+let connectors: string;
 let server: http.Server;
 /// The tool names each request offered, by the prompt that sent it.
 const offered = new Map<string, string[]>();
@@ -26,10 +28,12 @@ const offered = new Map<string, string[]>();
 type Message = { role: string; content: string | { type: string; text?: string }[] };
 
 before(async () => {
-  home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-sdk-classifier-")));
+  home = fs.realpathSync(fs.mkdtempSync(path.join(SYNTHETIC_HOME_ROOT, "advisor-sdk-classifier-")));
   const claudeDir = path.join(home, ".claude");
   fs.mkdirSync(claudeDir);
-  const stub = path.join(home, "stub-mcp.mjs");
+  connectors = path.join(home, "connectors");
+  fs.mkdirSync(connectors);
+  const stub = path.join(connectors, "stub-mcp.mjs");
   fs.writeFileSync(stub, STUB_MCP);
   // A user-scope MCP server, as `claude mcp add --scope user` writes it.
   fs.writeFileSync(path.join(claudeDir, ".claude.json"), JSON.stringify({
@@ -63,7 +67,7 @@ after(() => {
 /// Run one turn with `opts` and return the tool names its request offered.
 async function offeredTools(prompt: string, opts: AgentSessionOptions): Promise<string[]> {
   const { port } = server.address() as { port: number };
-  const s = new AgentSession({ ...opts, home }, fakeModelQuery(home, port));
+  const s = new AgentSession({ ...opts, home, readableFolders: () => [connectors] }, fakeModelQuery(home, port));
   try {
     const r = await s.run(`PROMPT:${prompt}`, undefined, 30_000);
     assert.equal(r.error, undefined, `${prompt}: ${r.error}`);

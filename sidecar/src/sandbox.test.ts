@@ -655,7 +655,8 @@ test("#sandbox-readable-folders each path refusal names the folders that the age
   for (const [tool, input] of calls) {
     const d = toolDecision(tool, input, policy);
     const message = d.behavior === "deny" ? d.message : "";
-    assert.match(message, /: "\/home\/u\/Documents", "\/home\/u\/work"\.$/, JSON.stringify(input));
+    assert.match(message, /: "\/home\/u\/Documents", "\/home\/u\/work"\. /, JSON.stringify(input));
+    assert.match(message, /put the folder in `path`/, JSON.stringify(input));
     assert.doesNotMatch(message, /"[^"]*(Library|relative)"/, JSON.stringify(input));
   }
   // The folders that the user lists, but that the policy refuses, are no help.

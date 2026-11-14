@@ -240,8 +240,9 @@ Ask box.
 - **Agent:** the backend (one provider and model for the classifier, the
   research lanes and the query lane), the card **effort**, authentication, the
   number of parallel agents, and connector actions.
-- **Files:** the folders that Claude agents may read (see [Safety](#safety)).
-  A change applies at once.
+- **Files:** the folders that the agents may read (see [Safety](#safety)).
+  Claude's own file tools refuse a removed folder at once. Other changes apply
+  from the next card, or when a busy agent is idle.
 - **Triggers:** sensitivity (conservative, balanced or eager), and a toggle for
   each card kind.
 - **Transcription:** system-audio capture and the speech-recognition locale.
@@ -299,10 +300,16 @@ On **Claude**, a tool policy limits each research agent call:
   actions**.
 - Files can be read, but not changed, only inside your readable folders. Add
   and remove them in Preferences → **Files**. There are none by default, so the
-  agents read no local file until you add a folder. A change applies at once,
-  also to a card that is in progress. Each Claude task names the readable
-  folders to the agent, so it searches there first. A folder outside your home
-  folder is not used, and nor is a symlink that leads out of it.
+  agents read no local file until you add a folder. Claude's own file tools
+  refuse a removed folder at once, also in a card that is in progress. Other
+  changes apply from the next card. An agent that is busy, or has cards
+  waiting, keeps its folders until it is idle: until then its connectors can
+  read a removed folder, and it cannot read an added one. Each Claude task
+  names the readable folders to the agent, so it searches there first. A
+  folder outside your home folder is not used, and nor is a symlink that leads
+  out of it. Connectors can write only temp files and the agents' own logs,
+  and with a subscription login the login keychain, where Claude keeps that
+  login.
 - A readable folder that is, holds or sits inside a credential path is not
   used. Credential paths are `~/.ssh`, `~/.aws`, `~/.claude`, `~/.codex`,
   keychains, shell history, browser profiles and more. So `~` and `~/Library`
@@ -311,6 +318,12 @@ On **Claude**, a tool policy limits each research agent call:
   treats as the same name, such as a different letter case. A file search must
   name a folder inside a readable folder.
 - No shell, and no other Claude Code tool (skills, scheduling, sub-agents, …).
+- On macOS, Claude Code and the connectors that it starts on your Mac also run
+  under a macOS Seatbelt profile. In your home folder they read only your
+  readable folders and what Claude Code needs: its `~/.claude` settings,
+  `~/.claude.json`, its program files, its working folder and, with a
+  subscription login, your login keychain. A connector that reads its own files in
+  your home folder starts only when that folder is a readable folder.
 
 The policy applies before the permission rules of Claude Code, so allow rules
 in your Claude settings cannot widen it.

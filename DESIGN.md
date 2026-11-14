@@ -346,7 +346,9 @@ symlink.
   tokens; browser profiles; and the profiles of Electron apps (Slack, Discord,
   VS Code, Cursor), which hold session cookies.
 
-The fault with connector arguments is still open. `toolDecision` judges a
+The fault with connector arguments stayed open in this change (closed on
+2026-11-11 for the connectors that the Claude CLI starts: see *The Claude CLI
+runs under a Seatbelt profile*). `toolDecision` judges a
 connector tool by its name only, so the read verb of a local filesystem
 connector passes `read_file {path: "~/.ssh/id_rsa"}`, and `ReadMcpResource`
 passes a `file:` URI. Rejected for it:
@@ -432,6 +434,13 @@ not drop a folder that the sidecar uses.
   it. Codex does not get the note: it has no file tool of its own (*Codex
   shell stays closed*), and its Seatbelt profile applies the list (*Codex
   reads only the readable folders*).
+- **The note says how to call Glob** (2026-11-12). With a notes folder in
+  `path`, the CLI's Glob found nothing for a pattern that started with folder
+  names (`A/B/*.md`), with or without the Seatbelt profile. With `A/B` in
+  `path`, `*.md` found the folder's 12 notes. A card then decided that the
+  notes did not exist, and searched for a minute. So the note tells the
+  agent to put the folder in `path` and to start the pattern with `*` or
+  `**`. In one run with the note, the same question took one Glob and 8 s.
 
 The rest of the Preferences window never writes the list (see *Readable
 folders in Preferences*), so it cannot add back a folder that the user
@@ -450,8 +459,145 @@ Limits:
 
 - Codex applies the list in its Seatbelt profile since 2026-11-11: see
   *Codex reads only the readable folders*.
-- Connector arguments are still not checked. The Seatbelt profile for the
-  Claude CLI and its stdio connectors will close that fault.
+- Connector arguments: since 2026-11-11 the kernel holds the Claude CLI's
+  stdio connectors to the readable folders (see *The Claude CLI runs under a
+  Seatbelt profile*). The tool gate still judges a connector by its name only.
+
+### The Claude CLI runs under a Seatbelt profile (2026-11-11, GHSA-6xc8-f55f-jxqr)
+
+Decision: on macOS, `AgentSession` starts each Claude CLI through the SDK's
+`spawnClaudeCodeProcess` as `sandbox-exec -p <profile> claude …`
+(`claudeSandbox.ts`). The profile has the read rules of the Codex profile
+(`seatbelt.ts`). The home folder is refused. Then these are allowed, each only
+when `readableRoots` honours it: the readable folders, the CLI's folder, its
+working folder, a `TMPDIR` in the home folder and a `CLAUDE_CONFIG_DIR`. Also
+allowed is the CLI's own state: `~/.claude`, `~/.claude.json` with its backup
+and lock, and in subscription mode the login keychain. The parent folders
+give metadata only, and the credential denylist comes last. Writes are
+confined (decided 2026-11-14): see the bullet below. On Linux (CI) the CLI
+starts as the SDK starts it.
+
+Reason: fault 2 of the advisory. The tool gate judges a connector tool by its
+name only, and a stdio connector reads with the rights of its own process. So
+`read_file {path: "~/.config/rclone/rclone.conf"}` returned the file. A stdio
+connector is a child of the CLI, so it inherits the profile.
+
+- **The login keychain** (decided 2026-11-11). The subscription login is in
+  the login keychain. Under a profile without `~/Library/Keychains`,
+  `claude auth status` said `loggedIn: false`. The CLI reads and writes its
+  login through `security`. In subscription mode the profile allows
+  `login.keychain-db`, the metadata of its folder, and the lock files that
+  `security` keeps beside each keychain (`.fl` and a hash, empty). The lock
+  files have no fixed name, so a regular expression allows them. Without
+  them a write failed (exit 161), so the CLI could not save a refreshed
+  login. Since writes are confined, the profile also lets the CLI write
+  `login.keychain-db`, its lock files, and the temp files that `security`
+  renames over it (`login.keychain-db.` and a suffix). Without the temp files
+  a save failed with exit 161 again (2026-11-14). The other files in
+  `~/Library/Keychains` stay refused. With an API
+  key in the environment (API-key mode), the CLI needs no keychain, and the
+  profile keeps it refused. In subscription mode, the CLI and its connectors
+  can query the login keychain, as before. A connector that can run a
+  command can read, without a prompt, each item whose access list trusts
+  `/usr/bin/security`: the CLI's own login, and the tokens that other
+  command-line tools save through `security`. It can also overwrite or move
+  the keychain file. The profile cannot tell these calls from the CLI's own,
+  which use the same program (code review 2026-11-14). The tool gate still
+  refuses the agent's own reads there.
+- **The profile is fixed when the CLI starts.** A Claude session is
+  long-lived, and the profile goes inline (`-p`), so each CLI has the policy of
+  its own start and no file is shared. After a change to the readable folders,
+  an idle session starts a new CLI at its next task: about one cold start for
+  each lane. The recap replays the transcript, but not the lane's own earlier
+  answers, as after any recycle (*Recycled lanes replay the conversation*). So
+  an Ask that refers to an earlier answer of that lane loses its referent once.
+  A busy session keeps its CLI until it is idle. Meanwhile the note at the
+  start of a task, the tool gate and its refusals use only the folders that
+  the running CLI's profile also allows (`readableNow`), so they never name or
+  pass a folder that the kernel refuses (code review 2026-11-11). Before
+  2026-11-14 the gate used the new list: it passed an added folder, the kernel
+  refused it with `EPERM`, and the refusals named it (code review 2026-11-14).
+  The tool gate refuses a removed folder at once, but a connector can read it
+  until the session is idle at the start of a task, when a new CLI starts. A
+  session that always has a task waiting keeps its CLI longer.
+- **The kernel refuses some calls before the gate.** Glob checks its folder
+  with `stat` before the PreToolUse hook. The kernel now refuses that `stat`
+  for a folder outside the readable folders (`EPERM`). So the agent no longer
+  learns whether such a folder exists, and that refusal does not name the
+  readable folders. The note at the start of each task still names them.
+- **Writes are confined** (decided 2026-11-14, replacing "writes are not
+  confined" of 2026-11-11). The code review of 2026-11-14 found that open
+  writes defeat the read rules. A `rename` needs a write of its source only,
+  so a connector with "Allow connector actions" could move `~/.ssh`, or
+  `~/Library` with the keychain in it, into a readable folder and read the
+  files there. A hard link and a clone copy were refused, because they read
+  the source. The user decided that the CLI and its connectors only read,
+  except for the CLI's transcripts and logs. So the profile lets them write
+  only these:
+  - the temp folders and `/dev`, as for Codex (`TEMP_ROOTS` in
+    `seatbelt.ts`). A temp folder in the home folder only when the policy
+    honours it as a listed folder (`writableTemps`);
+  - the CLI's transcripts for its working folder
+    (`<config folder>/projects/<name>`);
+  - its connectors' logs (`~/Library/Caches/claude-cli-nodejs/<name>`);
+  - in subscription mode, the login keychain (see above).
+
+  `claudeWriteFolders` gives the two folders. The CLI names them after its
+  resolved working folder, with each character other than a letter or a digit
+  as `-` (CLI 2.1.173). A name of more than 200 characters gets a hash that
+  Advisor does not compute, so such a folder gets no allowance. The CLI cannot
+  create the folders under the profile, so the session creates them before
+  it starts the CLI. Every other write is refused: the readable folders,
+  `~/.claude.json`, `~/.claude/settings.json`, and the rest of the home
+  folder. In a run on a synthetic home with no write in the home folder, the
+  CLI still answered and called a connector, and kept only no transcript,
+  connector log or config update. So the CLI needs none of the refused writes
+  to answer.
+
+Verified: `claudeSandbox.test.ts` checks the policy, and processes started
+through the spawn hook on a fake home. A readable folder, the state and the
+CLI folder are read. An unlisted folder, a store, and (with an API key) the
+keychain are refused, also for a child process. With a subscription login,
+the login keychain and its lock files are read, and another keychain file
+and a listing of the folder are refused. On a throwaway keychain under the
+profile, `security add-generic-password -U` wrote and updated an item, as
+without a profile. `sandbox.sdk.test.ts` against
+the real CLI 2.1.173: each earlier case still holds. A filesystem connector
+reads a file in a readable folder, and gets `EPERM` for an unnamed store and
+for the keychain. A folder added during a session is read at the next task.
+Since 2026-11-14, with confined writes: in `claudeSandbox.test.ts`, a process
+writes the temp folder and the two write folders, and cannot write a
+readable folder, `~/.claude/settings.json`, `~/.claude.json` or the home
+folder. It cannot move a store, an unlisted folder or `Library` into a
+readable folder. A subscription login can save the login keychain as
+`security` does, and an API-key login cannot. In `sandbox.sdk.test.ts`, a
+connector's `move_file` of `~/.ssh` gets `EPERM` with connector actions on,
+and the real CLI writes its transcript in its folder. With open writes, the
+connector moved the store. On a throwaway keychain under the confined
+profile, `security` added, updated, found and deleted an item. On the real
+home folder, a real card read the notes, called a claude.ai connector, and
+wrote its transcript and connector logs. The CLI wrote nothing to stderr.
+On the real home folder, with no model call: `claude auth status` gave
+`loggedIn: true`, `claude mcp list` connected the claude.ai connectors and a
+local one, and `~/Desktop` and `~/.ssh` were refused.
+
+Cost (accepted 2026-11-11, as for Codex): a stdio connector that reads its own
+code or data in the home folder fails, unless that folder is readable. A
+connector that searches its working folder finds nothing there, because it is
+the empty agent folder. Since 2026-11-14, a connector also cannot write, move
+or delete a file in the home folder, outside the temp folders, and the CLI
+that Advisor starts no longer updates `~/.claude.json` (its start counters,
+tips and project settings).
+
+Residual: the CLI and its connectors can read `~/.claude` and `~/.claude.json`,
+which hold MCP server settings and their tokens, and in subscription mode
+read and write the login keychain, with the items that trust `security`
+(see *The login keychain*). They can write the CLI's transcript and
+connector-log folders for Advisor's working folder, which Advisor does not
+read back. A local connector that runs as its own server (HTTP or SSE)
+is not a child of the CLI, so the profile does not hold it, and the tool gate
+still judges its tools by name only. The profile applies on macOS only, the
+one platform that Advisor runs on.
 
 ### Readable folders in Preferences (2026-11-10)
 
@@ -1558,9 +1704,11 @@ and `~/.codex-global-state.json`, in the listed and the resolved form), the
 platform package of the CLI, the agent working folder, and each writable root
 in the home folder (what the CLI writes, it reads back). Each of these except
 the state is a read root only when `readableRoots` honours it as a listed
-folder, so a `TMPDIR` of `~/Library` stays write-only and does not open the
-stores in it that the denylist does not name (code review 2026-11-11). (The
-write side is older: since 2026-08-10, such a `TMPDIR` is writable.) It allows the
+folder, so a `TMPDIR` of `~/Library` does not open the stores in it that the
+denylist does not name (code review 2026-11-11). Since 2026-11-14 such a
+`TMPDIR` is not writable either (`writableTemps` in `seatbelt.ts`): a process
+could move a store out of it to `/tmp`, which it can write and read (code
+review 2026-11-14). From 2026-08-10 to then it was writable. It allows the
 metadata of each folder on the way to these, by exact path, because the CLI
 resolves its paths (`canonicalize`). The denylist stays as the last read
 rule. The CLI now runs in the agent working folder, not in `$HOME`.

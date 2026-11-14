@@ -12,7 +12,7 @@ import type { AgentSessionOptions } from "./agent.js";
 import { CodexAgentSession, codexClientOptions, codexConfigServers, codexWorkingDirectory } from "./codex.js";
 import { installCodexSandbox, realpathOrSelf, vendoredCodexPath, vendoredCodexRoot } from "./codexSandbox.js";
 import { mergeConfig } from "./config.js";
-import { STUB_MCP } from "./fakeModel.js";
+import { STUB_MCP, SYNTHETIC_HOME_ROOT } from "./fakeModel.js";
 import { cardLaneOptions } from "./lanes.js";
 import { classifierOptions } from "./trigger.js";
 
@@ -169,7 +169,7 @@ function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: T
 
 before(async () => {
   if (darwin.skip) return;
-  home = realpathOrSelf(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-sdk-codex-")));
+  home = realpathOrSelf(fs.mkdtempSync(path.join(SYNTHETIC_HOME_ROOT, "advisor-sdk-codex-")));
   const codexHome = path.join(home, ".codex");
   fs.mkdirSync(codexHome);
   fs.mkdirSync(path.join(home, "sandbox"));

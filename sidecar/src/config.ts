@@ -29,7 +29,8 @@ export interface AdvisorConfig {
   /// The folders that the agents may read (absolute, or `~/…`). None by
   /// default: a credential store that the denylist does not name stays out of
   /// reach (GHSA-6xc8-f55f-jxqr). The Claude policy reads it from the file at
-  /// each file-tool call, and the Codex Seatbelt profile before each turn
+  /// each file-tool call, the Claude CLI's Seatbelt profile when the CLI
+  /// starts, and the Codex Seatbelt profile before each turn
   /// (`loadReadableFolders`, `refreshCodexSandbox`).
   readableFolders: string[];
 }

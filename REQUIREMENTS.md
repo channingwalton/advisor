@@ -137,6 +137,9 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - Under the Seatbelt profile, a Codex card lane runs no shell command: the CLI cannot apply its own sandbox inside the profile, so a command fails before it reads an ordinary file or a denied path (such as `~/.ssh`). The user guide says that Codex cards cannot run shell commands. `#codex-shell`
 - N13. **Codex reads (GHSA-6xc8-f55f-jxqr):**
   - In the home folder, the Codex CLI and each process that it starts read only the readable folders, Codex's own state, the CLI's program files and its working folder; the credential paths stay refused. A folder that the user removes is refused from the next turn. A connector that reads its own files in no readable folder does not start. `#codex-readable-folders`
+- N14. **Claude CLI reads and writes (GHSA-6xc8-f55f-jxqr):**
+  - On macOS, in the home folder, the Claude CLI and each process that it starts, its stdio connectors among them, read only the readable folders, the CLI's state (`~/.claude`, `~/.claude.json`), its program files and its working folder, and the login keychain only with a subscription login. A connector cannot read a file outside the readable folders. An idle session takes a changed list at its next task. `#claude-seatbelt`
+  - They write only the temp folders, the CLI's transcripts and its connectors' logs for its working folder, and with a subscription login the login keychain. So a connector cannot move a store into a readable folder to read it there. `#claude-seatbelt`
 
 ## Risks
 

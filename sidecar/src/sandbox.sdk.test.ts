@@ -5,7 +5,8 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { AgentSession } from "./agent.js";
-import { fakeModelQuery, sse, stubMcp } from "./fakeModel.js";
+import { claudeWriteFolders } from "./claudeSandbox.js";
+import { fakeModelQuery, sse, stubMcp, SYNTHETIC_HOME_ROOT } from "./fakeModel.js";
 
 // The sandbox against the real bundled Claude CLI, not just the policy
 // predicates. The SDK approves some calls before `canUseTool` is ever asked —
@@ -25,6 +26,49 @@ const DENYLIST = "non-sensitive file or folder";
 const NOT_READABLE = "folders that the user lists as readable";
 /// An ordinary file in a readable folder that the Grep pattern matches.
 const MATCH = "SYNTHETIC_ORDINARY_MATCH";
+/// A file in a folder that a test lists as readable only during a session.
+const LATER = "SYNTHETIC_LATER_CONTENT";
+/// On macOS the CLI runs under a Seatbelt profile (claudeSandbox.ts). The
+/// kernel then refuses a file operation that the CLI makes before the tool
+/// gate sees the call, such as Glob's `stat` of its folder.
+const SEATBELT = process.platform === "darwin";
+const KERNEL = "EPERM: operation not permitted";
+/// Refused by the tool gate for `reason`, or, before the gate, by the kernel.
+const refused = (out: string, reason: string): boolean => out.includes(reason) || (SEATBELT && out.includes(KERNEL));
+/// A connector with a tool that reads the file at its `path` argument, as a
+/// filesystem connector does. The tool gate does not judge connector
+/// arguments; on macOS the kernel does (GHSA-6xc8-f55f-jxqr, fault 2).
+const FILES_MCP = `
+import fs from "node:fs";
+import readline from "node:readline";
+const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.id === undefined) return;
+  if (msg.method === "initialize") {
+    send({ jsonrpc: "2.0", id: msg.id, result: {
+      protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "files", version: "1" },
+    } });
+  } else if (msg.method === "tools/list") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { tools: [{
+      name: "read_file", description: "Read a file", inputSchema: { type: "object", properties: { path: { type: "string" } } },
+    }, {
+      name: "move_file", description: "Move a file",
+      inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } } },
+    }] } });
+  } else if (msg.method === "tools/call" && msg.params.name === "move_file") {
+    let text;
+    try { fs.renameSync(msg.params.arguments.from, msg.params.arguments.to); text = "MOVED"; } catch (e) { text = "MOVE_FAILED:" + e.code; }
+    send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }] } });
+  } else if (msg.method === "tools/call") {
+    let text;
+    try { text = "FILE:" + fs.readFileSync(msg.params.arguments.path, "utf8"); } catch (e) { text = "READ_FAILED:" + e.code; }
+    send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }] } });
+  } else {
+    send({ jsonrpc: "2.0", id: msg.id, result: {} });
+  }
+});
+`;
 
 let home: string;
 let work: string;
@@ -78,6 +122,14 @@ function scripted(id: string): { name: string; input: Record<string, unknown> } 
     };
     // The same patterns for a real folder, as a control: they do match.
     case "globRealNamed": return { name: "Glob", input: { path: p("Documents"), pattern: "**/real/*" } };
+    // A connector's path argument, which only the kernel judges.
+    case "connectorStore": return { name: "mcp__files__read_file", input: { path: p(".config", "rclone", "rclone.conf") } };
+    case "connectorNotes": return { name: "mcp__files__read_file", input: { path: p("Documents", "notes.txt") } };
+    case "connectorKeychain": return { name: "mcp__files__read_file", input: { path: p("Library", "Keychains", "login.keychain-db") } };
+    // A store moved into a readable folder could be read there.
+    case "connectorMove": return { name: "mcp__files__move_file", input: { from: p(".ssh"), to: p("Documents", "moved") } };
+    // A file in a folder that becomes readable during the session.
+    case "laterPlan": return { name: "Read", input: { file_path: p("later", "plan.txt") } };
     case "grepRealNamed": return {
       name: "Grep", input: { path: p("Documents"), pattern: "SYNTHETIC", glob: "**/real/*", output_mode: "content" },
     };
@@ -121,10 +173,13 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, raw: string
 }
 
 before(async () => {
-  home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-sdk-sb-")));
+  // Not in a temp folder: the profile lets the CLI write the temp folders, and
+  // the tests check that it cannot write the home folder.
+  home = fs.realpathSync(fs.mkdtempSync(path.join(SYNTHETIC_HOME_ROOT, "advisor-sdk-sb-")));
   work = path.join(home, "work");
   for (const dir of [
     ".ssh", ".ssh/sub", ".claude", ".config", ".config/rclone", "Documents", "Documents/real", "work", "work/sub",
+    "later", "connectors", "Library", "Library/Keychains",
   ]) {
     fs.mkdirSync(path.join(home, dir));
   }
@@ -139,6 +194,8 @@ before(async () => {
   fs.writeFileSync(path.join(home, "Documents", "notes.txt"), NOTES);
   fs.writeFileSync(path.join(home, "Documents", "match.md"), MATCH);
   fs.writeFileSync(path.join(home, "Documents", "real", "inner.md"), MATCH);
+  fs.writeFileSync(path.join(home, "later", "plan.txt"), LATER);
+  fs.writeFileSync(path.join(home, "Library", "Keychains", "login.keychain-db"), SECRET);
   // The user's own settings allow a path the denylist refuses — the shape found
   // in a real ~/.claude/settings.json (`Read(~/.claude/**)`).
   fs.writeFileSync(
@@ -162,14 +219,14 @@ after(() => {
 /// A session whose CLI runs in the synthetic home against the fake endpoint.
 /// `~/Documents` and `~/work` are readable unless a test lists other folders.
 /// The policy reads the list at each call, as it reads config.json.
-function session(cwd: string, readable = ["Documents", "work"].map((d) => path.join(home, d))): AgentSession {
+function session(cwd: string, readable = ["Documents", "work"].map((d) => path.join(home, d)), allowMcpActions = false): AgentSession {
   const { port } = server.address() as { port: number };
   const queryFn = fakeModelQuery(home, port);
   const s = new AgentSession(
     {
       name: "sdk-sandbox", systemPrompt: "test", model: "claude-test", allowedTools: ["WebSearch", "WebFetch"],
       // A new list at each call, as a read of config.json gives.
-      cwd, home, readableFolders: () => [...readable],
+      cwd, home, allowMcpActions, readableFolders: () => [...readable],
     },
     queryFn
   );
@@ -229,7 +286,7 @@ test("#sandbox-fold-spelling a spelling that the filesystem folds to a denied pa
   if (!fs.existsSync(path.join(home, ".\u00DFh"))) return t.skip("this filesystem does not fold ß");
   const glob = await toolResult(session(work), "foldedGlob");
   assert.ok(!glob.includes(HIDDEN_NAME), glob);
-  assert.ok(glob.includes(DENYLIST), glob);
+  assert.ok(refused(glob, DENYLIST), glob);
 });
 
 test("#sandbox-credential-stores a credential store from the extended list is not read", async () => {
@@ -264,7 +321,60 @@ test("#sandbox-readable-folders a credential store outside every readable folder
   assert.ok(read.includes(NOT_READABLE), read);
   const glob = await toolResult(session(work), "unnamedGlob");
   assert.ok(!glob.includes("rclone.conf"), glob);
-  assert.ok(glob.includes(NOT_READABLE), glob);
+  assert.ok(refused(glob, NOT_READABLE), glob);
+});
+
+// The CLI's Seatbelt profile is fixed when it starts. An idle session starts a
+// new CLI after the list changes, so a folder that the user adds is readable
+// at the next task, not only at the next recording (decided 2026-11-11).
+test("#claude-seatbelt a folder added during a session is read at the next task", async () => {
+  const readable = [path.join(home, "Documents")];
+  const s = session(work, readable);
+  const before = await toolResult(s, "notes");
+  assert.ok(before.includes(NOTES), before);
+  readable.push(path.join(home, "later"));
+  const after = await toolResult(s, "laterPlan");
+  assert.ok(after.includes(LATER), after);
+});
+
+// Fault 2: a connector reads with the rights of its own process, and the tool
+// gate does not judge its arguments. Under the CLI's Seatbelt profile, the
+// connector inherits the readable folders.
+test("#claude-seatbelt a connector cannot read a file outside the readable folders", { skip: !SEATBELT && "requires macOS Seatbelt" }, async (t) => {
+  const connectors = path.join(home, "connectors");
+  const userConfig = path.join(home, ".claude", ".claude.json");
+  fs.writeFileSync(path.join(connectors, "files-mcp.mjs"), FILES_MCP);
+  fs.writeFileSync(userConfig, JSON.stringify({
+    mcpServers: { files: { type: "stdio", command: process.execPath, args: [path.join(connectors, "files-mcp.mjs")] } },
+  }));
+  t.after(() => fs.rmSync(userConfig, { force: true }));
+  // "Allow connector actions" on: the kernel, not the tool gate, refuses the move.
+  const s = session(work, [path.join(home, "Documents"), connectors], true);
+  const notes = await toolResult(s, "connectorNotes");
+  assert.ok(notes.includes(`FILE:${NOTES}`), notes);
+  const store = await toolResult(s, "connectorStore");
+  assert.ok(!store.includes(SECRET), store);
+  assert.ok(store.includes("READ_FAILED:EPERM"), store);
+  // The CLI here has an API key in its environment, so it needs no keychain,
+  // and the profile keeps it refused.
+  const keychain = await toolResult(s, "connectorKeychain");
+  assert.ok(!keychain.includes(SECRET), keychain);
+  assert.ok(keychain.includes("READ_FAILED:EPERM"), keychain);
+  // Writes are confined, so a connector cannot move a store into a readable
+  // folder to read it there (code review 2026-11-14).
+  const move = await toolResult(s, "connectorMove");
+  assert.ok(move.includes("MOVE_FAILED:EPERM"), move);
+  assert.ok(fs.existsSync(path.join(home, ".ssh", "synthetic-key")));
+});
+
+// The CLI saves its transcript in its own folder, which the profile lets it
+// write. A CLI release that names the folder another way would lose the
+// transcripts without an error, so this checks the name (2026-11-14).
+test("#claude-seatbelt the CLI writes its transcript under the profile", { skip: !SEATBELT && "requires macOS Seatbelt" }, async () => {
+  const s = session(work);
+  await toolResult(s, "notes");
+  const [transcripts] = claudeWriteFolders(home, work, path.join(home, ".claude"));
+  assert.ok(fs.readdirSync(transcripts).some((f) => f.endsWith(".jsonl")), transcripts);
 });
 
 test("#sandbox-readable-folders an ordinary file is not read when no folder is listed, or only the home folder", async () => {
@@ -350,14 +460,17 @@ test("#sandbox-mcp-gate a connector read tool runs; a sharing tool and a compoun
   // A user-scope connector with a read tool and two action tools, as
   // `claude mcp add --scope user` writes it — registered for this test only, so
   // the path cases above don't each spawn a server they never use.
-  const stub = path.join(home, "stub-mcp.mjs");
+  // In a readable folder: on macOS the connector inherits the CLI's Seatbelt
+  // profile, and could not read its own script elsewhere in the home folder.
+  const connectors = path.join(home, "connectors");
+  const stub = path.join(connectors, "stub-mcp.mjs");
   const userConfig = path.join(home, ".claude", ".claude.json");
   fs.writeFileSync(stub, stubMcp(["lookup", "share_file", "findAndReplace"]));
   fs.writeFileSync(userConfig, JSON.stringify({
     mcpServers: { stub: { type: "stdio", command: process.execPath, args: [stub] } },
   }));
   t.after(() => fs.rmSync(userConfig, { force: true }));
-  const s = session(work);
+  const s = session(work, [path.join(home, "Documents"), path.join(home, "work"), connectors]);
   const read = await toolResult(s, "mcpRead");
   assert.ok(read.includes("STUB_TOOL_RAN:lookup"), read);
   for (const id of ["mcpAction", "mcpCompound"]) {

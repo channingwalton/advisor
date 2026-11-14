@@ -11,7 +11,6 @@ import {
   installCodexSandbox,
   realpathOrSelf,
   sandboxPolicy,
-  sandboxReadDenials,
   sandboxWriteDenials,
   seatbeltProfile,
   writeCodexProfile,
@@ -68,7 +67,10 @@ function readsOf(home: string, folders = [path.join(home, "Documents")]): ReadAl
 
 /// A policy with only the given rules, for tests of the profile text.
 function rules(given: Partial<SeatbeltPolicy>): SeatbeltPolicy {
-  return { home: [], readRoots: [], readMetadata: [], readDenials: [], writableRoots: [], writeDenials: [], ...given };
+  return {
+    home: [], readRoots: [], readPatterns: [], readMetadata: [], readDenials: [], confineWrites: true, writableRoots: [], writePatterns: [], writeDenials: [],
+    ...given,
+  };
 }
 
 function sandboxed(profile: string, argv: string[]): { code: number; out: string; err: string } {
@@ -77,14 +79,19 @@ function sandboxed(profile: string, argv: string[]): { code: number; out: string
 }
 
 test("the OS sandbox denies every path the Claude backend denies, bar Codex's own state", () => {
-  const home = "/home/u";
-  const denied = sandboxReadDenials(home);
-  for (const p of deniedPaths(home)) {
-    const providerState = p === "/home/u/.codex" || p === "/home/u/.codex-global-state.json";
-    assert.equal(denied.includes(p), !providerState, p);
+  // The denials that the profile ships (`storeDenials`, code review 2026-11-14).
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-codex-deny-")));
+  const denied = sandboxPolicy(home, { folders: [], cliRoot: "/opt/codex", cwd: path.join(home, "cwd") }, ["/tmp"]).readDenials;
+  try {
+    for (const p of deniedPaths(home)) {
+      const providerState = p === path.join(home, ".codex") || p === path.join(home, ".codex-global-state.json");
+      assert.equal(denied.includes(p), !providerState, p);
+    }
+    // Parity is the point: one denylist, both backends.
+    assert.equal(denied.length, deniedPaths(home).length - 2);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
-  // Parity is the point: one denylist, both backends.
-  assert.equal(denied.length, deniedPaths(home).length - 2);
 });
 
 test("the profile denies the read paths and confines writes to the writable roots", () => {
@@ -313,17 +320,24 @@ test("#codex-readable-folders a sandboxed process reads back what it writes in a
   assert.equal(back.code, 0, back.err);
 });
 
-// A `TMPDIR` that holds stores, such as `~/Library`, stays write-only: as a
-// read root it would open every store in it that the denylist does not name.
-// A writable root is judged as a listed folder is (`readableRoots`), and so
-// are the CLI and working folders (code review 2026-11-11).
-test("#codex-readable-folders a temporary folder that holds stores is not opened to reads", darwin, () => {
+// A `TMPDIR` that holds stores, such as `~/Library`, is neither read nor
+// written. As a read root it would open every store in it that the denylist
+// does not name. As a writable root it would let a process move a store out to
+// `/tmp`, which it can write and read (code review 2026-11-14). A temp root is
+// judged as a listed folder is (`readableRoots`), and so are the CLI and
+// working folders (code review 2026-11-11).
+test("#codex-readable-folders a temporary folder that holds stores is not opened to reads or writes", darwin, () => {
   const { home } = fakeHome();
   const library = path.join(home, "Library");
   fs.mkdirSync(path.join(library, "Mail"));
   fs.writeFileSync(path.join(library, "Mail", "inbox.txt"), "private mail");
-  const policy = sandboxPolicy(home, readsOf(home), [library]);
+  const policy = sandboxPolicy(home, readsOf(home), [library, "/private/tmp"]);
   assert.ok(!policy.readRoots.includes(library), policy.readRoots.join("\n"));
+  assert.ok(!policy.writableRoots.includes(library), policy.writableRoots.join("\n"));
+  assert.ok(policy.writableRoots.includes("/private/tmp"), "a temp folder outside the home folder stays writable");
+  // Nor a temp folder above the home folder, which holds every store in it.
+  const above = sandboxPolicy(home, readsOf(home), [path.dirname(home), "/"]).writableRoots;
+  assert.ok(!above.includes(path.dirname(home)) && !above.includes("/"), above.join("\n"));
   const profile = path.join(home, "tmp", "library.sb");
   fs.writeFileSync(profile, seatbeltProfile(policy));
   const r = sandboxed(profile, ["/bin/cat", path.join(library, "Mail", "inbox.txt")]);

@@ -79,8 +79,9 @@ struct AdvisorConfig: Codable, Equatable {
     /// The folders that the agents may read: absolute paths, or `~/…`.
     /// None by default, so an agent reads no local file until the user lists
     /// a folder (GHSA-6xc8-f55f-jxqr). Claude's file tools check it at each
-    /// call; Codex's Seatbelt profile is written from it before each turn
-    /// (sidecar/src/codexSandbox.ts). The sidecar refuses a folder at,
+    /// call, and the Claude CLI's Seatbelt profile takes it when the CLI
+    /// starts (sidecar/src/claudeSandbox.ts); Codex's profile is written from
+    /// it before each turn (sidecar/src/codexSandbox.ts). The sidecar refuses a folder at,
     /// under or above a credential store (`readableRoots` in
     /// sidecar/src/agent.ts). Mirrors sidecar/src/config.ts, which reads the
     /// file again at each file-tool call. Preferences → Files edits it in the
@@ -1038,7 +1039,7 @@ struct FilesSettingsView: View {
                 Button { addFolders() } label: { Label("Add folder…", systemImage: "plus") }
                     .focusEffectDisabled()
                     .disabled(unusable)
-                Text("Agents can read the files in these folders, but cannot change them. A credential folder such as ~/.ssh is not used, and nor is a folder inside one or a folder that holds one, such as ~ or ~/Library. A folder beside them, such as ~/Library/Mobile Documents (iCloud Drive), is used. A folder outside your home folder is not used. A change applies to Claude at once, and to Codex from its next turn.")
+                Text("Agents can read the files in these folders, but cannot change them. A credential folder such as ~/.ssh is not used, and nor is a folder inside one or a folder that holds one, such as ~ or ~/Library. A folder beside them, such as ~/Library/Mobile Documents (iCloud Drive), is used. A folder outside your home folder is not used. Claude's own file tools refuse a removed folder at once. Other changes apply from the next card, or when a busy agent is idle.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

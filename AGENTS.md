@@ -106,18 +106,25 @@ rework because of this.
   (`~/.claude/CLAUDE.md`), which the agents load through
   `settingSources: ["user"]`.
 - **The agent sandbox is a security boundary.** Before you change it, read its
-  entries in DESIGN.md (*Agent sandboxing*, *Codex runs under a Seatbelt
-  profile*, *Codex connectors follow the actions toggle*). Change it only on
-  purpose, record the change there, and verify it against the real CLI
+  entries in DESIGN.md (*Agent sandboxing*, *Readable folders*, *The Claude
+  CLI runs under a Seatbelt profile*, *Codex runs under a Seatbelt profile*,
+  *Codex connectors follow the actions toggle*). Change it only on purpose,
+  record the change there, and verify it against the real CLI
   (`sandbox.sdk.test.ts`, `codex.sdk.test.ts`), not only the predicate.
   - Claude: one policy, `toolDecision` (`sidecar/src/agent.ts`). The
     `sandboxGate` PreToolUse hook enforces it, because the SDK approves reads
     in the working directory, and the user's allow rules, before it asks
-    `canUseTool`. MCP tools fail closed.
+    `canUseTool`. MCP tools fail closed. On macOS the CLI also runs under a
+    Seatbelt profile (`sidecar/src/claudeSandbox.ts`), so its stdio
+    connectors read only the readable folders, and write only the temp
+    folders and the CLI's transcripts and logs.
   - Codex has no per-call hook, so its boundary is a Seatbelt profile
-    (`sidecar/src/codexSandbox.ts`) built from the same `deniedPaths()` list.
-    Keep its own `sandboxMode: "read-only"`: it cannot apply inside the
-    profile, so each Codex shell command fails closed (#118).
+    (`sidecar/src/codexSandbox.ts`) built from the readable folders and the
+    same `deniedPaths()` list. Keep its own `sandboxMode: "read-only"`: it
+    cannot apply inside the profile, so each Codex shell command fails closed
+    (#118).
+  - Both profiles take their read rules and temp folders from
+    `sidecar/src/seatbelt.ts`.
 - User preferences are in `~/Library/Application Support/Advisor/config.json`,
   mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts`. Change
   both together. Keys commented "App-side only" in Preferences.swift (such as
