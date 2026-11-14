@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { deniedPaths, readableRoots } from "./agent.js";
+import { deniedPaths, readableRoots } from "./toolPolicy.js";
 
 // The Seatbelt profile parts that the Codex profile (codexSandbox.ts) and the
 // Claude profile (claudeSandbox.ts) share (GHSA-6xc8-f55f-jxqr).

@@ -205,7 +205,7 @@ private func tempConfig() -> (dir: URL, file: URL) {
 
 // The sidecar grants an entry in its lexical form and in its symlink-first
 // form: with `Link -> Real`, `Link/../Notes` grants `Notes` beside `Link` and
-// `Notes` beside `Real` (`judgedForms` in sidecar/src/agent.ts). A Remove of
+// `Notes` beside `Real` (`judgedForms` in sidecar/src/toolPolicy.ts). A Remove of
 // either folder takes the entry out (code review 2026-11-10).
 @Test func readableFoldersRemovingMatchesEachFormThatTheSidecarGrants() throws {
     let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

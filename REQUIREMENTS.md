@@ -49,7 +49,7 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F8a. Auto cards: one toolbar toggle turns automatic cards (answers, context, fact-checks) off and on mid-session without stopping listening; manual actions and Ask keep working while it's off.
 - F9. Surface background context for detected entities (relevant notes, tickets, docs, prior discussion).
 - F10. Fact-check claims against web/internal sources, citing the source; say "couldn't verify" rather than guess when a claim can't be confirmed.
-- F11. Search across: the web, work tools via the user's MCP connectors (e.g. Jira, Confluence, Slack), and the user's own notes and local files/repos (read-only; credential paths excluded). A Codex card cannot search local files itself (N12): it reaches notes only through a connector. Advisor holds no notes location of its own: personal context, such as where notes live, comes from the user's own agent configuration (for Claude, `~/.claude/CLAUDE.md`).
+- F11. Search across: the web, work tools via the user's MCP connectors (e.g. Jira, Confluence, Slack), and the user's own notes and local files/repos (read-only; credential paths excluded). A Codex card searches local files through Advisor's own read-only file tools (N15), not through the shell (N12). Advisor holds no notes location of its own: personal context, such as where notes live, comes from the user's own agent configuration (for Claude, `~/.claude/CLAUDE.md`).
 - F12. Every answer cites its source(s).
 
 ### Agent backend
@@ -140,6 +140,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - N14. **Claude CLI reads and writes (GHSA-6xc8-f55f-jxqr):**
   - On macOS, in the home folder, the Claude CLI and each process that it starts, its stdio connectors among them, read only the readable folders, the CLI's state (`~/.claude`, `~/.claude.json`), its program files and its working folder, and the login keychain only with a subscription login. A connector cannot read a file outside the readable folders. An idle session takes a changed list at its next task. `#claude-seatbelt`
   - They write only the temp folders, the CLI's transcripts and its connectors' logs for its working folder, and with a subscription login the login keychain. So a connector cannot move a store into a readable folder to read it there. `#claude-seatbelt`
+- N15. **Codex file tools (issue #120):**
+  - A Codex card lane reads local files through Advisor's own Read, Grep and Glob, with connector actions on and off; the classifier does not get them. Each call applies the Claude read policy: a path outside the readable folders, or in a credential path such as `~/.ssh` or `~/.codex`, is refused, and the refusal names the readable folders. The tools run under the Codex Seatbelt profile, and take the folder list of the turn. Each task names the folders and the tools. `#codex-files`
 
 ## Risks
 

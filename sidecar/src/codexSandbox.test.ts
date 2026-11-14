@@ -4,10 +4,12 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { deniedPaths } from "./agent.js";
+import { deniedPaths } from "./toolPolicy.js";
 import { codexConstructorOptions } from "./codex.js";
 import {
   codexWrapperScript,
+  filesServer,
+  filesServerReads,
   installCodexSandbox,
   realpathOrSelf,
   sandboxPolicy,
@@ -62,7 +64,7 @@ function fakeHome(opts: { symlinkDotfiles?: boolean } = {}): {
 /// What the fake home lets the sandboxed process read: `~/Documents`, the CLI
 /// folder and the working folder.
 function readsOf(home: string, folders = [path.join(home, "Documents")]): ReadAllowance {
-  return { folders, cliRoot: path.join(home, "cli"), cwd: path.join(home, "Library", "cwd") };
+  return { folders, cliRoot: path.join(home, "cli"), cwd: path.join(home, "Library", "cwd"), ownTools: [] };
 }
 
 /// A policy with only the given rules, for tests of the profile text.
@@ -81,7 +83,7 @@ function sandboxed(profile: string, argv: string[]): { code: number; out: string
 test("the OS sandbox denies every path the Claude backend denies, bar Codex's own state", () => {
   // The denials that the profile ships (`storeDenials`, code review 2026-11-14).
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-codex-deny-")));
-  const denied = sandboxPolicy(home, { folders: [], cliRoot: "/opt/codex", cwd: path.join(home, "cwd") }, ["/tmp"]).readDenials;
+  const denied = sandboxPolicy(home, { folders: [], cliRoot: "/opt/codex", cwd: path.join(home, "cwd"), ownTools: [] }, ["/tmp"]).readDenials;
   try {
     for (const p of deniedPaths(home)) {
       const providerState = p === path.join(home, ".codex") || p === path.join(home, ".codex-global-state.json");
@@ -380,6 +382,70 @@ test("#codex-readable-folders a path in a readable folder resolves when $HOME is
   const resolved = sandboxed(profile, ["/bin/realpath", path.join(notes, "a.md")]);
   assert.equal(resolved.code, 0, resolved.err);
   assert.match(sandboxed(profile, ["/bin/cat", path.join(notes, "a.md")]).out, /note/);
+});
+
+test("#codex-files the profile write also writes the folder list for Advisor's file tools", () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-codex-list-")));
+  try {
+    const listed = ["~/Notes", path.join(home, "Work")];
+    writeCodexProfile(home, home, readsOf(home, listed), [home]);
+    const list = path.join(home, "readable-folders.json");
+    assert.deepEqual(JSON.parse(fs.readFileSync(list, "utf8")), listed);
+    // The server reads that file, and the profile lets it.
+    assert.equal(filesServer(home, home).args.at(-1), list);
+    assert.ok(filesServerReads(home).includes(list));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/// Ask Advisor's file tools, started under `profile`, to Read each
+/// file, and return each answer, or undefined when the server gave none.
+function askFileTools(profile: string, cwd: string, server: { command: string; args: string[] }, files: string[]) {
+  const requests = [
+    { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18" } },
+    ...files.map((file_path, i) => ({
+      jsonrpc: "2.0", id: i + 1, method: "tools/call", params: { name: "Read", arguments: { file_path } },
+    })),
+  ];
+  const r = spawnSync("/usr/bin/sandbox-exec", ["-f", profile, server.command, ...server.args], {
+    cwd, input: requests.map((m) => JSON.stringify(m)).join("\n") + "\n", encoding: "utf8",
+  });
+  const replies = (r.stdout ?? "").split("\n").filter(Boolean).map((l) => JSON.parse(l) as {
+    id: number; result?: { content?: { text: string }[]; isError?: boolean };
+  });
+  return { err: r.stderr, answers: files.map((_, i) => replies.find((m) => m.id === i + 1)?.result) };
+}
+
+// The file tools run from the sidecar's modules, which are in the home folder
+// in a dev checkout or an app in ~/Applications. Only the three modules are
+// copied, so a module that pulls in more (an agent SDK) fails this test.
+test("#codex-files Advisor's file tools start under the profile from the home folder, and read only the readable folders", darwin, () => {
+  const { home, tmp } = fakeHome();
+  const dist = path.join(home, "Applications", "sidecar", "dist");
+  fs.mkdirSync(dist, { recursive: true });
+  for (const m of ["localFilesMcp.js", "localFiles.js", "toolPolicy.js"]) {
+    fs.copyFileSync(new URL(`./${m}`, import.meta.url), path.join(dist, m));
+  }
+  fs.copyFileSync(new URL("../package.json", import.meta.url), path.join(path.dirname(dist), "package.json"));
+  const server = filesServer(tmp, home, dist);
+  const cwd = readsOf(home).cwd;
+  const files = [
+    path.join(home, "Documents", "notes.txt"),
+    path.join(home, ".ssh", "id_rsa"),
+    path.join(home, ".codex", "auth.json"),
+    path.join(home, "Private", "plan.txt"),
+  ];
+  const profile = writeCodexProfile(tmp, home, { ...readsOf(home), ownTools: filesServerReads(tmp, dist) }, [tmp]);
+  const { err, answers: [note, key, auth, plan] } = askFileTools(profile, cwd, server, files);
+  assert.match(note?.content?.[0].text ?? "", /hello/, err);
+  for (const refused of [key, auth, plan]) {
+    assert.equal(refused?.isError, true, JSON.stringify(refused));
+    assert.doesNotMatch(refused?.content?.[0].text ?? "", /PRIVATE KEY|provider token|private plan/);
+  }
+  // The control: without their read rules, they do not start.
+  writeCodexProfile(tmp, home, readsOf(home), [tmp]);
+  assert.equal(askFileTools(profile, cwd, server, files).answers[0], undefined);
 });
 
 /// Run `script` in a new Node process whose home folder is `home`, as the

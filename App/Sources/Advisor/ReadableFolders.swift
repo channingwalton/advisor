@@ -3,7 +3,7 @@ import Foundation
 /// The folders that the Claude agents may read: `readableFolders` in
 /// config.json (GHSA-6xc8-f55f-jxqr). The sidecar reads the list from the file
 /// at each file-tool call and enforces it (`readableRoots` in
-/// sidecar/src/agent.ts). This is the app's side: the edits that Preferences →
+/// sidecar/src/toolPolicy.ts). This is the app's side: the edits that Preferences →
 /// Files makes. Each edit reads the file's list at that moment, so a copy of
 /// the config that a window loaded earlier never writes the list.
 ///
@@ -109,7 +109,7 @@ enum ReadableFolders {
     }
 
     /// The folders that the sidecar grants for an entry (`readableRoots` in
-    /// sidecar/src/agent.ts): `~` expanded, then the lexical form, the
+    /// sidecar/src/toolPolicy.ts): `~` expanded, then the lexical form, the
     /// resolved form and the resolved lexical form. A `..` after a symlink
     /// makes the last two differ: the kernel follows the symlink before it
     /// applies the `..`. The sidecar ignores a relative entry, so such an

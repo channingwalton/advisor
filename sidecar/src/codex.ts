@@ -3,8 +3,9 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import { Codex, type CodexOptions, type Thread, type ThreadOptions } from "@openai/codex-sdk";
 import { agentCwd, type Agent, type AgentSessionOptions, type RunProgress, type TaskResult } from "./agent.js";
-import { codexSandboxWrapper, refreshCodexSandbox } from "./codexSandbox.js";
+import { codexFilesServer, codexSandboxWrapper, refreshCodexSandbox } from "./codexSandbox.js";
 import { log } from "./protocol.js";
+import { honouredFolders, readableFoldersNote, REALPATH } from "./toolPolicy.js";
 
 /// Codex client auth. With an explicit `apiKey` the SDK talks to the OpenAI API
 /// directly; without one it falls back to the user's Codex CLI login
@@ -62,8 +63,19 @@ export function codexThreadOptions(opts: AgentSessionOptions): ThreadOptions {
   };
 }
 
+/// The name of Advisor's own MCP server, which gives a Codex card lane its file
+/// tools (#120).
+export const FILES_SERVER = "advisor";
+
 /// Codex client options for a session: auth, the CLI to spawn (`codexPath`, the
 /// sandbox wrapper), and `--config` overrides.
+///
+/// File tools: a card lane (one that reads the readable folders) gets
+/// Advisor's own Read, Grep and Glob (`files`, localFilesMcp.ts), with
+/// connector actions on and off. They apply Claude's read policy to each call,
+/// and run under the profile. A server of the user's with their name fails
+/// the session: an override merges into that server's settings rather than
+/// replace them.
 ///
 /// Connectors: the Claude backend lets read/search connector tools through and
 /// refuses actions unless `allowMcpActions` (`mcpPermission`). Codex has no
@@ -85,30 +97,55 @@ export async function codexClientOptions(
   opts: AgentSessionOptions,
   env: NodeJS.ProcessEnv,
   codexPath: string,
-  listServers: (codexPath: string, cwd: string) => Promise<string[]> = codexConfigServers
+  listServers: (codexPath: string, cwd: string) => Promise<string[]> = codexConfigServers,
+  files?: { command: string; args: string[] }
 ): Promise<CodexOptions> {
   const client = codexConstructorOptions(env, codexPath);
-  if (opts.allowMcpActions === true && !opts.noTools) return client;
-  const features: Record<string, boolean> = { apps: false, plugins: false };
-  const config: NonNullable<CodexOptions["config"]> = { features };
-  if (opts.noTools) {
-    Object.assign(features, {
-      shell_tool: false, unified_exec: false, goals: false, image_generation: false, sleep_tool: false,
-      multi_agent: false, multi_agent_v2: false,
-    });
-    // A model's catalogue entry can turn sub-agents on (`multi_agent_version`),
-    // whatever the features say. Only `[agents] enabled = false` overrides it.
-    config.agents = { enabled: false };
+  const actions = opts.allowMcpActions === true && !opts.noTools;
+  const ownFiles = opts.readableFolders !== undefined && !opts.noTools ? files : undefined;
+  if (actions && !ownFiles) return client;
+  const config: NonNullable<CodexOptions["config"]> = {};
+  if (!actions) {
+    const features: Record<string, boolean> = { apps: false, plugins: false };
+    config.features = features;
+    if (opts.noTools) {
+      Object.assign(features, {
+        shell_tool: false, unified_exec: false, goals: false, image_generation: false, sleep_tool: false,
+        multi_agent: false, multi_agent_v2: false,
+      });
+      // A model's catalogue entry can turn sub-agents on (`multi_agent_version`),
+      // whatever the features say. Only `[agents] enabled = false` overrides it.
+      config.agents = { enabled: false };
+    }
   }
   const servers = await listServers(codexPath, codexWorkingDirectory(opts));
-  // The SDK writes each override as a dotted path, so a name with any other
-  // character would disable some other key and leave this server running.
-  const unsafe = servers.find((name) => !/^[A-Za-z0-9_-]+$/.test(name));
-  if (unsafe !== undefined) throw new Error(`can't disable the Codex MCP server "${unsafe}": rename it`);
-  if (servers.length > 0) {
-    config.mcp_servers = Object.fromEntries(servers.map((name) => [name, { enabled: false }]));
+  if (ownFiles && servers.includes(FILES_SERVER)) {
+    throw new Error(`a Codex MCP server is named "${FILES_SERVER}", the name of Advisor's file tools: rename it`);
   }
+  const mcpServers: NonNullable<CodexOptions["config"]> = {};
+  if (!actions) {
+    // The SDK writes each override as a dotted path, so a name with any other
+    // character would disable some other key and leave this server running.
+    const unsafe = servers.find((name) => !/^[A-Za-z0-9_-]+$/.test(name));
+    if (unsafe !== undefined) throw new Error(`can't disable the Codex MCP server "${unsafe}": rename it`);
+    for (const name of servers) mcpServers[name] = { enabled: false };
+  }
+  if (ownFiles) mcpServers[FILES_SERVER] = ownFiles;
+  if (Object.keys(mcpServers).length > 0) config.mcp_servers = mcpServers;
   return { ...client, config };
+}
+
+/// The note that starts each task of a Codex card lane: the folders that it can
+/// read, as Claude's note gives them (`readableFoldersNote`), and where its
+/// file tools are. Codex defers connector tools, so a model reaches them only
+/// through tool search, or code mode's tool list, by name. Each task carries
+/// it, because a thread outlives a change to the list.
+export function codexFilesNote(home: string, folders: readonly string[]): string {
+  const note = readableFoldersNote(home, folders);
+  if (honouredFolders(home, folders, REALPATH).length === 0) return note;
+  return `${note} Read, Grep and Glob are the tools of Advisor's MCP server \`${FILES_SERVER}\` ` +
+    `(\`mcp__${FILES_SERVER}__Read\`, \`mcp__${FILES_SERVER}__Grep\`, \`mcp__${FILES_SERVER}__Glob\`): ` +
+    "when they are not in your tool list, find them with tool search. The shell cannot read files here.";
 }
 
 /// The MCP servers the user's Codex config defines, by name: ~/.codex/config.toml
@@ -178,7 +215,7 @@ export class CodexAgentSession implements Agent {
       // is the right outcome: an unsandboxed Codex would read every secret in
       // $HOME and, via MCP tools that bypass its own `read-only` mode
       // (openai/codex#4152), write anywhere too.
-      new Codex(await codexClientOptions(opts, process.env, codexSandboxWrapper())),
+      new Codex(await codexClientOptions(opts, process.env, codexSandboxWrapper(), codexConfigServers, codexFilesServer())),
     /// Run before each turn's CLI starts: writes the Seatbelt profile with the
     /// readable folders of that moment (`refreshCodexSandbox`).
     private readonly prepareTurn: () => void = refreshCodexSandbox
@@ -283,9 +320,12 @@ export class CodexAgentSession implements Agent {
         // A new thread has none of the conversation. A timeout or a failed
         // turn drops the thread, so the next task starts one.
         if (this.firstTurn && task.recap) log(`${this.opts.name}: new thread, recap ${task.recap.length} chars`);
+        const files = this.opts.readableFolders
+          ? `${codexFilesNote(this.opts.home ?? homedir(), this.opts.readableFolders())}\n\n`
+          : "";
         const input = this.firstTurn
-          ? `${this.opts.systemPrompt}\n\n${task.recap ?? ""}${task.task}`
-          : task.task;
+          ? `${this.opts.systemPrompt}\n\n${files}${task.recap ?? ""}${task.task}`
+          : `${files}${task.task}`;
         this.firstTurn = false;
         // A profile that cannot be written fails the turn: the CLI would
         // start with the readable folders of an earlier turn.

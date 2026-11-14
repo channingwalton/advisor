@@ -8,6 +8,7 @@ import { type Codex, Thread, type ThreadEvent, type ThreadOptions } from "@opena
 import {
   CodexAgentSession,
   codexClientOptions,
+  codexFilesNote,
   codexConfigServers,
   codexConstructorOptions,
   codexThreadOptions,
@@ -214,6 +215,35 @@ test("#classifier-recap a recap goes into the first turn of each Codex thread on
   assert.equal(calls[2].input, "sp\n\nRECAP3 task3");
   complete(calls[2], "a3", "next");
   await third;
+});
+
+test("#codex-files each task of a Codex card lane starts with its readable folders and where its file tools are", async () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-codex-note-")));
+  const notes = path.join(home, "Notes");
+  fs.mkdirSync(notes);
+  let folders = [notes];
+  const { calls, factory } = controlledThreads();
+  const session = new CodexAgentSession({ ...base, home, readableFolders: () => folders }, factory);
+  try {
+    const note = codexFilesNote(home, [notes]);
+    assert.ok(note.includes(JSON.stringify(notes)), note);
+    assert.match(note, /mcp__advisor__Read/);
+    const first = session.run("task1", undefined, 60_000, "RECAP ");
+    await setImmediate();
+    assert.equal(calls[0].input, `sp\n\n${note}\n\nRECAP task1`);
+    complete(calls[0], "a1");
+    await first;
+    // The user removes the folder: the next task says so, and names no tools.
+    folders = [];
+    const second = session.run("task2", undefined, 60_000);
+    await setImmediate();
+    assert.equal(calls[1].input, `${codexFilesNote(home, [])}\n\ntask2`);
+    assert.doesNotMatch(calls[1].input, /mcp__advisor/);
+    complete(calls[1], "a2");
+    await second;
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 // The classifier resets its session at the pass limit (ClassifierSession).
@@ -568,6 +598,36 @@ test("#codex-connectors a server name that can't be a config key fails the sessi
   // `codex mcp add` refuses such names, but config.toml can quote one. Its
   // override path would name a different key, leaving the server running.
   await assert.rejects(codexClientOptions(base, {}, "/w/codex", servers(["a.b"]).list), /a\.b/);
+});
+
+/// Advisor's file tools, as `codexFilesServer` gives them.
+const FILES = { command: "/node", args: ["/dist/localFilesMcp.js", "/home", "/list.json"] };
+/// A card lane: it reads the readable folders.
+const lane = { ...base, readableFolders: () => [] };
+
+test("#codex-files a card lane gets Advisor's file tools, with connector actions on and off", async () => {
+  const on = await codexClientOptions({ ...lane, allowMcpActions: true }, {}, "/w/codex", servers(["fff"]).list, FILES);
+  assert.deepEqual(on, { codexPathOverride: "/w/codex", config: { mcp_servers: { advisor: FILES } } });
+  const off = await codexClientOptions(lane, {}, "/w/codex", servers(["fff"]).list, FILES);
+  assert.deepEqual(off.config, { features: NO_CONNECTORS, mcp_servers: { fff: { enabled: false }, advisor: FILES } });
+});
+
+test("#codex-files the classifier, and a session that reads no files, get no file tools", async () => {
+  const classifier = await codexClientOptions({ ...lane, noTools: true }, {}, "/w/codex", servers([]).list, FILES);
+  assert.equal(JSON.stringify(classifier).includes("advisor"), false, JSON.stringify(classifier));
+  assert.deepEqual(await codexClientOptions({ ...base, allowMcpActions: true }, {}, "/w/codex", servers([]).list, FILES), {
+    codexPathOverride: "/w/codex",
+  });
+});
+
+test("#codex-files a Codex MCP server of the user's with the file tools' name fails the session", async () => {
+  // An override would merge into that server's settings, not replace them.
+  for (const allowMcpActions of [true, false]) {
+    await assert.rejects(
+      codexClientOptions({ ...lane, allowMcpActions }, {}, "/w/codex", servers(["advisor"]).list, FILES),
+      /"advisor"/
+    );
+  }
 });
 
 test("#classifier-no-tools a Codex session with no tools also drops the shell, goals, image generation, sleep and sub-agents", async () => {

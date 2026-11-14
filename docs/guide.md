@@ -304,8 +304,8 @@ On **Claude**, a tool policy limits each research agent call:
   refuse a removed folder at once, also in a card that is in progress. Other
   changes apply from the next card. An agent that is busy, or has cards
   waiting, keeps its folders until it is idle: until then its connectors can
-  read a removed folder, and it cannot read an added one. Each Claude task
-  names the readable folders to the agent, so it searches there first. A
+  read a removed folder, and it cannot read an added one. Each task names the
+  readable folders to the agent, so it searches there first. A
   folder outside your home folder is not used, and nor is a symlink that leads
   out of it. Connectors can write only temp files and the agents' own logs,
   and with a subscription login the login keychain, where Claude keeps that
@@ -336,17 +336,18 @@ to Codex's own state and temporary folders. Even there, they cannot change
 Codex's configuration, hooks or instructions. A change to the readable folders
 applies to Codex from its next turn. This is coarser than the Claude policy:
 Codex can read its own `~/.codex` login, and it cannot allow connector reads
-and refuse actions. So with **Allow connector actions** off it gets no
-connectors (no MCP servers or plugins from `~/.codex/config.toml`, and no
+and refuse actions. So with **Allow connector actions** off it gets none of
+your connectors (no MCP servers or plugins from `~/.codex/config.toml`, and no
 ChatGPT apps), and with it on, it gets all of them. A connector that reads its
 own files in your home folder starts only when that folder is a readable
 folder.
 
 Codex cards cannot run shell commands. Codex can try one, but the Codex CLI
-cannot start its own sandbox inside the profile, so the command fails. So,
-unlike a Claude card, a Codex card cannot read your local notes. Only a
-connector can reach them, and Codex gets connectors only with **Allow
-connector actions** on. See [DESIGN.md](../DESIGN.md).
+cannot start its own sandbox inside the profile, so the command fails. A Codex
+card reads your local notes through Advisor's own file tools instead: Read,
+Grep and Glob, which apply the Claude policy to each call, under the profile.
+It has them with **Allow connector actions** on or off. See
+[DESIGN.md](../DESIGN.md).
 
 ## Logs
 

@@ -72,8 +72,7 @@ the commit check and CI.
 Advisor is a native macOS GUI: a browser cannot drive it, and unit tests cannot
 reach most visual and runtime behaviour (recording, STT, window lifecycle,
 cards). For such a change, green builds and tests are not done. Observe the
-change in the running app, or report it as unverified. Issues #21 and #12 had
-rework because of this.
+change in the running app, or report it as unverified.
 
 - Screenshot the dev build: run `cd App && sh xcode.sh swift build`, launch the
   `.build` binary, and capture its window with `screencapture -l <windowid>`
@@ -111,7 +110,7 @@ rework because of this.
   *Codex connectors follow the actions toggle*). Change it only on purpose,
   record the change there, and verify it against the real CLI
   (`sandbox.sdk.test.ts`, `codex.sdk.test.ts`), not only the predicate.
-  - Claude: one policy, `toolDecision` (`sidecar/src/agent.ts`). The
+  - Claude: one policy, `toolDecision` (`sidecar/src/toolPolicy.ts`). The
     `sandboxGate` PreToolUse hook enforces it, because the SDK approves reads
     in the working directory, and the user's allow rules, before it asks
     `canUseTool`. MCP tools fail closed. On macOS the CLI also runs under a
@@ -122,7 +121,9 @@ rework because of this.
     (`sidecar/src/codexSandbox.ts`) built from the readable folders and the
     same `deniedPaths()` list. Keep its own `sandboxMode: "read-only"`: it
     cannot apply inside the profile, so each Codex shell command fails closed
-    (#118).
+    (#118). A Codex card reads files through Advisor's own MCP server
+    (`sidecar/src/localFiles.ts`), which applies `toolDecision` to each call
+    under that profile.
   - Both profiles take their read rules and temp folders from
     `sidecar/src/seatbelt.ts`.
 - User preferences are in `~/Library/Application Support/Advisor/config.json`,

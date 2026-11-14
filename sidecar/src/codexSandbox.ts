@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { agentCwd } from "./agent.js";
 import { loadReadableFolders } from "./config.js";
 import {
@@ -61,6 +62,9 @@ export interface ReadAllowance {
   cliRoot: string;
   /// The CLI's working folder.
   cwd: string;
+  /// What Advisor's own file tools read to start, and their folder list
+  /// (`filesServerReads`).
+  ownTools: readonly string[];
 }
 
 /// The path lists as the kernel will match them: resolved, then deduped.
@@ -86,7 +90,7 @@ export function sandboxPolicy(home: string, reads: ReadAllowance, tmps: string[]
     // judged as a listed folder is, so a `TMPDIR` at or above a store, such as
     // `~/Library`, is not read (code review 2026-11-11), and `writableTemps`
     // leaves it out of the writable roots (code review 2026-11-14).
-    ...homeReadRules(home, [...reads.folders, reads.cliRoot, reads.cwd, ...writableRoots], state),
+    ...homeReadRules(home, [...reads.folders, reads.cliRoot, reads.cwd, ...reads.ownTools, ...writableRoots], state),
     readDenials: storeDenials(home, state),
     readPatterns: [],
     confineWrites: true,
@@ -131,20 +135,50 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/// Write the profile into `dir` and return its path. The write is atomic (a
-/// new file, then a rename), so a CLI that starts meanwhile reads the old
-/// profile or the new one, never a part of one.
+/// The file beside the profile that lists the readable folders for Advisor's
+/// file tools (localFilesMcp.ts): a JSON list, as config.json holds it.
+const FOLDER_LIST = "readable-folders.json";
+
+/// The sidecar's compiled modules. Advisor's file tools run from here.
+const SIDECAR_DIST = path.dirname(fileURLToPath(import.meta.url));
+
+/// What the profile must let Advisor's file tools read (#120): their modules,
+/// the `package.json` beside them, which Node reads to load them as ES modules,
+/// and the folder list. A dev checkout, and an app in `~/Applications`, are in
+/// the home folder. Node itself needs no rule: the kernel runs a program that
+/// the profile does not let a process read (checked 2026-11-14).
+export function filesServerReads(dir: string, dist: string = SIDECAR_DIST): string[] {
+  return [dist, path.join(path.dirname(dist), "package.json"), path.join(dir, FOLDER_LIST)];
+}
+
+/// The MCP server of Advisor's file tools, as the Codex CLI starts it: this
+/// Node, on `localFilesMcp.js`, with the home folder and the folder list.
+export function filesServer(dir: string, home: string, dist: string = SIDECAR_DIST): { command: string; args: string[] } {
+  return { command: process.execPath, args: [path.join(dist, "localFilesMcp.js"), home, path.join(dir, FOLDER_LIST)] };
+}
+
+/// Write the profile and the folder list into `dir`, and return the profile's
+/// path. Each write is atomic (a new file, then a rename), so a CLI or a file
+/// tool that starts meanwhile reads the old file or the new one, never a part
+/// of one. The list is written first: a CLI that starts between the two
+/// writes has the old profile and the new list, and reads only what both
+/// allow.
 export function writeCodexProfile(
   dir: string,
   home: string,
   reads: ReadAllowance,
   tmps: string[] = DEFAULT_TMPS
 ): string {
+  writeAtomic(path.join(dir, FOLDER_LIST), JSON.stringify(reads.folders));
   const profilePath = path.join(dir, "advisor.sb");
-  const temp = `${profilePath}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, seatbeltProfile(sandboxPolicy(home, reads, tmps)));
-  fs.renameSync(temp, profilePath);
+  writeAtomic(profilePath, seatbeltProfile(sandboxPolicy(home, reads, tmps)));
   return profilePath;
+}
+
+function writeAtomic(file: string, text: string): void {
+  const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, text);
+  fs.renameSync(temp, file);
 }
 
 /// Write the profile and wrapper into `dir` and return the wrapper's path,
@@ -200,7 +234,8 @@ export function codexSandboxWrapper(home: string = os.homedir()): string {
   fs.mkdirSync(dir, { recursive: true });
   const cliRoot = vendoredCodexRoot();
   const cwd = agentCwd(home);
-  const reads = (): ReadAllowance => ({ folders: loadReadableFolders(), cliRoot, cwd });
+  const ownTools = filesServerReads(dir);
+  const reads = (): ReadAllowance => ({ folders: loadReadableFolders(), cliRoot, cwd, ownTools });
   // The home as `$HOME` spells it, not resolved: a folder listed through a
   // symlinked home must be in it, as for Claude (`readableRoots` checks both
   // forms). `sandboxPolicy` resolves each path that it writes.
@@ -208,8 +243,15 @@ export function codexSandboxWrapper(home: string = os.homedir()): string {
   return installed.wrapper;
 }
 
-/// Write the profile again with the readable folders that config.json lists
-/// now. Each Codex turn starts a new CLI, which reads the profile as it
+/// The MCP server of Advisor's file tools for this process's Codex lanes
+/// (`filesServer`), with the sandbox installed first.
+export function codexFilesServer(home: string = os.homedir()): { command: string; args: string[] } {
+  codexSandboxWrapper(home);
+  return filesServer(installed!.dir, installed!.home);
+}
+
+/// Write the profile and the folder list again, with the readable folders that
+/// config.json lists now. Each Codex turn starts a new CLI, which reads the profile as it
 /// starts, so a turn reads the folders of that moment: a folder that the user
 /// removes is refused from the next turn on. Nothing to do before the wrapper
 /// is installed in this process. Node runs this to its end before any other

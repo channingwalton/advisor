@@ -83,7 +83,7 @@ struct AdvisorConfig: Codable, Equatable {
     /// starts (sidecar/src/claudeSandbox.ts); Codex's profile is written from
     /// it before each turn (sidecar/src/codexSandbox.ts). The sidecar refuses a folder at,
     /// under or above a credential store (`readableRoots` in
-    /// sidecar/src/agent.ts). Mirrors sidecar/src/config.ts, which reads the
+    /// sidecar/src/toolPolicy.ts). Mirrors sidecar/src/config.ts, which reads the
     /// file again at each file-tool call. Preferences → Files edits it in the
     /// file (`ReadableFolders`); `saveChanges` never writes it.
     var readableFolders: [String] = []

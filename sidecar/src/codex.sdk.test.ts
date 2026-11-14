@@ -10,7 +10,9 @@ import { fileURLToPath } from "node:url";
 import { Codex } from "@openai/codex-sdk";
 import type { AgentSessionOptions } from "./agent.js";
 import { CodexAgentSession, codexClientOptions, codexConfigServers, codexWorkingDirectory } from "./codex.js";
-import { installCodexSandbox, realpathOrSelf, vendoredCodexPath, vendoredCodexRoot } from "./codexSandbox.js";
+import {
+  filesServer, filesServerReads, installCodexSandbox, realpathOrSelf, vendoredCodexPath, vendoredCodexRoot,
+} from "./codexSandbox.js";
 import { mergeConfig } from "./config.js";
 import { STUB_MCP, SYNTHETIC_HOME_ROOT } from "./fakeModel.js";
 import { cardLaneOptions } from "./lanes.js";
@@ -37,6 +39,10 @@ import { classifierOptions } from "./trigger.js";
 // model runs `SHELL_COMMAND` through `exec_command`, from code mode's `exec` or
 // directly, and the next request carries what the command printed. Under
 // Advisor's profile no command runs (#118).
+//
+// A prompt whose name starts with `files` asks Advisor's own Read (#120) for
+// each of `FILE_TARGETS`: from code mode's `exec`, or, on a classic model,
+// through `tool_search` and then one call for each file.
 
 /// Seatbelt and the vendored darwin binary; CI runs the sidecar on Linux.
 const darwin = { skip: process.platform !== "darwin" ? "requires macOS and the darwin Codex CLI" : false };
@@ -45,6 +51,8 @@ let home: string;
 /// The folder of the stub connector: a readable folder, or the Seatbelt
 /// profile refuses the connector its own script (GHSA-6xc8-f55f-jxqr).
 let connectorsDir: string;
+/// A folder of notes, readable in the tests of Advisor's file tools.
+let notesDir: string;
 let server: http.Server;
 /// What a session could use, by the prompt that sent it: the names of the tools
 /// it was offered, what a read from the stub server's resources returned
@@ -54,6 +62,8 @@ interface Offered {
   tools: string[];
   stub?: string;
   shell?: string;
+  /// What Advisor's Read returned for each of `FILE_TARGETS`, for a `files` prompt.
+  files?: string[];
 }
 const offered = new Map<string, Offered>();
 
@@ -72,6 +82,16 @@ const KEY = "key-118-secret";
 /// A read-only shell command: the note, then the key. Set in `before`, because
 /// the paths are in the synthetic home.
 let SHELL_COMMAND: string;
+/// What a `files` prompt asks Advisor's Read for, in order: a note in a
+/// readable folder, the key, and Codex's config, which the profile lets the
+/// CLI read and the policy refuses. Set in `before`.
+let FILE_TARGETS: string[];
+/// Run by code mode's `exec`: Advisor's Read of each file, as a JSON list.
+const codeFiles = (): string => `const out = [];
+for (const file_path of ${JSON.stringify(FILE_TARGETS)}) {
+  try { out.push(JSON.stringify(await tools.mcp__advisor__Read({ file_path }))); } catch (e) { out.push("THREW " + String(e)); }
+}
+text(JSON.stringify(out));`;
 /// Run by code mode's `exec`: the shell command, through the nested tool.
 const codeShell = (): string => `let out;
 try { out = await tools.exec_command(${JSON.stringify({ cmd: SHELL_COMMAND })}); } catch (e) { out = String(e); }
@@ -93,8 +113,8 @@ function outputText(output: unknown): string {
   return Array.isArray(output) ? output.map((o: { text?: string }) => o.text ?? "").join("\n") : "";
 }
 
-/// Answer a Responses API request with one finished item.
-function respond(res: http.ServerResponse, item: object): void {
+/// Answer a Responses API request with finished items.
+function respond(res: http.ServerResponse, ...items: object[]): void {
   const id = "resp_test";
   const usage = {
     input_tokens: 1, input_tokens_details: { cached_tokens: 0 },
@@ -102,7 +122,7 @@ function respond(res: http.ServerResponse, item: object): void {
   };
   const events = [
     { type: "response.created", response: { id } },
-    { type: "response.output_item.done", output_index: 0, item },
+    ...items.map((item, i) => ({ type: "response.output_item.done", output_index: i, item })),
     { type: "response.completed", response: { id, usage } },
   ];
   res.writeHead(200, { "content-type": "text/event-stream" });
@@ -128,6 +148,7 @@ function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: T
   // The last probe output: a resumed thread sends its earlier turns' too.
   const result = (body.input ?? []).filter((i) => i.type?.endsWith("_output") && i.call_id === PROBE).at(-1);
   const entry = offered.get(prompt);
+  if (entry && prompt.startsWith("files")) return answerFiles(res, body, entry);
   if (result && entry && prompt.startsWith("shell")) {
     entry.shell = outputText(result.output);
     return respond(res, done);
@@ -146,7 +167,9 @@ function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: T
   }
   if (entry) return respond(res, done);
   const tools = requestTools(body);
-  offered.set(prompt, { tools });
+  const fresh: Offered = { tools };
+  offered.set(prompt, fresh);
+  if (prompt.startsWith("files")) return answerFiles(res, body, fresh);
   if (prompt.startsWith("shell")) {
     if (tools.includes("exec")) {
       return respond(res, { type: "custom_tool_call", id: "ctc_probe", call_id: PROBE, name: "exec", input: codeShell(), status: "completed" });
@@ -167,6 +190,40 @@ function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: T
   respond(res, done);
 }
 
+/// The `files` probe, one step for each request: code mode reads every file
+/// in one `exec`; a classic model searches for the tools, then calls Read for
+/// each file at once. The request after the reads records their outputs.
+function answerFiles(res: http.ServerResponse, body: { input?: InputItem[] }, entry: Offered): void {
+  // This turn's items only: a resumed thread sends its earlier turns' too.
+  const all = body.input ?? [];
+  const input = all.slice(Math.max(all.map((i) => JSON.stringify(i).includes("PROMPT:")).lastIndexOf(true), 0));
+  const output = (id: string) => input.find((i) => i.call_id === id && i.type?.endsWith("_output"));
+  const code = output(PROBE);
+  if (code) {
+    const json = outputText(code.output).split("\n").find((line) => line.startsWith("["));
+    entry.files = json ? (JSON.parse(json) as string[]) : [outputText(code.output)];
+    return respond(res, message("done"));
+  }
+  const reads = FILE_TARGETS.map((_, i) => output(`read${i}`));
+  if (reads.every((r) => r !== undefined)) {
+    entry.files = reads.map((r) => outputText(r!.output));
+    return respond(res, message("done"));
+  }
+  if (entry.tools.includes("exec")) {
+    return respond(res, { type: "custom_tool_call", id: "ctc_probe", call_id: PROBE, name: "exec", input: codeFiles(), status: "completed" });
+  }
+  if (input.some((i) => i.type === "tool_search_output")) {
+    return respond(res, ...FILE_TARGETS.map((file_path, i) => ({
+      type: "function_call", id: `fc_read${i}`, call_id: `read${i}`, namespace: "mcp__advisor", name: "Read",
+      arguments: JSON.stringify({ file_path }), status: "completed",
+    })));
+  }
+  respond(res, {
+    type: "tool_search_call", id: "ts_probe", call_id: "search", execution: "client",
+    arguments: { query: "read a local file" }, status: "completed",
+  });
+}
+
 before(async () => {
   if (darwin.skip) return;
   home = realpathOrSelf(fs.mkdtempSync(path.join(SYNTHETIC_HOME_ROOT, "advisor-sdk-codex-")));
@@ -179,6 +236,10 @@ before(async () => {
   fs.writeFileSync(note, `${NOTE}\n`);
   fs.writeFileSync(key, `${KEY}\n`);
   SHELL_COMMAND = `cat ${note}; cat ${key}`;
+  notesDir = path.join(home, "Notes");
+  fs.mkdirSync(notesDir);
+  fs.writeFileSync(path.join(notesDir, "n.md"), `${NOTE}\n`);
+  FILE_TARGETS = [path.join(notesDir, "n.md"), key, path.join(codexHome, "config.toml")];
   connectorsDir = path.join(home, "connectors");
   fs.mkdirSync(connectorsDir);
   const stub = path.join(connectorsDir, "stub-mcp.mjs");
@@ -241,10 +302,13 @@ async function offeredTools(
     CODEX_HOME: path.join(home, ".codex"),
     FAKE_API_KEY: "sk-test",
   };
-  const wrapper = installCodexSandbox(path.join(home, "sandbox"), home, vendoredCodexPath(), {
-    folders: readable, cliRoot: vendoredCodexRoot(), cwd,
+  const sandbox = path.join(home, "sandbox");
+  const wrapper = installCodexSandbox(sandbox, home, vendoredCodexPath(), {
+    folders: readable, cliRoot: vendoredCodexRoot(), cwd, ownTools: filesServerReads(sandbox),
   });
-  const client = await codexClientOptions(opts, {}, wrapper, (cli, cwd) => codexConfigServers(cli, cwd, env));
+  const client = await codexClientOptions(
+    opts, {}, wrapper, (cli, cwd) => codexConfigServers(cli, cwd, env), filesServer(sandbox, home)
+  );
   const s = new CodexAgentSession(opts, (threadOptions) => new Codex({ ...client, env }).startThread(threadOptions));
   try {
     const r = await s.run(`PROMPT:${prompt}`, undefined, 60_000);
@@ -360,10 +424,13 @@ test("#codex-readable-folders the sidecar's next Codex turn refuses a folder tha
   assert.match(removed.stub ?? "", /MCP startup failed/, show(removed));
 });
 
-test("#codex-connectors a card lane without connector actions is offered no connectors", darwin, async () => {
+/// The connectors a session could use, but Advisor's own file tools.
+const userConnectors = (o: Offered): string[] => connectors(o).filter((t) => !t.startsWith("mcp__advisor__"));
+
+test("#codex-connectors a card lane without connector actions is offered no connectors but Advisor's file tools", darwin, async () => {
   for (const [i, model] of MODELS.entries()) {
     const o = await offeredTools(`card${i}`, cardLaneOptions(mergeConfig({ model }), "research0"));
-    assert.deepEqual(connectors(o), [], `${model}: ${show(o)}`);
+    assert.deepEqual(userConnectors(o), [], `${model}: ${show(o)}`);
     // It is still offered the shell, though no command runs under the profile (#118).
     assert.ok(o.tools.includes("exec_command"), `${model}: ${show(o)}`);
   }
@@ -388,7 +455,41 @@ test("#codex-connectors the sidecar's own Codex lanes follow the connector-actio
   const allowed = await sidecarTools("sidecarActions", true);
   assert.ok(allowed.tools.includes("mcp__stub__lookup"), show(allowed));
   const o = await sidecarTools("sidecar", false);
-  assert.deepEqual(connectors(o), [], show(o));
+  assert.deepEqual(userConnectors(o), [], show(o));
+});
+
+/// Advisor's Read gave the note, and refused the key and Codex's config: the
+/// profile lets the CLI read the config, so the policy refused it.
+function assertFileReads(o: Offered, label: string): void {
+  const shown = `${label}: ${JSON.stringify(o.files)}`;
+  assert.equal(o.files?.length, FILE_TARGETS.length, shown);
+  const [note, key, config] = o.files!;
+  assert.ok(note.includes(NOTE), shown);
+  for (const refused of [key, config]) assert.match(refused, /Access denied/, shown);
+  assert.ok(!key.includes(KEY), shown);
+  assert.ok(!config.includes("model_provider"), shown);
+}
+
+test("#codex-files a card lane reads a note through Advisor's Read, and not a store, with connector actions on and off", { ...darwin, timeout: 120_000 }, async () => {
+  for (const [i, model] of MODELS.entries()) {
+    for (const allowMcpActions of [false, true]) {
+      const lane = cardLaneOptions(mergeConfig({ model, allowMcpActions }), "research0");
+      const o = await offeredTools(`files${i}${allowMcpActions ? "on" : "off"}`, lane, [connectorsDir, notesDir]);
+      assertFileReads(o, `${model}, connector actions ${allowMcpActions ? "on" : "off"}`);
+    }
+  }
+});
+
+// The sidecar's own path: its file tools, and the folder list that it writes
+// before each turn with the profile.
+test("#codex-files the sidecar's Codex card reads a note through Advisor's Read until the user removes its folder", { ...darwin, timeout: 90_000 }, async () => {
+  const [listed, removed] = await sidecarTurns([
+    { prompt: "filesSidecarListed", readable: [connectorsDir, notesDir] },
+    { prompt: "filesSidecarRemoved", readable: [connectorsDir] },
+  ], false);
+  assertFileReads(listed, "listed");
+  assert.match(removed.files?.[0] ?? "", /Access denied/, JSON.stringify(removed.files));
+  assert.ok(!(removed.files?.[0] ?? "").includes(NOTE), JSON.stringify(removed.files));
 });
 
 /// What no setting removes, each inert here: code mode's `exec` runs JavaScript

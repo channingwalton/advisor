@@ -4,10 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { HookInput } from "@anthropic-ai/claude-agent-sdk";
+import { sandboxGate } from "./agent.js";
 import {
   readPathAllowed, searchRootAllowed, readableRoots, mcpPermission, normaliseVerbName, bareMcpName, toolDecision,
-  sandboxGate, type SandboxPolicy,
-} from "./agent.js";
+  type SandboxPolicy,
+} from "./toolPolicy.js";
 
 const HOME = "/home/u";
 

@@ -431,9 +431,8 @@ not drop a folder that the sidecar uses.
   an agent tried twelve other paths, such as `~/Documents/Obsidian` and
   `~/vault`, and then said that no notes were readable. The list goes in the
   task, not in the system prompt, because a warm session outlives a change to
-  it. Codex does not get the note: it has no file tool of its own (*Codex
-  shell stays closed*), and its Seatbelt profile applies the list (*Codex
-  reads only the readable folders*).
+  it. Codex got no note until 2026-11-14, when it got file tools of
+  Advisor's own (*Codex reads local files through Advisor's file tools*).
 - **The note says how to call Glob** (2026-11-12). With a notes folder in
   `path`, the CLI's Glob found nothing for a pattern that started with folder
   names (`A/B/*.md`), with or without the Seatbelt profile. With `A/B` in
@@ -1759,6 +1758,112 @@ Rejected: an allowance for the folder of each configured connector program.
 It helps only a connector that is a script, not one whose data is elsewhere in
 the home folder, and it opens more of the home folder.
 
+### Codex reads local files through Advisor's file tools (2026-11-14, issue #120)
+
+Decision: a Codex card lane gets Advisor's own stdio MCP server, `advisor`,
+with three read-only tools that have the names and inputs of Claude's: Read,
+Grep and Glob (`localFiles.ts`). Each call goes through `toolDecision`, the
+Claude policy, before it opens a file. So a Codex card reads what a Claude
+card reads, and a refusal names the readable folders. The Codex CLI starts the
+server as one of its stdio connectors, so the server runs under the CLI's
+Seatbelt profile too. `codexClientOptions` adds it with `--config` overrides
+(`mcp_servers.advisor.command` and `.args`) to each session with
+`readableFolders` (the card lanes), with "Allow connector actions" on and off.
+The classifier does not get it. Each task of a card lane starts with the
+readable folders and the tool names (`codexFilesNote`), as each Claude task
+does. The shell stays closed (*Codex shell stays closed*).
+
+Reason: since #118 a Codex card read no local note. Only a connector could,
+and only with connector actions on. The alternative in the issue, shell
+commands under the CLI's own sandbox, would need the outer wrapper changed.
+
+- **The folder list.** Before each turn, `writeCodexProfile` writes
+  `readable-folders.json` from `config.json` beside the profile, then the
+  profile. Each tool call reads the list. So the tools and the kernel use the
+  list of the last turn start: a folder that the user removes is refused from
+  the next turn on, as for the rest of Codex. The list is written first, so a
+  CLI that starts between the two writes reads only what both allow.
+- **The server's own files.** The server is the sidecar's Node on
+  `dist/localFilesMcp.js`. A dev checkout, and an app in `~/Applications`, are
+  in the home folder, so the profile lets the server read `sidecar/dist`, the
+  `package.json` beside it, and the folder list (`filesServerReads`). Node
+  reads `package.json` to load the modules as ES modules: without it, the
+  import fails (checked 2026-11-14). Node itself needs no rule. The server
+  loads only `localFiles.js` and `toolPolicy.js`, which load only Node's own
+  modules, so the profile does not open `node_modules`. For this, the policy
+  moved out of `agent.ts` into `toolPolicy.ts`, which also ended the
+  `seatbelt.ts` and `agent.ts` import cycle.
+- **Two layers.** The profile lets the CLI read `~/.codex`, and the policy
+  refuses it, so a Read of `~/.codex/config.toml` is refused. A Read of
+  `~/.ssh` is refused by both.
+- **Grep is JavaScript**, not ripgrep: it needs no program path in the CLI's
+  package, and it gives the same results on Linux CI. As ripgrep does, it
+  skips hidden files and does not follow symlinks. So its patterns are
+  JavaScript regular expressions. Glob uses `fs.globSync`. A pattern can go
+  through a symlink (`link/*`), so a match that Read would refuse is left out.
+  The full judgement resolves each store's path: for 10,000 notes it took
+  20 s. So only a match whose resolved path is not itself is judged in full,
+  and the 10,000 notes take 0.1 s. A match with no symlink is in the folder
+  that the policy allowed, and a readable folder holds no store.
+- **The tools work from the resolved path, judged again** (code review
+  2026-11-14). With `A/k -> B/sub` in two readable folders, a `path` of
+  `A/k/..` is `B` to the kernel and `A` to a lexical join: the first Grep
+  listed `B` and opened `A/n.txt`, a symlink out of the folders, as if it were
+  `B/n.txt`, and printed what it led to. Now each tool resolves its path, and
+  judges it again when it differs, so a symlink that changed after the policy
+  judged the call is judged too. So Glob and Grep give resolved paths: under
+  `~/Library/Mobile Documents/...` for a `~/Notes` that is a symlink there. Glob leaves out a match with a `..` in it:
+  `fs.globSync` takes `[.][.]` as `..`, which the policy's check of the
+  pattern's text does not see, and the first Glob listed files beside the
+  folder that way. Read and Grep open the resolved path with `O_NOFOLLOW` and
+  `O_NONBLOCK`, and judge what they opened (`fstat`): a symlink swapped in at
+  the end of the path is refused, and a pipe gives an error, where the first
+  Read waited on it for ever. A tool error is the call's error result: the
+  first server ended at an uncaught throw, and with it each later call of the
+  turn.
+- **A server of the user's named `advisor` fails the session**, with a message
+  that says to rename it: an override merges into that server's settings and
+  does not replace them. To find such a name, a session with connector actions
+  on now lists the user's servers too (about 0.5 s, once for each session).
+
+Found against the real CLI 0.166.0 (`codex.sdk.test.ts`): the CLI starts a
+server that only `--config` overrides define. MCP tools are deferred. A
+code-mode model calls `tools.mcp__advisor__Read` from `exec`. A classic model
+finds the namespace `mcp__advisor` through `tool_search`, whose description
+names `advisor` as a source, and then calls `Read` in it. The calls ran under
+the approval policy `never`, with each tool annotated as read-only.
+
+Verified: `localFiles.test.ts`, on real files: reads in a readable folder, and
+refusals of a store, an unlisted folder, a symlink out of a readable folder,
+a relative path and patterns that leave the folder (`[.][.]` too); Glob
+leaves out a match through a symlink into `~/.ssh`; Grep does not follow a
+symlink, nor a `..` after one; a pipe gives an error; a tool failure is an
+error result; the server process reads the list at each call. `codexSandbox.test.ts`: the server,
+copied with only its three modules into `~/Applications` in a fake home,
+starts under the profile, reads a note, and refuses `~/.ssh`, `~/.codex` and
+an unlisted folder; without its read rules it does not start.
+`codex.sdk.test.ts`, against the real CLI: on a code-mode and on a classic
+model, with connector actions on and off, a card reads a note and is refused
+the key and Codex's config; in the real sidecar, a question after the user
+removes the folder is refused. A build without the server in the client
+options, and one without the policy in the server, each failed these tests.
+
+Residuals and limits:
+
+- Every connector of a Codex card can read the server's own files: in a dev
+  checkout, `sidecar/dist` and `sidecar/package.json`. They hold no secrets.
+- A folder on the way to a file that another process swaps for a symlink
+  between the resolve and the open is followed, as by the Claude CLI's own
+  Read. The profile still refuses what is outside it, but it allows
+  `~/.codex`.
+- Grep runs on the server's only thread, with no time limit, and does not
+  skip `node_modules` (ripgrep honours `.gitignore`). A pattern that
+  backtracks without end, or a very large folder, keeps the server busy, and
+  the turn's later calls wait. Not fixed (code review 2026-11-14).
+- `codex mcp list` runs with plugins off, so a plugin's server named
+  `advisor` is not found, and with connector actions on it would meet the
+  overrides. Not checked.
+
 ## DMG built with `diskutil image` (2026-10-02)
 
 Decision: `dmg.sh` stages `Advisor.app` and an Applications link in a folder,
@@ -1952,7 +2057,9 @@ With it off (the default), and always for the classifier (`noTools`), a session
 has none: `features.apps` and `features.plugins` are off, and each server in
 the user's config is disabled by name (`mcp_servers.<name>.enabled=false`). The
 classifier also loses the shell (`shell_tool`, `unified_exec`), goals, image
-generation and sub-agents (`multi_agent`).
+generation and sub-agents (`multi_agent`). (Since 2026-11-14 a card lane also
+gets Advisor's own file tools, with the toggle on or off: *Codex reads local
+files through Advisor's file tools*.)
 
 Reason: Codex has no per-call hook, so it cannot allow reads and refuse
 actions as `mcpPermission` does on Claude. Before, every Codex lane, the
@@ -2735,7 +2842,8 @@ Follow-ups:
   closed. Its alternative: shell commands under the CLI's own sandbox, with
   the outer wrapper changed. The 0.166.0 binary names a
   `permissions.filesystem.deny_read` setting among its managed requirements,
-  but whether a user config can set it was not checked.
+  but whether a user config can set it was not checked. Done 2026-11-14:
+  *Codex reads local files through Advisor's file tools*.
 
 ## A second Ask runs beside the first (2026-11-02)
 
