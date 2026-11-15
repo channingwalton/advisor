@@ -110,6 +110,9 @@ change in the running app, or report it as unverified.
   *Codex connectors follow the actions toggle*). Change it only on purpose,
   record the change there, and verify it against the real CLI
   (`sandbox.sdk.test.ts`, `codex.sdk.test.ts`), not only the predicate.
+  Before you commit a change to what an agent can read, run one card with a
+  real model in the dev build: the SDK tests script the model to the correct
+  path, so they cannot show that a model does not find a readable folder.
   - Claude: one policy, `toolDecision` (`sidecar/src/toolPolicy.ts`). The
     `sandboxGate` PreToolUse hook enforces it, because the SDK approves reads
     in the working directory, and the user's allow rules, before it asks
