@@ -272,8 +272,8 @@ export class AgentSession implements Agent {
     this.input?.end();
     this.input = undefined;
     this.stream = undefined;
-    // Ending the input is not enough: a query with hooks keeps its CLI until
-    // the turn's `result`, so a blocked turn kept its process (#142). close()
+    // Ending the input is not enough: in the real-CLI test, the CLI of a
+    // blocked turn stayed after it (#142, `agent.close.sdk.test.ts`). close()
     // ends the CLI and the stream, so the old loop ends by itself.
     try {
       stream?.close();
