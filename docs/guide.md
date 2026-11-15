@@ -287,8 +287,8 @@ next recording session.
 Advisor itself knows nothing about your notes. On Claude, the research agents
 load your own Claude configuration (`~/.claude/CLAUDE.md`), which is where note
 locations and personal context belong. Codex agents do not load it, and cannot
-read `~/.claude`. A Claude agent reads a note folder only when it is one of your
-readable folders (see [Safety](#safety)).
+read `~/.claude`. An agent, Claude or Codex, reads a note folder only when it is
+one of your readable folders (see [Safety](#safety)).
 
 ## Safety
 
@@ -316,14 +316,19 @@ On **Claude**, a tool policy limits each research agent call:
   give nothing, but `~/Library/Mobile Documents` (iCloud Drive) works. Each
   path is judged where its symlinks lead, and in any spelling that the disk
   treats as the same name, such as a different letter case. A file search must
-  name a folder inside a readable folder.
+  name a folder inside a readable folder, and a search pattern that could
+  leave that folder is refused: one with `..`, a leading `/` or `~`, or
+  another spelling of them, such as `[.][.]`.
 - No shell, and no other Claude Code tool (skills, scheduling, sub-agents, …).
 - On macOS, Claude Code and the connectors that it starts on your Mac also run
   under a macOS Seatbelt profile. In your home folder they read only your
   readable folders and what Claude Code needs: its `~/.claude` settings,
   `~/.claude.json`, its program files, its working folder and, with a
-  subscription login, your login keychain. A connector that reads its own files in
-  your home folder starts only when that folder is a readable folder.
+  subscription login, your login keychain. A connector that reads its own
+  files in your home folder starts only when that folder is a readable folder.
+  With a subscription login, a connector that can run commands can read the
+  keychain items that trust `/usr/bin/security`, and can overwrite the
+  keychain file.
 
 The policy applies before the permission rules of Claude Code, so allow rules
 in your Claude settings cannot widen it.

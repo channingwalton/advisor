@@ -33,7 +33,12 @@ script that makes it.*
    configuration most people need. (No CLI login? Switch **Authentication** to
    *API key* in Preferences and paste an Anthropic or OpenAI key instead —
    billed to that key.)
-4. **Record.** Click the red record button at the top of the sidebar (or press
+4. **Add your notes folders.** The agents read no local file until you list a
+   folder in Preferences → **Files**. They can read only those folders, and
+   never credential paths such as `~/.ssh`. Version 0.4.18 and earlier read
+   the whole home folder except those paths, so after an upgrade, add your
+   notes folder here.
+5. **Record.** Click the red record button at the top of the sidebar (or press
    ⌘N), then **Listen**. The conversation transcribes live and Advisor surfaces answer, context and fact-check cards as it goes.
 
 That's it. Everything stays on your Mac — nothing is uploaded except the
