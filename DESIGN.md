@@ -68,7 +68,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Sessions browser** (`SessionsView`, `SessionArchive`, `SessionDetail`, `TranscriptDoc`, `NoteEdit`, `AnswerPanel`). Master/detail: search (a `#tag` term filters by tag) and a date-grouped list with folders (each folder can hold a default context and tags, and has its own record button); the detail renders the saved note through the shared feed. Ask and Summarise stream into the Answer panel and can be stopped; research actions, follow-ups, corrections and notes work on saved notes too. Edits splice the note's lines (`NoteEdit`) and decline if the note changed underneath; the note still being recorded is read-only there.
 
-**SessionWriter** (with `SessionMarkdown`). One markdown note per session, `yyyy-MM-dd-HHmmss.md`, in the session folder (the `sessionDir` preference, default `~/Library/Application Support/Advisor/sessions/`) or a folder sub-directory of it. Frontmatter: `name`, `started`, `ended`, `context`, `tags`. Body: an optional `# Summary`, then `# Transcript` with cards and NOTE blocks inline as blockquotes at their place in the conversation; the Sessions browser appends Ask answers under `# Follow-ups`. Each card is written as `Card.persisted`: a finished card as it stands, one mid-follow-up or mid-re-summarise as its last completed answer, one still on its first run not at all. Rewritten on a 2 s debounce; transcripts only, no audio; the vault is never written. **Export** copies the note byte-identical (`SessionWriter.export`).
+**SessionWriter** (with `SessionMarkdown`). One markdown note per session, `yyyy-MM-dd-HHmmss.md`, in the session folder (the `sessionDir` preference, default `~/Library/Application Support/Advisor/sessions/`) or a folder sub-directory of it. Frontmatter: `name`, `started`, `ended`, `context`, `tags`. Body: an optional `# Summary`, then `# Transcript` with cards and NOTE blocks inline as blockquotes at their place in the conversation; the Sessions browser appends Ask answers under `# Follow-ups`. Each card is written as `Card.persisted`: a finished card as it stands, one mid-follow-up or mid-re-summarise as its last completed answer, one still on its first run not at all. Rewritten 2 s after the last change, and at most 10 s after the first change not yet written (`WriteDebounce`, #141); transcripts only, no audio; the vault is never written. **Export** copies the note byte-identical (`SessionWriter.export`).
 
 **SidecarManager.** Spawns the Node sidecar and supervises it: on a crash it fails every still-researching card and pending document request, restarts with exponential backoff (1/2/4/8 s, capped 8 s, ≤5 attempts; a crash after a >60 s healthy run resets the budget), then replays `session_start` plus the lane/auto config (not the utterance history — the classifier session is gone). A deliberate `stop()` cancels any pending restart. Authentication: subscription by default; in API-key mode the Keychain key is injected as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` at spawn (`apiKeyEnv`), and each session start re-reads it, replacing the process if it changed. Saved-session requests route back by request id (`discardDocumentRequest` drops one and cancels it). Sends to a dead sidecar surface on the status line. Transport: newline-delimited JSON over stdin/stdout — no port management, lifecycle tied to the parent, trivially debuggable. The sidecar's stderr goes into the app's log file.
 
@@ -1089,7 +1089,7 @@ lists notes by their `yyyy-MM-dd-HHmmss.md` name). (Changed 2026-06-19: see
   by request id. A crash, a spawn failure or a stop fails every outstanding
   request. Two document questions can run at once. A finished answer is
   appended under `# Follow-ups` (`SessionMarkdown.followUpBlock`).
-- **Two writers.** `SessionWriter` rewrites its whole note every 2 s and keeps
+- **Two writers.** `SessionWriter` rewrites its whole note 2 s after a change (10 s at most) and keeps
   its file after the session ends. The detail pane therefore edits no file that
   the live writer owns (`writer.currentFileURL`). `TranscriptWindowContext`
   carries the sidecar and the owned file across scenes.
@@ -3379,7 +3379,7 @@ that macOS uses for Markdown files opens it. Both menus call
 Delete and Export. For a missing file, the workspace returns `false` and shows
 nothing, so the function shows an alert. The live note is exempt, as for Delete
 and Move to Folder. The writer rewrites the whole note from memory two seconds
-after the last change, and after Stop for late cards, until `releaseRecording`
+after the last change (at most ten seconds after the first unwritten one), and after Stop for late cards, until `releaseRecording`
 releases the note. An editor that saves an old copy after the last rewrite drops the lines
 and cards added since, and nothing restores them. Reveal in Finder still shows
 the live note. Accepted limits, as for a note opened from Finder:

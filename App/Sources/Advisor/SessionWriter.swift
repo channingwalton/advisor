@@ -21,6 +21,8 @@ final class SessionWriter {
     /// post-stop rewrites for finishing cards keep the retained context.
     private var sessionActive = false
     private var pendingWrite: DispatchWorkItem?
+    /// Decides how long a change waits before the write (2 s quiet, 10 s at most).
+    private var debounce = WriteDebounce()
     /// Set when a live name edit (`updateName`) is staged but not yet on disk, so
     /// the next `write()` knows to refresh the Sessions browser. Cleared by that
     /// write — an ordinary content write doesn't set it, so the browser isn't
@@ -125,6 +127,7 @@ final class SessionWriter {
     /// `start()` re-establishes them.
     func releaseNote() {
         pendingWrite?.cancel()
+        debounce.written()
         fileURL = nil
         started = nil
         ended = nil
@@ -170,17 +173,21 @@ final class SessionWriter {
         write()
     }
 
-    /// Debounced rewrite; call whenever utterances or cards change.
+    /// Debounced rewrite (2 s after the last change, 10 s after the first one
+    /// not yet written); call whenever utterances or cards change.
     func noteChanged() {
         pendingWrite?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.write() }
         pendingWrite = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+        let delay = debounce.delay(forChangeAt: .now)
+        let seconds = Double(delay.components.seconds) + Double(delay.components.attoseconds) / 1e18
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
     /// Render the note with cards embedded inline in the conversation (the same
     /// format the window shows). See `SessionMarkdown.inline`.
     private func write() {
+        debounce.written()
         guard let fileURL, let started else { return }
         let md = SessionMarkdown.inline(
             utterances: store.utterances, cards: store.cards, notes: store.notes,
