@@ -18,6 +18,13 @@ or when you **Ask**. If microphone permission or speech startup fails, fix the
 problem that the window reports and press **Resume**. The transcript so far
 stays.
 
+If the microphone or the system audio stops during a session, for example when
+you connect or remove a headset, Advisor starts it again and the status line
+says so. If it cannot start again after three tries, or it stops more than
+three times in a minute, the status line shows a warning and the session
+continues with the source that still works. If the microphone has gone, press
+**Stop**, choose another input, then press **Resume**.
+
 The recording window and the Sessions detail show the same feed: the
 conversation as plain text, with the time of each paragraph in the margin, and
 cards and notes in place on a faint fill. A past session reads as it did live.

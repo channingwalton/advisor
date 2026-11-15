@@ -14,6 +14,11 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F1. Capture microphone audio (in-person conversations).
 - F2. Capture system audio (Zoom/Meet/Teams or anything else playing) without a meeting bot.
 - F3. Run both simultaneously, distinguishing "me" (mic) from "them" (system audio).
+  - A microphone capture that stops by itself during a session starts again, and the session keeps its speech engines and system audio (issue #135). `#capture-mic-restart`
+  - A microphone that cannot start again leaves a warning in the status line, and the session continues with the system audio. `#capture-mic-restart-failed`
+  - A system-audio stream that stops by itself during a session starts again (issue #135). `#capture-system-restart`
+  - A system-audio stream that cannot start again leaves a warning in the status line, and the session continues with the microphone. `#capture-system-restart-failed`
+  - A source restarts at most three times a minute, then shows a warning; Resume starts a fresh bound. `#capture-restart-bounded`
 - F4. Start/stop listening with one action; clear visual indicator when live.
   - A microphone permission denial leaves a working retry in the same Recording window (issue #83). `#recording-retry-permission`
   - An initial speech-engine failure leaves a working retry without replacing the session note. `#recording-retry-start`

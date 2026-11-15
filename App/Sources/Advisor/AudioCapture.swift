@@ -19,6 +19,13 @@ final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate
 
     /// Called on the audio thread with 16 kHz mono samples.
     var onSamples: (([Float]) -> Void)?
+    /// Called when the capture stops by itself: the audio hardware
+    /// configuration changed, or the capture session failed, was interrupted or
+    /// lost its device. It is called on a framework queue. Do not stop or start
+    /// the capture inside it: AVAudioEngine can deadlock if the engine is
+    /// released from its notification handler.
+    var onStopped: ((Error?) -> Void)?
+    private var stopObservers: [NSObjectProtocol] = []
 
     static func requestPermission() async -> Bool {
         await AVCaptureDevice.requestAccess(for: .audio)
@@ -132,6 +139,21 @@ final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate
             self.converter = nil
             throw error
         }
+        // The engine stops itself when the input or output hardware changes,
+        // for example when a headset is connected or removed.
+        observeStop(.AVAudioEngineConfigurationChange, object: engine) { _ in nil }
+    }
+
+    private func observeStop(
+        _ name: Notification.Name, object: AnyObject,
+        error: @escaping @Sendable (Notification) -> Error?
+    ) {
+        let token = NotificationCenter.default.addObserver(
+            forName: name, object: object, queue: nil
+        ) { [weak self] note in
+            self?.onStopped?(error(note))
+        }
+        stopObservers.append(token)
     }
 
     private func startCaptureSession(device: InputDevice) throws {
@@ -168,6 +190,15 @@ final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate
         captureOutput = output
         loggedUnsupportedCaptureFormat = false
         captureQueue.sync { session.startRunning() }
+        observeStop(AVCaptureSession.runtimeErrorNotification, object: session) { note in
+            note.userInfo?[AVCaptureSessionErrorKey] as? Error
+        }
+        observeStop(AVCaptureSession.wasInterruptedNotification, object: session) { _ in
+            AdvisorError.audioSetup("input device \(device.name) was interrupted")
+        }
+        observeStop(AVCaptureDevice.wasDisconnectedNotification, object: captureDevice) { _ in
+            AdvisorError.audioSetup("input device \(device.name) was disconnected")
+        }
         appLog.write("[advisor] mic capture using AVCaptureSession: \(device.name)")
     }
 
@@ -257,6 +288,9 @@ final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate
     }
 
     func stop() {
+        // A stop on request is not a loss, so stop listening for one first.
+        for token in stopObservers { NotificationCenter.default.removeObserver(token) }
+        stopObservers = []
         let session = captureSession
         captureSession = nil
         captureOutput?.setSampleBufferDelegate(nil, queue: nil)

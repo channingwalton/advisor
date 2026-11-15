@@ -162,6 +162,8 @@ final class TranscriptStore: ObservableObject {
 
 protocol MicrophoneCaptureProtocol: AnyObject, Sendable {
     var onSamples: (([Float]) -> Void)? { get set }
+    /// Called when the capture stops by itself, on any thread.
+    var onStopped: ((Error?) -> Void)? { get set }
 
     func start(device: InputDevice?, echoCancellation: Bool) throws
     func stop()
@@ -219,6 +221,15 @@ final class Recorder: @unchecked Sendable {
     @MainActor private var speechRunToken = 0
     @MainActor private var listeningStatus = "listening"
     @MainActor private var currentDevice: InputDevice?
+    /// Counts the microphone capture starts. A loss that an earlier start
+    /// reports is ignored.
+    private let micRun = Atomic<Int>(0)
+    /// Bounds the restarts of a source that stopped by itself (issue #135).
+    /// Each Listen or Resume starts with a fresh bound.
+    @MainActor private var micRestarts = RestartBudget()
+    @MainActor private var systemRestarts = RestartBudget()
+    /// The wait before a failed restart is tried again.
+    private let sourceRestartDelay: Duration
     /// Called on the main actor for each accepted utterance.
     var onUtterance: ((Utterance) -> Void)?
     /// Whether recognised text goes into the log file (the `logTranscriptText`
@@ -258,7 +269,8 @@ final class Recorder: @unchecked Sendable {
         },
         requestSystemAccess: @escaping @MainActor @Sendable () -> Bool = {
             SystemAudioCapture.requestAccessIfNeeded()
-        }
+        },
+        sourceRestartDelay: Duration = .milliseconds(500)
     ) throws {
         self.store = store
         appleMic = micEngine
@@ -267,6 +279,7 @@ final class Recorder: @unchecked Sendable {
         self.systemCapture = systemCapture
         self.requestMicPermission = requestMicPermission
         self.requestSystemAccess = requestSystemAccess
+        self.sourceRestartDelay = sourceRestartDelay
 
         // The engine tags each result with the session token it was started with,
         // so a result from a superseded session is dropped at the store write.
@@ -294,19 +307,101 @@ final class Recorder: @unchecked Sendable {
             guard let self, self.samplesEnabled.load(ordering: .relaxed) else { return }
             self.appleSys.append(samples)
         }
+        capture.onStopped = { [weak self] error in
+            guard let self else { return }
+            let run = self.micRun.load(ordering: .relaxed)
+            Task { @MainActor in self.microphoneStopped(error, run: run) }
+        }
         systemCapture.onStopped = { [weak self] error in
             guard let self else { return }
             self.systemActive.store(false, ordering: .relaxed)
-            Task { @MainActor in
-                guard self.desiredRunning,
-                    self.samplesEnabled.load(ordering: .relaxed)
-                else { return }
-                if let error {
-                    self.store.status = SystemAudioCapture.startFailureNote(for: error)
-                } else {
-                    self.store.status = "system audio stopped: ok"
-                }
+            Task { @MainActor in self.systemAudioStopped(error) }
+        }
+    }
+
+    /// The microphone capture stopped by itself, for example because a
+    /// headset was connected or removed. Start it again.
+    @MainActor
+    private func microphoneStopped(_ error: Error?, run: Int) {
+        guard desiredRunning, store.listening, micCaptureActive,
+            run == micRun.load(ordering: .relaxed)
+        else { return }
+        // Release the stopped capture, so that the restart and any stop
+        // begin from a clean state.
+        stopMicrophoneSource()
+        appLog.write(
+            "[advisor] microphone capture stopped; restarting: \(error.map { "\($0)" } ?? "device change")")
+        store.status = CaptureRecovery.restartingNote(.microphone)
+        scheduleSourceRestart(.microphone, epoch: lifecycleEpoch, after: .zero, lastError: error)
+    }
+
+    /// The system-audio stream stopped by itself. Start it again.
+    @MainActor
+    private func systemAudioStopped(_ error: Error?) {
+        guard desiredRunning, store.listening else { return }
+        appLog.write(
+            "[advisor] system audio stopped; restarting: \(error.map { "\($0)" } ?? "no error")")
+        store.status = CaptureRecovery.restartingNote(.systemAudio)
+        scheduleSourceRestart(.systemAudio, epoch: lifecycleEpoch, after: .zero, lastError: error)
+    }
+
+    /// Queue a restart of `source` behind the other lifecycle work. A stop, a
+    /// new start or an STT recovery changes the epoch and so cancels it.
+    @MainActor
+    private func scheduleSourceRestart(
+        _ source: CaptureSource, epoch: Int, after delay: Duration, lastError: Error?
+    ) {
+        guard delay > .zero else {
+            _ = enqueueLifecycle {
+                await self.restartSource(source, epoch: epoch, lastError: lastError)
             }
+            return
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, self.isCurrent(epoch) else { return }
+            _ = self.enqueueLifecycle {
+                await self.restartSource(source, epoch: epoch, lastError: lastError)
+            }
+        }
+    }
+
+    @MainActor
+    private func restartSource(_ source: CaptureSource, epoch: Int, lastError: Error?) async {
+        guard isCurrent(epoch) else { return }
+        let allowed: Bool
+        switch source {
+        case .microphone:
+            // A second loss report, or an STT recovery, may have started it.
+            guard !micCaptureActive else { return }
+            allowed = micRestarts.take(at: Date())
+        case .systemAudio:
+            guard !systemActive.load(ordering: .relaxed) else { return }
+            allowed = systemRestarts.take(at: Date())
+        }
+        guard allowed else {
+            appLog.write("[advisor] \(source.name) not restarted: restart limit reached")
+            store.status = CaptureRecovery.failedNote(
+                source, listening: listeningStatus, error: lastError)
+            return
+        }
+        do {
+            switch source {
+            case .microphone:
+                try startMicrophoneSource(device: currentDevice)
+            case .systemAudio:
+                try await systemCapture.start()
+                // Mark it active before the epoch check, so that a queued
+                // stop stops it.
+                systemActive.store(true, ordering: .relaxed)
+                guard isCurrent(epoch) else { return }
+            }
+            appLog.write("[advisor] \(source.name) restarted")
+            store.status = CaptureRecovery.restartedNote(source, listening: listeningStatus)
+        } catch {
+            appLog.write("[advisor] \(source.name) restart failed: \(error)")
+            guard isCurrent(epoch) else { return }
+            scheduleSourceRestart(source, epoch: epoch, after: sourceRestartDelay, lastError: error)
         }
     }
 
@@ -416,8 +511,7 @@ final class Recorder: @unchecked Sendable {
 
             samplesEnabled.store(true, ordering: .relaxed)
             do {
-                try capture.start(device: currentDevice, echoCancellation: false)
-                micCaptureActive = true
+                try startMicrophoneSource(device: currentDevice)
             } catch {
                 samplesEnabled.store(false, ordering: .relaxed)
                 _ = requestStop(
@@ -629,6 +723,8 @@ final class Recorder: @unchecked Sendable {
         let sessionGeneration = store.sessionGeneration
         let runToken = nextSpeechRunToken()
         currentDevice = device
+        micRestarts = RestartBudget()
+        systemRestarts = RestartBudget()
 
         samplesEnabled.store(false, ordering: .relaxed)
         stopMicrophoneSource()
@@ -702,8 +798,7 @@ final class Recorder: @unchecked Sendable {
         // disabled: it fails or mutes the mic on supported multichannel setups.
         samplesEnabled.store(true, ordering: .relaxed)
         do {
-            try capture.start(device: device, echoCancellation: false)
-            micCaptureActive = true
+            try startMicrophoneSource(device: device)
         } catch {
             samplesEnabled.store(false, ordering: .relaxed)
             _ = requestStop(status: "error: \(error)")
@@ -772,6 +867,14 @@ final class Recorder: @unchecked Sendable {
         stopQueued = false
         guard !desiredRunning else { return }
         store.status = pendingStopStatus
+    }
+
+    /// AEC stays off: it fails or mutes the mic on supported multichannel setups.
+    @MainActor
+    private func startMicrophoneSource(device: InputDevice?) throws {
+        micRun.wrappingAdd(1, ordering: .relaxed)
+        try capture.start(device: device, echoCancellation: false)
+        micCaptureActive = true
     }
 
     @MainActor

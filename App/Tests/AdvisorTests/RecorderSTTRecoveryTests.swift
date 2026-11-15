@@ -143,12 +143,14 @@ private final class FakeSpeechEngine: SpeechEngineProtocol, @unchecked Sendable 
 
 private final class FakeMicrophoneCapture: MicrophoneCaptureProtocol, @unchecked Sendable {
     var onSamples: (([Float]) -> Void)?
+    var onStopped: ((Error?) -> Void)?
 
     private struct State {
         var active = false
         var starts = 0
         var stops = 0
         var emitWhileStopping = false
+        var failingStarts = 0
     }
 
     private let state = Mutex(State())
@@ -162,11 +164,27 @@ private final class FakeMicrophoneCapture: MicrophoneCaptureProtocol, @unchecked
     var stopCount: Int { state.withLock { $0.stops } }
 
     func start(device: InputDevice?, echoCancellation: Bool) throws {
-        state.withLock {
-            $0.active = true
-            $0.starts += 1
+        let fails = state.withLock { state in
+            state.starts += 1
+            guard state.failingStarts == 0 else {
+                state.failingStarts -= 1
+                return true
+            }
+            state.active = true
+            return false
         }
         events.append("mic-source-start")
+        if fails { throw AdvisorError.audioSetup("cannot find input device USB mic for capture") }
+    }
+
+    /// The device goes away: the capture stops by itself and reports it.
+    func lose(_ error: Error? = nil) {
+        state.withLock { $0.active = false }
+        onStopped?(error)
+    }
+
+    func failNextStarts(_ count: Int) {
+        state.withLock { $0.failingStarts = count }
     }
 
     func stop() {
@@ -200,6 +218,7 @@ private final class FakeSystemCapture: SystemAudioCaptureProtocol, @unchecked Se
         var starts = 0
         var stops = 0
         var emitWhileStopping = false
+        var failingStarts = 0
     }
 
     private let state = Mutex(State())
@@ -213,11 +232,27 @@ private final class FakeSystemCapture: SystemAudioCaptureProtocol, @unchecked Se
     var stopCount: Int { state.withLock { $0.stops } }
 
     func start() async throws {
-        state.withLock {
-            $0.active = true
-            $0.starts += 1
+        let fails = state.withLock { state in
+            state.starts += 1
+            guard state.failingStarts == 0 else {
+                state.failingStarts -= 1
+                return true
+            }
+            state.active = true
+            return false
         }
         events.append("system-source-start")
+        if fails { throw AdvisorError.audioSetup("no display found for system audio capture") }
+    }
+
+    /// The stream stops by itself and reports it.
+    func lose(_ error: Error? = streamStoppedError()) {
+        state.withLock { $0.active = false }
+        onStopped?(error)
+    }
+
+    func failNextStarts(_ count: Int) {
+        state.withLock { $0.failingStarts = count }
     }
 
     func stop() async {
@@ -271,7 +306,8 @@ private func makeHarness(
         capture: micCapture,
         systemCapture: systemCapture,
         requestMicPermission: requestMicPermission,
-        requestSystemAccess: { true })
+        requestSystemAccess: { true },
+        sourceRestartDelay: .zero)
     return RecorderHarness(
         store: store,
         recorder: recorder,
@@ -633,6 +669,13 @@ private func eventually(_ condition: @escaping () -> Bool) async -> Bool {
     return condition()
 }
 
+private func streamStoppedError() -> NSError {
+    NSError(
+        domain: "com.apple.ScreenCaptureKit.SCStreamErrorDomain",
+        code: -3805,
+        userInfo: [NSLocalizedDescriptionKey: "The stream was stopped by the system."])
+}
+
 private func speechHelperError() -> NSError {
     NSError(
         domain: NSCocoaErrorDomain,
@@ -872,5 +915,188 @@ struct RecorderSTTRecoveryTests {
         #expect(harness.sysEngine.stopCount == 2)
         #expect(harness.systemCapture.startCount == 1)
         #expect(harness.micCapture.startCount == 1)
+    }
+}
+
+/// Issue #135: a microphone or system-audio stream that stops by itself during
+/// a session starts again, or the status line says that it did not.
+@Suite(.serialized)
+struct RecorderCaptureRecoveryTests {
+    @MainActor
+    @Test func req_capture_mic_restart() async throws {
+        let harness = try makeHarness(sessionGeneration: 50)
+        await startListening(harness)
+        harness.events.clear()
+
+        harness.micCapture.lose()
+
+        #expect(await eventually { harness.store.status.contains("microphone restarted") })
+        #expect(harness.store.listening)
+        #expect(harness.micCapture.startCount == 2)
+        // Only the microphone source starts again. The speech engines and the
+        // system audio keep running.
+        #expect(harness.events.values == ["mic-source-start"])
+        #expect(harness.micEngine.starts.count == 1)
+        #expect(harness.systemCapture.stopCount == 0)
+
+        harness.micCapture.emit()
+        #expect(harness.events.values.last == "mic-sink-append")
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func micRestartRetriesAFailedStart() async throws {
+        let harness = try makeHarness(sessionGeneration: 51)
+        await startListening(harness)
+        harness.micCapture.failNextStarts(1)
+
+        harness.micCapture.lose()
+
+        #expect(await eventually { harness.store.status.contains("microphone restarted") })
+        #expect(harness.micCapture.startCount == 3)
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func req_capture_mic_restart_failed() async throws {
+        let harness = try makeHarness(sessionGeneration: 52)
+        await startListening(harness)
+        harness.micCapture.failNextStarts(10)
+
+        harness.micCapture.lose()
+
+        #expect(await eventually {
+            harness.store.status.contains(
+                "microphone stopped and could not restart: audio setup failed: "
+                    + "cannot find input device USB mic for capture")
+        })
+        // Three attempts, then the warning. The session keeps the system audio.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(harness.micCapture.startCount == 1 + 3)
+        #expect(harness.store.listening)
+        #expect(harness.systemCapture.stopCount == 0)
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func twoMicLossReportsRestartTheMicrophoneOnce() async throws {
+        let harness = try makeHarness(sessionGeneration: 53)
+        await startListening(harness)
+
+        harness.micCapture.lose()
+        harness.micCapture.lose()
+
+        #expect(await eventually { harness.store.status.contains("microphone restarted") })
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(harness.micCapture.startCount == 2)
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func req_capture_restart_bounded() async throws {
+        let harness = try makeHarness(sessionGeneration: 54)
+        await startListening(harness)
+
+        for restarts in 2...4 {
+            harness.micCapture.lose()
+            #expect(await eventually { harness.micCapture.startCount == restarts })
+        }
+        harness.micCapture.lose()
+
+        #expect(await eventually {
+            harness.store.status.contains(
+                "microphone stopped too often to restart; press Stop, then Resume")
+        })
+        #expect(harness.micCapture.startCount == 4)
+
+        // Resume starts with a fresh bound.
+        await harness.recorder.stop().value
+        await startListening(harness)
+        harness.micCapture.lose()
+        #expect(await eventually { harness.store.status.contains("microphone restarted") })
+        #expect(harness.micCapture.startCount == 6)
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func micLossAfterStopIsIgnored() async throws {
+        let harness = try makeHarness(sessionGeneration: 55)
+        await startListening(harness)
+        await harness.recorder.stop().value
+
+        harness.micCapture.lose()
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(harness.micCapture.startCount == 1)
+        #expect(harness.store.status == "idle")
+    }
+
+    @MainActor
+    @Test func req_capture_system_restart() async throws {
+        let harness = try makeHarness(sessionGeneration: 56)
+        await startListening(harness)
+        harness.events.clear()
+
+        harness.systemCapture.lose()
+
+        #expect(await eventually { harness.store.status.contains("system audio restarted") })
+        #expect(harness.store.listening)
+        #expect(harness.systemCapture.startCount == 2)
+        #expect(harness.events.values == ["system-source-start"])
+        #expect(harness.sysEngine.starts.count == 1)
+        #expect(harness.micCapture.stopCount == 0)
+
+        harness.systemCapture.emit()
+        #expect(harness.events.values.last == "system-sink-append")
+        // The restarted stream stops with the session.
+        await harness.recorder.stop().value
+        #expect(harness.systemCapture.stopCount == 1)
+    }
+
+    @MainActor
+    @Test func req_capture_system_restart_failed() async throws {
+        let harness = try makeHarness(sessionGeneration: 57)
+        await startListening(harness)
+        harness.systemCapture.failNextStarts(10)
+
+        harness.systemCapture.lose()
+
+        #expect(await eventually {
+            harness.store.status.contains(
+                "system audio stopped and could not restart: audio setup failed: "
+                    + "no display found for system audio capture")
+        })
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(harness.systemCapture.startCount == 1 + 3)
+        #expect(harness.store.listening)
+        #expect(harness.micCapture.stopCount == 0)
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func twoSystemLossReportsRestartTheStreamOnce() async throws {
+        let harness = try makeHarness(sessionGeneration: 58)
+        await startListening(harness)
+
+        harness.systemCapture.lose()
+        harness.systemCapture.lose()
+
+        #expect(await eventually { harness.store.status.contains("system audio restarted") })
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(harness.systemCapture.startCount == 2)
+        await harness.recorder.stop().value
+    }
+
+    @MainActor
+    @Test func systemLossAfterStopIsIgnored() async throws {
+        let harness = try makeHarness(sessionGeneration: 59)
+        await startListening(harness)
+        await harness.recorder.stop().value
+
+        harness.systemCapture.lose()
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(harness.systemCapture.startCount == 1)
+        #expect(harness.store.status == "idle")
     }
 }

@@ -153,6 +153,7 @@ The placeholder-then-stream pattern keeps the card visible early. Until 2026-10-
 
 - **Sidecar crash** → in-flight cards fail and pending document requests fail; supervised restart with backoff and session replay (above); the status line shows the crash and each attempt; once the budget is spent it asks the user to stop and start listening again. Inside the sidecar, a stray rejection or exception is logged rather than killing the process.
 - **Apple STT result-stream failure** (for example a Speech helper disconnect, `NSCocoaErrorDomain` 4099) → the status line shows recovery, audio sources drain before both speech engines restart, then sources resume; simultaneous mic/system failures coalesce, and a failure during that restart stops listening with the error.
+- **Lost microphone or system-audio stream** (a device change, a capture-session error, a ScreenCaptureKit stop) → only that source starts again, up to three times a minute; past that, the status line keeps a warning and the session continues. See *A lost capture source starts again*.
 - **Agent failure or timeout** → the card flips to `failed` with the reason, never silently; a failed pooled lane is reset and replays the conversation on its next card; a failed classify is re-fed (bounded), and a classifier that starts again gets the recent conversation as context.
 - **Authentication** → no blocking banner. An API key is checked when entered in Preferences (`AuthValidator`), and re-read at each session start; a key that later fails surfaces as a failed card.
 
@@ -3674,6 +3675,55 @@ synthetic click in a test host did not reach the link handler. In the running
 app (Channing, 2026-11-15), a session note with
 `[calc](file:///System/Applications/Calculator.app)` showed "calc" as plain
 text, and a click on it had no effect.
+
+## A lost capture source starts again (2026-11-15, issue #135)
+
+Before this change, a microphone or system-audio stream that stopped during a
+session was not detected. `AudioCapture` had no observer for a device change
+or a capture-session error, so `store.listening` stayed true with no `me`
+lines. A lost ScreenCaptureKit stream changed the status line only.
+
+The adapters report a loss through `onStopped`, as `SystemAudioCapture`
+already did. `AudioCapture` observes `AVAudioEngineConfigurationChange` on its
+engine (the engine stops itself when the input or output hardware changes),
+and the capture session's runtime error, its interruption and the
+disconnection of its device. It removes the observers when it stops on
+request. The handler only calls `onStopped`: Apple warns that releasing the
+engine inside it can deadlock. `SystemAudioCapture` now ignores a stop from a
+stream that it has already replaced or stopped.
+
+`Recorder` starts only the lost source again, through the lifecycle queue, so
+a restart is ordered with stop, start and STT recovery, and any of these
+cancels it through the epoch. The speech engines keep running. A failed start
+is tried again after 500 ms. `RestartBudget` (the tested core) allows three
+attempts per source in any 60 seconds, so a device that keeps failing, or that
+keeps stopping after each restart, ends with a warning in the status line, not
+a loop. The warning names the source and the last error. The session keeps
+running on the other source. Listen and Resume start with a fresh budget. A
+loss that an earlier microphone start reported is ignored (`micRun`).
+
+Not chosen: stopping the whole session when a source cannot start again. The
+other source still works, and Resume would fail the same way until the user
+chooses another input. Not chosen: falling back to the default input when the
+selected device has gone, because that changes the user's choice without
+asking.
+
+Residuals:
+
+- The restart uses the device that the session started with. The recording
+  window always passes a named device (the saved choice, or
+  `AudioDevices.preferred`), and reads the device list only when it opens. So
+  when that device is removed, the restart
+  cannot find it. The microphone stays stopped with the warning, and does not
+  move to the new default input.
+- An STT recovery that starts while a system-audio restart is waiting or in
+  flight does not restart the system audio, because it reads `systemActive`
+  when it begins.
+
+Verified by tests with fake captures (`RecorderCaptureRecoveryTests`,
+`CaptureRecoveryTests`). Not verified in the running app: the fault was not
+reproduced, and no headset or USB microphone was connected or removed during a
+session.
 
 ## Revisit as it grows
 

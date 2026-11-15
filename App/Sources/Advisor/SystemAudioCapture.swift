@@ -30,7 +30,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             : "system audio failed: \(message)"
     }
 
-    private static func isPermissionFailure(_ message: String) -> Bool {
+    static func isPermissionFailure(_ message: String) -> Bool {
         let lower = message.lowercased()
         return lower.contains("tcc")
             || lower.contains("declined")
@@ -80,6 +80,8 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        // A stream that was stopped on request, or replaced, is not a loss.
+        guard stream === self.stream else { return }
         self.stream = nil
         onStopped?(error)
     }
