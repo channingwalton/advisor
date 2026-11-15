@@ -215,6 +215,14 @@ private func inner(_ block: String) throws -> String {
     #expect(parsed.triggerQuote == "first line second line")
 }
 
+@Test func cardBlockKeepsAMultilineTitleOnOneHeaderLine() throws {
+    // #136: a newline in the title must not break out of the blockquote.
+    let card = makeCard(created: Date(timeIntervalSince1970: 1_000), kind: "question", title: "compare A\nand B")
+    let block = SessionMarkdown.cardBlock(card)
+    #expect(block.split(separator: "\n").allSatisfy { $0.hasPrefix(">") })
+    #expect(block.hasPrefix("> **Q · compare A and B**"))
+}
+
 @Test func cardBlockKeepsAMultilineFootnoteOnOneFooterLine() throws {
     let card = Card(
         id: "q", created: Date(timeIntervalSince1970: 1_000), kind: "question", title: "T",

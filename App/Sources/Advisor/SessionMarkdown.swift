@@ -157,10 +157,10 @@ enum SessionMarkdown {
     /// body markdown, then — after a blank line, as the sole trailing paragraph —
     /// a one-line footer (grounding note, `Asked …` stamp or `↳ trigger quote`).
     /// Every line is `>`-prefixed so multi-paragraph bodies stay in the quote;
-    /// a newline in the footer's text would break out of it (#100), so the
-    /// footer is collapsed to one line.
+    /// a newline in the title or footer would break out of it (#100, #136), so
+    /// both are collapsed to one line.
     static func cardBlock(_ card: Card) -> String {
-        var lines = ["**\(label(for: card)) · \(card.title)**"]
+        var lines = ["**\(label(for: card)) · \(oneLine(card.title))**"]
 
         let body = card.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty && body != "…" {
