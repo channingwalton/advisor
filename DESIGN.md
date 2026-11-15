@@ -64,7 +64,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Recording window** (`TranscriptView`, `ListeningToolbar`, `ComposerForm`, `RecordControl`). Toolbar: Listen / Stop / Resume with the timer (Stop is resumable), mic mute, audio source, then Ask and Note, the folder indicator, Name, Context and Tags chips, Auto cards, Hide Transcript, Summarise, Float and Export. Ask (⌘K) sends a free-text query and Note (⇧⌘N) an editorial note, each from a popover. Closing the window ends the session; if cards are still researching, `WindowCloseGuard` (`SessionClose.swift`) asks whether to wait for them or stop them. ⌘Q runs the same close through `QuitSequence` (`AppServices.shutdown`, 5 s deadline, then a synchronous save, sidecar stop and `_exit`).
 
-**Feed** (`Feed`, `FeedView`). One model and view for both windows: transcript runs (paragraphs with their time in the margin), cards anchored under the line that triggered them, editorial NOTE cards (`FeedNoteView`) and headings, in chronological order. The live feed follows the tail unless the user scrolls up. Right-click a line for AI actions (Answer / Context / Fact check), a correction, or Add note. Cards collapse, copy, skip or delete, and take follow-ups. Each window supplies its behaviour through `FeedActions`.
+**Feed** (`Feed`, `FeedView`). One model and view for both windows: transcript runs (paragraphs with their time in the margin), cards anchored under the line that triggered them, editorial NOTE cards (`FeedNoteView`) and headings, in chronological order. The live feed follows the tail unless the user scrolls up. Right-click a line for AI actions (Answer / Context / Fact check), a correction, or Add note. Cards collapse, copy, skip or delete, and take follow-ups. Each window supplies its behaviour through `FeedActions`. A card link opens only an `http`, `https` or `mailto` address: the card renderer, `MarkdownText`, removes every other link (see *A card link opens only a web or mail address*).
 
 **Sessions browser** (`SessionsView`, `SessionArchive`, `SessionDetail`, `TranscriptDoc`, `NoteEdit`, `AnswerPanel`). Master/detail: search (a `#tag` term filters by tag) and a date-grouped list with folders (each folder can hold a default context and tags, and has its own record button); the detail renders the saved note through the shared feed. Ask and Summarise stream into the Answer panel and can be stopped; research actions, follow-ups, corrections and notes work on saved notes too. Edits splice the note's lines (`NoteEdit`) and decline if the note changed underneath; the note still being recorded is read-only there.
 
@@ -1323,7 +1323,9 @@ it splits blocks on blank lines and parses each with
 `AttributedString(markdown:.inlineOnly)`, with fonts and colours from `Theme`.
 The `MarkdownUI` dependency was removed. (Superseded in part: nested lists
 2026-10-04, see *Sessions window restyle*; tables 2026-10-15, see *Card
-tables*; the source links 2026-10-18, see *Card sources and verdict removed*.)
+tables*; the source links 2026-10-18, see *Card sources and verdict removed*;
+the link schemes 2026-11-15, see *A card link opens only a web or mail
+address*.)
 
 ## Floating sidebar (2026-06-21)
 
@@ -3583,6 +3585,63 @@ the rule for a topic discussed at length. It checks that balanced and
 conservative keep the earlier text, that the eager text has every rule of
 the balanced text, and it checks the kind toggles. The replay
 above is the evidence that the model follows the text.
+
+## A card link opens only a web or mail address (2026-11-15, GHSA-3xvp-r46q-p3gm)
+
+Decision: the card renderer (`MarkdownText`, in its private `inline()`, not
+`SessionMarkdown.inline`) keeps a link only when its scheme is
+`http`, `https` or `mailto`, in any letter case. It removes the link from
+every other run, so that run shows as its label, with the style of its run
+(bold, code or a heading, for example) and no link.
+A link with no scheme is removed too: a relative path, and also a web address
+written without `https://` (`www.example.com`).
+
+Reason: a card shows the label of a link, not its destination, and
+`NSTextView` opens any URL that the Foundation parser makes into a link. A
+research agent that reads a prompt injection can write
+`[Source](shortcuts://run-shortcut?name=…)`, and one click then runs the
+shortcut, starts an app (`file:///Applications/…`) or mounts a share
+(`smb://`). The same renderer shows saved notes from disk, Ask answers in the
+Sessions browser and NOTE cards. The allowlist is
+in the tested core, so it applies to each layout that parses inline markdown,
+and the text view gets no link to open. Not chosen: a check of the click in a
+text-view delegate (`textView(_:clickedOnLink:at:)`) as the only check, because
+a removed link would still look like a link. Not chosen (2026-11-15): that
+delegate check as a second layer, for a link that reaches the text view by
+another path, and a filter at the end of `render()` in place of `inline()`. Not chosen: an allowlist that adds `obsidian` or other app
+schemes, because an app can register actions under its scheme.
+
+Residual risks (accepted 2026-11-15):
+
+- The session writer (`SessionMarkdown`) keeps the card body as the agent
+  wrote it, so the saved note holds each link unchanged. Another app that
+  opens the note (**Open in Default App**, **Share…**, an export) can show a
+  removed link as a live link. Not chosen: a session writer that also
+  removes these links.
+- A kept link still shows only its label. An `https` link can carry
+  conversation text in its query to a site that the agent chose. Its label can
+  name another site, and so can a user name in the URL
+  (`https://docs.example@evil.example/`).
+- An `http` link can send a GET request to a local or network service, such as
+  `http://127.0.0.1:8080/…` or a router at `192.168.1.1`.
+- A `mailto` link can prefill the recipient, the subject and the body of a
+  draft. Some mail clients also read an `attach` parameter, which can attach a
+  local file. The user must still send the draft.
+- An `https` link to a domain that an app claims can open that app (a
+  universal link). This was not tested.
+- Not chosen: refusing `http` links to loopback and private addresses, `https`
+  links with a user name, and `mailto` query keys other than `subject` and
+  `body`.
+
+Verified: `MarkdownTextTests.req_card_link_schemes` (`#card-link-schemes`)
+renders the removed schemes in a paragraph, a list item, a heading, a lead
+line, a table header and body cell, a block quote, a continuation paragraph
+and an autolink, and the kept schemes in a paragraph and a table body cell. It
+failed before the change, with each removed scheme still a link. A probe that
+rendered through `apply(to:)` into an `IntrinsicHeightTextView` found no link
+in its text storage at a removed label, and found the `https` link in place. A
+click in the running app was not tested: a synthetic click in a test host did
+not reach the link handler.
 
 ## Revisit as it grows
 

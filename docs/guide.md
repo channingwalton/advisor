@@ -125,6 +125,11 @@ re-summarise runs, the saved note keeps the previous answer, and a cancel puts
 it back. A failed re-summarise keeps the old summary with a line that says so;
 click Summarise again to retry.
 
+A link in a card opens a web page or a new email. A link to anything else,
+such as a file, an app or a shortcut, shows as text that you cannot click.
+The saved note keeps each link as the agent wrote it, so another app that
+opens the note can show such a link as a live link.
+
 Hover a card for its controls: **Copy** (the title and the body), collapse or
 expand (fact-checks start collapsed), and delete (✕). A delete of a card that
 still researches stops its research.

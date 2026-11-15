@@ -946,3 +946,54 @@ private func cellFrame(_ text: String, in layout: (NSLayoutManager, NSTextContai
         #expect(lm.usedRect(for: container).width <= width)
     }
 }
+
+/// The link destinations in `s`, in order, as their absolute strings.
+private func links(_ s: NSAttributedString) -> [String] {
+    var found: [String] = []
+    s.enumerateAttribute(.link, in: NSRange(location: 0, length: s.length)) { value, _, _ in
+        if let url = value as? URL { found.append(url.absoluteString) }
+        else if let text = value as? String { found.append(text) }
+    }
+    return found
+}
+
+/// A card shows only a link's label, so a click must not open a scheme that
+/// runs or reaches something on the Mac (GHSA-3xvp-r46q-p3gm). Links keep
+/// `http`, `https` and `mailto`, in any letter case; every other scheme, and
+/// a link with no scheme, becomes its plain label. Each layout that parses
+/// inline markdown is covered: a paragraph, a list item, a heading, a lead
+/// line, a table header and body cell, a block quote, a continuation
+/// paragraph and an autolink.
+@Test func req_card_link_schemes() {
+    let card = """
+    [web](https://example.com/a) [plain](http://example.com/b) [MAIL](mailto:me@example.com) [CAPS](HTTPS://example.com/c)
+
+    [report](file:///Applications/Calculator.app) and <file:///etc/hosts>
+
+    - [docs](shortcuts://run-shortcut?name=X)
+    - [share](smb://host.example/share)
+
+    # [js](javascript:alert(1))
+
+    **Lead** ([note](notes/today.md))
+    - [vnc](vnc://host.example)
+
+    | [head](shortcuts://x) | b |
+    |---|---|
+    | [term](x-apple.systempreferences:com.apple.preference.security) | [ok](https://example.com/d) |
+
+    > [quote](file:///etc/hosts)
+
+    - item
+
+      [cont](smb://host.example/c)
+    """
+    let s = MarkdownText.render(card, style: .answer)
+    #expect(links(s) == [
+        "https://example.com/a", "http://example.com/b", "mailto:me@example.com", "HTTPS://example.com/c",
+        "https://example.com/d",
+    ])
+    for label in ["report", "file:///etc/hosts", "docs", "share", "js", "note", "vnc", "head", "term", "quote", "cont"] {
+        #expect(s.string.contains(label), "the label \(label) stays visible")
+    }
+}

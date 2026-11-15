@@ -825,7 +825,25 @@ struct MarkdownText: NSViewRepresentable {
         // to a run with the code intent, so a character that the monospaced
         // font lacks (such as `∘`) drew blank (issue #108).
         ns.removeAttribute(.inlinePresentationIntent, range: full)
+        // A card shows a link's label, not its destination, and agent text can
+        // come from a prompt injection. So a link keeps only a web or mail
+        // scheme; any other becomes its plain label (GHSA-3xvp-r46q-p3gm).
+        ns.enumerateAttribute(.link, in: full) { value, range, _ in
+            guard let value, !opensSafely(value) else { return }
+            ns.removeAttribute(.link, range: range)
+        }
         return ns
+    }
+
+    /// The link schemes that a click on a card can open.
+    private static let openableSchemes: Set<String> = ["http", "https", "mailto"]
+
+    /// Whether a `.link` attribute value is a URL with a scheme in
+    /// `openableSchemes`, in any letter case.
+    private static func opensSafely(_ link: Any) -> Bool {
+        let url = link as? URL ?? (link as? String).flatMap { URL(string: $0) }
+        guard let scheme = url?.scheme?.lowercased() else { return false }
+        return openableSchemes.contains(scheme)
     }
 
     /// A block of `---`/`***`/`___` (3+), optionally spaced — a horizontal rule.

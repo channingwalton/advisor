@@ -142,6 +142,8 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
   - They write only the temp folders, the CLI's transcripts and its connectors' logs for its working folder, and with a subscription login the login keychain. So a connector cannot move a store into a readable folder to read it there. `#claude-seatbelt`
 - N15. **Codex file tools (issue #120):**
   - A Codex card lane reads local files through Advisor's own Read, Grep and Glob, with connector actions on and off; the classifier does not get them. Each call applies the Claude read policy: a path outside the readable folders, or in a credential path such as `~/.ssh` or `~/.codex`, is refused, and the refusal names the readable folders. The tools run under the Codex Seatbelt profile, and take the folder list of the turn. Glob and Grep walk the folder and follow no symlink, so no pattern takes them out of it. Each task names the folders and the tools. `#codex-files`
+- N16. **Card links (GHSA-3xvp-r46q-p3gm):**
+  - A link that Advisor shows in a card, a NOTE card or an Ask answer, live or saved, opens only an `http`, `https` or `mailto` address. A link with any other scheme (such as `file`, `shortcuts`, `smb` or `javascript`), or with no scheme, shows as its label and cannot be clicked. `#card-link-schemes`
 
 ## Risks
 
