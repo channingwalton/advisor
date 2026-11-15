@@ -3640,8 +3640,10 @@ and an autolink, and the kept schemes in a paragraph and a table body cell. It
 failed before the change, with each removed scheme still a link. A probe that
 rendered through `apply(to:)` into an `IntrinsicHeightTextView` found no link
 in its text storage at a removed label, and found the `https` link in place. A
-click in the running app was not tested: a synthetic click in a test host did
-not reach the link handler.
+synthetic click in a test host did not reach the link handler. In the running
+app (Channing, 2026-11-15), a session note with
+`[calc](file:///System/Applications/Calculator.app)` showed "calc" as plain
+text, and a click on it had no effect.
 
 ## Revisit as it grows
 
