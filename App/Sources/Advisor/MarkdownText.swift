@@ -266,10 +266,16 @@ struct MarkdownText: NSViewRepresentable {
         return out
     }
 
+    // The patterns are built once: a streaming card is parsed again on each
+    // update, and a regex literal at a call site is built again for each line (#139).
+    private static let quotePattern = #/[ \t]*> ?(.*)/#
+    private static let listItemPattern = #/^(\s*)([-*+]|\d+[.)])\s+(.*)$/#
+    private static let tableMarkPattern = #/:?-+:?/#
+
     /// A quote line's content: the line without its `>` marker and the space
     /// after it; nil for any other line.
     private static func quoted(_ line: String) -> String? {
-        line.wholeMatch(of: #/[ \t]*> ?(.*)/#).map { String($0.1) }
+        line.wholeMatch(of: quotePattern).map { String($0.1) }
     }
 
     /// A line's leading whitespace in columns, a tab moving on to the next
@@ -400,12 +406,15 @@ struct MarkdownText: NSViewRepresentable {
         var mark: Character
         var length: Int
 
+        private static let openingPattern = #/[ \t]*(`{3,}|~{3,})(.*)/#
+        private static let closingPattern = #/[ \t]*(`{3,}|~{3,})[ \t]*/#
+
         /// The fence `line` opens. Any indentation is allowed, so a fence
         /// under a list item is still a fence (cards have no indented code
         /// blocks). A backtick fence's info string holds no backtick, so
         /// "```npm i``` …" is inline code.
         init?(opening line: String) {
-            guard let m = line.wholeMatch(of: #/[ \t]*(`{3,}|~{3,})(.*)/#),
+            guard let m = line.wholeMatch(of: Self.openingPattern),
                 let mark = m.1.first, !(mark == "`" && m.2.contains("`"))
             else { return nil }
             self.mark = mark
@@ -414,7 +423,7 @@ struct MarkdownText: NSViewRepresentable {
 
         /// Closed by a line of at least as many of the same mark, and nothing else.
         func isClosed(by line: String) -> Bool {
-            guard let m = line.wholeMatch(of: #/[ \t]*(`{3,}|~{3,})[ \t]*/#) else { return false }
+            guard let m = line.wholeMatch(of: Self.closingPattern) else { return false }
             return m.1.first == mark && m.1.count >= length
         }
     }
@@ -445,7 +454,7 @@ struct MarkdownText: NSViewRepresentable {
     private static func isTableStart(_ raw: [String], at i: Int) -> Bool {
         guard raw[i].contains("|"), raw[i + 1].contains("|") else { return false }
         let marks = cells(raw[i + 1])
-        return marks.count == cells(raw[i]).count && marks.allSatisfy { $0.wholeMatch(of: #/:?-+:?/#) != nil }
+        return marks.count == cells(raw[i]).count && marks.allSatisfy { $0.wholeMatch(of: tableMarkPattern) != nil }
     }
 
     private static func alignment(_ mark: String) -> NSTextAlignment {
@@ -488,7 +497,7 @@ struct MarkdownText: NSViewRepresentable {
     /// A list line's indentation (in columns, as `indentColumns`), its marker
     /// token ("-", "*", "+", "1." or "1)") and its text; nil for any other line.
     private static func listItem(_ line: String) -> (Int, String, String)? {
-        guard let m = line.firstMatch(of: #/^(\s*)([-*+]|\d+[.)])\s+(.*)$/#) else { return nil }
+        guard let m = line.firstMatch(of: listItemPattern) else { return nil }
         let indent = column(after: m.1)
         return (indent, String(m.2), String(m.3))
     }
