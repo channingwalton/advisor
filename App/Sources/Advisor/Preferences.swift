@@ -604,6 +604,7 @@ private struct ContextEditorSheet: View {
             }
         }
         .padding(18)
+        .focusEffectDisabled()
     }
 }
 
@@ -923,6 +924,7 @@ struct PreferencesView: View {
             }
         }
         .frame(width: 480, height: 420)
+        .focusEffectDisabled()
         .onAppear(perform: reloadFromFile)
         .onChange(of: config) { _, new in
             if file.commit(new) {

@@ -54,6 +54,7 @@ struct FolderContextButton: View {
                 }
             }
             .padding(14)
+            .focusEffectDisabled()
         }
     }
 }

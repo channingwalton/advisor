@@ -297,6 +297,7 @@ struct TranscriptView: View {
                     .foregroundStyle(Theme.textSecondary)
                 Button("Stop now", action: terminateAgents)
                     .buttonStyle(.bordered)
+                    .focusEffectDisabled()
             }
         }
         .ignoresSafeArea()
