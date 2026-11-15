@@ -135,6 +135,9 @@ struct TranscriptView: View {
             noteDraft = NoteDraft()
             showAsk = false
             showNote = false
+            // A summary in flight at the close does not keep Summarise
+            // disabled in the next session (issue #144).
+            summarisingLive = false
             // Drop any folder target so reopening the window with the global record
             // button (or ⌘N) starts un-foldered (issue #35).
             winCtx.pendingFolder = nil
