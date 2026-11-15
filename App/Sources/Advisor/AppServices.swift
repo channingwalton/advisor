@@ -21,12 +21,18 @@ final class AppServices: ObservableObject {
     private var recordingEndTask: Task<Void, Never>?
 
     private var started = false
+    /// The most the close waits for the recorder to stop (issue #140).
+    private let closeTimeout: Duration
 
-    init(resolveDirectory: @escaping () -> URL = { SessionArchive.directory }) {
+    init(
+        resolveDirectory: @escaping () -> URL = { SessionArchive.directory },
+        closeTimeout: Duration = Deadline.recordingTeardown
+    ) {
         let store = TranscriptStore()
         self.store = store
         self.sidecar = SidecarManager(store: store)
         self.writer = SessionWriter(store: store, resolveDirectory: resolveDirectory)
+        self.closeTimeout = closeTimeout
     }
 
     /// End capture, retaining ownership while the close guard waits for cards.
@@ -38,6 +44,9 @@ final class AppServices: ObservableObject {
         sidecar.sendSessionEnd()
         let task = Task<Void, Never> { @MainActor in
             await stop?.value
+            // A close that gave up at its deadline cancels this task. The note
+            // is released by then, and the writer may hold the next session.
+            guard !Task.isCancelled else { return }
             writer.end()
         }
         recordingEndTask = task
@@ -46,13 +55,20 @@ final class AppServices: ObservableObject {
 
     /// The recording window can disappear before speech teardown completes.
     /// Keep its finalisation alive independently of SwiftUI's cancelled tasks.
+    /// A recorder that does not stop within `closeTimeout` is left behind, so a
+    /// wedged speech engine cannot hold the note or a reopened window (#140).
     @discardableResult
     func releaseRecording() -> Task<Void, Never> {
         if let recordingCloseTask { return recordingCloseTask }
         isClosingRecording = true
         let end = endRecording()
+        let timeout = closeTimeout
         let task = Task { @MainActor in
-            await end.value
+            if await !Deadline.wait(atMost: timeout, for: { await end.value }) {
+                appLog.write("[advisor] close: recorder still stopping after \(timeout) — saving what is there")
+                end.cancel()
+                if writer.isSessionActive { writer.end() }
+            }
             // Cards may have finished while the close guard waited. Flush them
             // before releasing ownership, then retire the old STT generation.
             writer.flush()

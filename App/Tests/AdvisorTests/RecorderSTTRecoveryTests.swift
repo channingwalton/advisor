@@ -455,6 +455,66 @@ struct RecordingPersistenceTests {
         #expect(!services.isClosingRecording)
     }
 
+    /// Issue #140: a speech engine that never stops does not hold the close.
+    /// After the deadline the note is saved and released, and the barrier that
+    /// a reopened window awaits completes. The time bound is loose on purpose,
+    /// as in `req_quit_deadline`.
+    @MainActor
+    @Test func req_close_deadline() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-close-deadline-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let services = AppServices(
+            resolveDirectory: { root }, closeTimeout: .milliseconds(100))
+        let harness = try makeHarness(sessionGeneration: 27, store: services.store)
+        services.recorder = harness.recorder
+        services.writer.start()
+        let url = try #require(services.writer.currentFileURL)
+        await startListening(harness)
+        harness.sysEngine.onFinal?("Said before the close", 27)
+        #expect(await eventually { !services.store.utterances.isEmpty })
+        harness.micEngine.setStopDelay(nanoseconds: 3_600_000_000_000) // never stops in time
+
+        let start = ContinuousClock.now
+        services.releaseRecording()
+        await services.recordingCloseTask?.value
+
+        #expect(ContinuousClock.now - start < .seconds(60))
+        let saved = try String(contentsOf: url, encoding: .utf8)
+        #expect(saved.contains("Said before the close"))
+        #expect(saved.split(separator: "\n").contains { $0.hasPrefix("ended:") })
+        #expect(services.writer.currentFileURL == nil)
+        #expect(services.store.sessionGeneration == 28)
+        #expect(!services.isClosingRecording)
+        #expect(services.recordingCloseTask == nil)
+    }
+
+    /// Issue #140: a stop that completes after the close deadline does not end
+    /// the session that the reopened window started.
+    @MainActor
+    @Test func aLateStopDoesNotEndTheNextSession() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("advisor-close-late-stop-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let services = AppServices(
+            resolveDirectory: { root }, closeTimeout: .milliseconds(50))
+        let old = try makeHarness(sessionGeneration: 35, store: services.store)
+        services.recorder = old.recorder
+        services.writer.start()
+        await startListening(old)
+        old.micEngine.setStopDelay(nanoseconds: 500_000_000)
+        await services.releaseRecording().value
+
+        services.writer.start()
+        let next = try #require(services.writer.currentFileURL)
+        // The old recorder runs its stops in order, so this one ends after the late one.
+        await old.recorder.stop().value
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(services.writer.isSessionActive)
+        #expect(services.writer.currentFileURL == next)
+    }
+
     /// ⌘Q (code review 2026-10-06): the quit teardown saves what the close path
     /// saves — microphone text still in the echo delay, and finals the speech
     /// engines emit while finishing — before the process exits.

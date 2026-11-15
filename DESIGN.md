@@ -1184,6 +1184,16 @@ window awaits this task, and late callbacks from the old generation are
 ignored. The Wait path drains speech first, keeps the writer while cards
 finish, and starts no new agent work.
 
+**The close has the quit deadline (2026-11-15, issue #140).** The close task
+waits at most 5 s for the recorder to stop, the same deadline as ⌘Q. Both use
+`Deadline.wait`. After the deadline, the task ends the session if it is still
+active, saves, releases the note and advances the generation, so a reopened
+window can start. The stop that was cut off does not call `writer.end()` when
+it completes, because the writer may hold the next session by then. Late
+results from that recorder carry the old generation and are dropped. Reason:
+before this change, a wedged SpeechAnalyzer held the close task with no limit,
+so a reopened window did not start, and the note was saved only at ⌘Q.
+
 ## Delete sessions (2026-06-19, issue #8)
 
 **Delete** is in the detail pane's `…` menu, behind a confirmation. A trash icon

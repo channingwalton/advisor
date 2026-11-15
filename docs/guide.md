@@ -42,7 +42,8 @@ controls then lose their labels.
   it with full context. The session ends when you close the recording window.
   If cards are still researching, the close asks you to **Wait** for them or to
   **Stop and Close**. A close, and a quit with ⌘Q, adds the last speech to the
-  note before the save.
+  note before the save. If speech recognition has not stopped after 5 seconds,
+  the app saves the note without the rest.
 - **Ask** (⌘K) opens a box for a question about the conversation, or about
   anything else. The answer comes as a card. **Return** sends it, and **⌥↵**
   starts a new line. You can ask again while an answer is in progress, and the
