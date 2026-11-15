@@ -210,8 +210,8 @@ function listed(lines: string[]): string {
 
 /// Glob, from the resolved root. A match with a `..` segment is left out (a
 /// backslash is a character of a name on macOS and Linux, not a separator):
-/// `fs.globSync` takes `[.][.]` as `..`, which the policy's check of the
-/// pattern's text does not see (code review 2026-11-14). A pattern can go
+/// `fs.globSync` takes `[.][.]` as `..`. The policy refuses such a pattern
+/// (`patternStaysInRoot`), and this is the second guard. A pattern can go
 /// through a symlink (`link/*`), so a match that Read would refuse is left out
 /// too. A match whose resolved path is itself has no symlink in it, so it is
 /// in the folder that the policy allowed, which can hold no store

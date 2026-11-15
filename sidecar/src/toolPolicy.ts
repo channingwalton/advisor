@@ -362,14 +362,218 @@ export function absolutePath(p: unknown, home: string): string | null {
 /// A Glob pattern (or Grep `glob` filter) that stays inside the root the policy
 /// checked. The CLI searches an absolute pattern's own base directory instead of
 /// `path`, so a permitted `path` with pattern `~/.ssh/*` listed the denied
-/// directory (code review 2026-10-06). Refuse a pattern, or any brace
-/// alternative of it (`{a, /etc/*}`), that starts with `/` or `~`, and any `..`
-/// — the folder belongs in `path`. A `~` inside a name is literal (`*~`). Grep's
-/// `glob` is optional (undefined passes).
+/// directory (code review 2026-10-06). Refuse the text `..`, and a pattern or
+/// brace alternative of it (`{a, /etc/*}`) that starts with `/` or `~` or has a
+/// segment that can be `..`: the folder belongs in `path`. `fs.globSync`, which
+/// Advisor's own Glob runs, reads `[.][.]` as `..`, `{x,}/etc` as `/etc`, and
+/// each `\` as a `/` before it expands braces (`{x,\}/etc` is `/etc`), where the
+/// Claude CLI reads `\` as an escape (seen 2026-11-14). So the whole check runs
+/// on both readings. A `~` inside a name is literal (`*~`). Grep's `glob` is
+/// optional (undefined passes).
 function patternStaysInRoot(p: unknown): boolean {
   if (p === undefined) return true;
-  if (typeof p !== "string") return false;
-  return !(/(^|[{,])\s*[/~]/.test(p) || p.includes(".."));
+  if (typeof p !== "string" || p.length > PATTERN_CHARS || p.includes("..")) return false;
+  return [...new Set([p, p.replaceAll("\\", "/")])].every((reading) => {
+    // A `/` or `~` after any `{` or `,`, also of a group that nothing closes.
+    if (/(^|[{,])\s*[/~]/.test(reading) || !plainBraces(reading)) return false;
+    const alternatives = braceAlternatives(reading);
+    return alternatives !== null && [...new Set([reading, ...alternatives])].every((alt) =>
+      !startsOutside(alt) && !alt.split("/").some(spellsDotDot)
+    );
+  });
+}
+
+/// The longest pattern that the policy judges. Each check is linear in the
+/// pattern or quadratic in one segment, and runs on each alternative of each
+/// reading, on the sidecar's only thread: a 1020-character pattern with 256
+/// alternatives took 1.2 s (code review 2026-11-14).
+const PATTERN_CHARS = 256;
+/// The most brace alternatives that the policy judges in one pattern.
+const BRACE_ALTERNATIVES = 64;
+
+/// The brace alternatives of a glob pattern: `{a,b}c` gives `ac` and `bc`, and
+/// `{a}` gives `a`. null for more than BRACE_ALTERNATIVES, or for a group that
+/// holds an escape or a class with a comma, a brace or a leading `]` in it,
+/// which glob programs split in different ways: the policy refuses the
+/// pattern. A plain class (`{[Mm][Dd],txt}`) splits the same in each.
+function braceAlternatives(p: string): string[] | null {
+  const group = firstBraceGroup(p);
+  if (group === undefined) return [p];
+  const { start, end, commas } = group;
+  if (/\\|\[[!^]?\]|\[[^\]]*[,{}]/.test(p.slice(start + 1, end))) return null;
+  const cuts = [start, ...commas, end];
+  const out: string[] = [];
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const rest = braceAlternatives(p.slice(0, start) + p.slice(cuts[k] + 1, cuts[k + 1]) + p.slice(end + 1));
+    if (rest === null || out.push(...rest) > BRACE_ALTERNATIVES) return null;
+  }
+  return out;
+}
+
+/// Braces that every glob program groups the same way: each `{` closed, each
+/// `}` closing one, and a comma at the level of each group. Node pairs other
+/// braces again: it reads `.{},.}` as `.` with the group `{},.}`, so as `.}`
+/// or `..` (code review 2026-11-14). An escaped brace or comma is literal.
+function plainBraces(p: string): boolean {
+  const commas: number[] = [];
+  for (let j = 0; j < p.length; j++) {
+    if (p[j] === "\\") j++;
+    else if (p[j] === "{") commas.push(0);
+    else if (p[j] === "," && commas.length > 0) commas[commas.length - 1]++;
+    else if (p[j] === "}" && !commas.pop()) return false;
+  }
+  return commas.length === 0;
+}
+
+/// The first `{` that a `}` closes, with the commas at its own level, in one
+/// pass. An escaped brace or comma is literal, and so is a `{` that nothing
+/// closes.
+function firstBraceGroup(p: string): { start: number; end: number; commas: number[] } | undefined {
+  const open: number[] = [];
+  let first: { start: number; end: number } | undefined;
+  for (let j = 0; j < p.length; j++) {
+    if (p[j] === "\\") j++;
+    else if (p[j] === "{") open.push(j);
+    else if (p[j] === "}" && open.length > 0) {
+      const start = open.pop()!;
+      if (first === undefined || start < first.start) first = { start, end: j };
+    }
+  }
+  if (first === undefined) return undefined;
+  const commas: number[] = [];
+  let depth = 0;
+  for (let j = first.start + 1; j < first.end; j++) {
+    if (p[j] === "\\") j++;
+    else if (p[j] === "{") depth++;
+    else if (p[j] === "}") depth--;
+    else if (p[j] === "," && depth === 0) commas.push(j);
+  }
+  return { ...first, commas };
+}
+
+/// A pattern that starts with `/` or `~` after any spaces, as a literal, an
+/// escape (`\/etc`) or a class that can match `/` (`[/]etc`). A class makes no
+/// `~` into the home folder.
+function startsOutside(alt: string): boolean {
+  const first = globUnits(alt.trimStart())[0];
+  return first !== undefined && (first.can("/") || first.char === "~");
+}
+
+/// A path segment that a glob program can read as `..`: two characters that
+/// can each be a dot, as a literal, an escape or a class (`[.][.]`, `\.\.`), or
+/// an extglob with a dot, a class or an escape in its brackets, at any depth
+/// (`+(.)`, `@(@(x)|.)`). A segment with `*`, `?` or `!(...)` matches only
+/// names that a folder listing gives, and no listing gives `..`.
+function spellsDotDot(segment: string): boolean {
+  if (extglobDot(segment)) return true;
+  const units = globUnits(segment);
+  return units.length === 2 && units.every((u) => !u.wild && u.can("."));
+}
+
+/// A dot, `[` or `\` inside the brackets of an extglob (`@(`, `+(`, `?(`,
+/// `*(`, `!(`), at any depth, in one pass. `*(1).md` has none.
+function extglobDot(segment: string): boolean {
+  let depth = 0;
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i];
+    if (c === "(" && (depth > 0 || (i > 0 && "?*+@!".includes(segment[i - 1])))) depth++;
+    else if (c === ")" && depth > 0) depth--;
+    else if (depth > 0 && ".[\\".includes(c)) return true;
+  }
+  return false;
+}
+
+/// One character of a glob pattern: a wildcard (`*`, `?`), a literal or
+/// escaped character (`char`), or a class. `can` tells whether it can match a
+/// given character.
+type GlobUnit = { wild: boolean; char?: string; can: (c: string) => boolean };
+
+function globUnits(s: string): GlobUnit[] {
+  const closes = classCloses(s);
+  const units: GlobUnit[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const end = s[i] === "[" ? classEnd(s, i, closes) : -1;
+    if (s[i] === "*" || s[i] === "?") {
+      units.push({ wild: true, can: () => false });
+    } else if (end > 0) {
+      units.push({ wild: false, can: classCan(s.slice(i + 1, end)) });
+      i = end;
+    } else {
+      const char = s[i] === "\\" && i + 1 < s.length ? s[++i] : s[i];
+      units.push({ wild: false, char, can: (c) => c === char });
+    }
+  }
+  return units;
+}
+
+/// The index of the `]` that closes the class at `s[i]`, or -1. A `]` first in
+/// the class is a member. `closes` is `classCloses(s)`.
+function classEnd(s: string, i: number, closes: Int32Array): number {
+  let j = i + 1;
+  if (s[j] === "!" || s[j] === "^") j++;
+  if (s[j] === "]") j++;
+  return closes[j] ?? -1;
+}
+
+/// For each index of `s`, the first `]` that a scan of a class from there
+/// reaches, or -1. The scan skips an escaped character and a POSIX class
+/// (`[:alpha:]`), which holds its own `]`. One pass from the end, so each
+/// segment costs linear time.
+function classCloses(s: string): Int32Array {
+  const closes = new Int32Array(s.length + 2).fill(-1);
+  for (let j = s.length - 1; j >= 0; j--) {
+    const posix = posixClass(s, j);
+    closes[j] = posix !== undefined ? closes[posix.end + 1]
+      : s[j] === "\\" ? closes[j + 2]
+      : s[j] === "]" ? j
+      : closes[j + 1];
+  }
+  return closes;
+}
+
+/// The POSIX class at `s[j]`, and the index of its last `]`: a name
+/// (`[:alpha:]`), an equivalence class (`[=.=]`) or a collating symbol (`[.].]`,
+/// `[.space.]`). Only a name in letters gives a `name`; the others can be any
+/// character. Only letters make a class name, so a name never holds the
+/// class's own `]`.
+function posixClass(s: string, j: number): { name: string; end: number } | undefined {
+  const m = s[j] === "[" && j + 1 < s.length && ":=.".includes(s[j + 1])
+    ? /^\[(?::([a-z]{1,12}):|=.=|\.(?:[a-z-]{2,20}|.)\.)\]/.exec(s.slice(j, j + 28))
+    : null;
+  return m ? { name: m[1] ?? "", end: j + m[0].length - 1 } : undefined;
+}
+
+/// The POSIX classes that hold no punctuation, so no `.`, `/` or `~`.
+const POSIX_LETTERS = new Set(["alnum", "alpha", "blank", "cntrl", "digit", "lower", "space", "upper", "word", "xdigit"]);
+
+/// Whether the class with this body (between `[` and `]`) can match a
+/// character, judged on the safe side: a negated class can match anything but
+/// `/` and its own literal members, and a POSIX class other than
+/// POSIX_LETTERS can match any punctuation.
+function classCan(body: string): (c: string) => boolean {
+  const negated = body[0] === "!" || body[0] === "^";
+  const chars: { char: string; escaped: boolean }[] = [];
+  let posixPunct = false;
+  for (let j = negated ? 1 : 0; j < body.length; j++) {
+    const posix = posixClass(body, j);
+    if (posix !== undefined) {
+      posixPunct ||= !POSIX_LETTERS.has(posix.name);
+      j = posix.end;
+    } else if (body[j] === "\\" && j + 1 < body.length) {
+      chars.push({ char: body[++j], escaped: true });
+    } else {
+      chars.push({ char: body[j], escaped: false });
+    }
+  }
+  const member = (c: string): boolean => {
+    for (let k = 0; k < chars.length; k++) {
+      const range = chars[k + 1]?.char === "-" && !chars[k + 1].escaped && k + 2 < chars.length;
+      if (range ? chars[k].char <= c && c <= chars[k + 2].char : chars[k].char === c) return true;
+      if (range) k += 2;
+    }
+    return false;
+  };
+  return negated ? (c) => c !== "/" && !member(c) : (c) => posixPunct || member(c);
 }
 
 /// The sandbox policy for one tool call. Shared by the PreToolUse gate and
@@ -416,7 +620,11 @@ export function toolDecision(toolName: string, input: unknown, policy: SandboxPo
     case "Glob": {
       if (!patternStaysInRoot(toolName === "Glob" ? args.pattern : args.glob)) {
         return refused(
-          `Access denied: ${toolName} patterns must be relative — no absolute, ~ or .. patterns. Put the folder in \`path\`.`
+          `Access denied: ${toolName} patterns must be relative — no absolute, ~ or .. pattern in any spelling ` +
+            `(such as \`[.][.]\` or \`{x,}/etc\`). A pattern also has at most ${PATTERN_CHARS} characters and ` +
+            `${BRACE_ALTERNATIVES} brace alternatives. Each \`{\` needs its \`}\` and a comma, and holds no \`\\\` ` +
+            `and no class with a comma or brace in it. ` +
+            `Put the folder in \`path\`.`
         );
       }
       return decide(absolutePath(args.path, home), searchRootAllowed);

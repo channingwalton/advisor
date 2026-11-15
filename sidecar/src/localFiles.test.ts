@@ -7,7 +7,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { FILE_TOOLS, fileTool, mcpReply, readFolderList, type FileToolResult } from "./localFiles.js";
-import type { SandboxPolicy } from "./toolPolicy.js";
+import { toolDecision, type SandboxPolicy } from "./toolPolicy.js";
 
 // Advisor's own file tools for Codex card lanes (#120), against real files in
 // a synthetic home. The Codex Seatbelt profile that the connector also runs
@@ -113,13 +113,45 @@ test("#codex-files Glob refuses a pattern or a path that leaves the readable fol
   assert.equal(fileTool("Glob", { path: notes }, policy).isError, true);
 });
 
-test("#codex-files Glob lists nothing outside the folder for a pattern that spells `..` another way", () => {
-  // `fs.globSync` takes `[.][.]` as `..`; the policy's pattern check looks for the text `..` (code review 2026-11-14).
+test("#codex-files Glob refuses a pattern that spells `..` or `/` another way", () => {
+  // `fs.globSync` takes `[.][.]` as `..`, and `\` and `{x,}` before an
+  // absolute path as an absolute pattern (code review and probe, 2026-11-14).
   for (const pattern of [
     "[.][.]/Other/*", "[.][.]/.ssh/*", "sub/[.][.]/[.][.]/Other/*", "{.,x}./Other/*", "[.]{.,}/Other/*", "[.]./Other/*",
+    `\\${home}/Other/*`, `\\.${home}/Other/*`, `{x,}${home}/Other/*`, "x\\[.][.]\\Other/*",
   ]) {
-    assert.equal(fileTool("Glob", { path: notes, pattern }, policy).text, "No files found", pattern);
+    assertRefused(fileTool("Glob", { path: notes, pattern }, policy), pattern);
   }
+});
+
+test("#sandbox-glob-pattern the policy refuses each short pattern that takes fs.globSync out of the folder", () => {
+  // Every word of up to two characters from the alphabet, of up to four from
+  // its first eight, and of up to five from the brace characters, before
+  // `/Other/*` and before the absolute path of `Other`. Runs to four
+  // characters from the whole alphabet found `{,\}`, and a review found
+  // `.{},.}` at five (2026-11-14).
+  const ALPHABET = [".", "[", "]", "{", "}", ",", "\\", "x", "*", "/", "!", "-", "+", "(", ")", "?"];
+  const words = (alphabet: string[], n: number): string[] =>
+    n === 0 ? [""] : words(alphabet, n - 1).flatMap((w) => alphabet.map((c) => w + c));
+  const prefixes = [1, 2].flatMap((n) => words(ALPHABET, n))
+    .concat([3, 4].flatMap((n) => words(ALPHABET.slice(0, 8), n)))
+    .concat(words([".", "{", "}", ",", "\\", "x"], 5));
+  let escapes = 0;
+  for (const prefix of prefixes) {
+    for (const pattern of [`${prefix}/Other/*`, `${prefix}${path.join(home, "Other")}/*`]) {
+      let matches: string[];
+      try {
+        matches = fs.globSync(pattern, { cwd: notes });
+      } catch {
+        continue; // not a pattern to globSync
+      }
+      const outside = matches.some((m) => !path.resolve(notes, m).startsWith(notes + path.sep));
+      if (!outside) continue;
+      escapes++;
+      assert.equal(toolDecision("Glob", { path: notes, pattern }, policy).behavior, "deny", pattern);
+    }
+  }
+  assert.ok(escapes > 0, "no pattern left the folder, so the test checks nothing");
 });
 
 test("#codex-files Glob lists a note whose name holds a backslash and `..`", () => {

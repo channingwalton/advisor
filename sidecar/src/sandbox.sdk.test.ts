@@ -94,6 +94,9 @@ function scripted(id: string): { name: string; input: Record<string, unknown> } 
     case "tildeGlob": return { name: "Glob", input: { path: "~/Documents", pattern: "*.txt" } };
     case "globScoped": return { name: "Glob", input: { path: p("Documents"), pattern: "*.txt" } };
     case "globEscape": return { name: "Glob", input: { path: p("Documents"), pattern: p(".ssh", "*") } };
+    // Spellings that Node's glob reads as `..` or as an absolute pattern.
+    case "globClassDotDot": return { name: "Glob", input: { path: p("Documents"), pattern: "[.][.]/.ssh/*" } };
+    case "globBraceAbsolute": return { name: "Glob", input: { path: p("Documents"), pattern: `{x,}${p(".ssh")}/*` } };
     // The user's connectors, as the CLI names them (`mcp__<server>__<tool>`).
     case "mcpRead": return { name: "mcp__stub__lookup", input: {} };
     case "mcpAction": return { name: "mcp__stub__share_file", input: {} };
@@ -274,6 +277,16 @@ test("#sandbox-glob-pattern harness control: a scoped Glob lists its files", asy
 test("#sandbox-glob-pattern an absolute pattern cannot search outside its checked root", async () => {
   const out = await toolResult(session(work), "globEscape");
   assert.ok(!out.includes(HIDDEN_NAME), out);
+});
+
+test("#sandbox-glob-pattern the gate refuses a pattern that spells `..` or `/` another way", async () => {
+  // The CLI 2.1.173 itself lists nothing for these (probe, 2026-11-14); the
+  // gate refuses them as Advisor's own Glob does.
+  for (const id of ["globClassDotDot", "globBraceAbsolute"]) {
+    const out = await toolResult(session(work), id);
+    assert.ok(out.includes("patterns must be relative"), `${id}: ${out}`);
+    assert.ok(!out.includes(HIDDEN_NAME), `${id}: ${out}`);
+  }
 });
 
 test("#sandbox-fold-spelling a spelling that the filesystem folds to a denied path is not read", async (t) => {

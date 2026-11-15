@@ -551,9 +551,61 @@ test("#sandbox-glob-pattern refuses patterns that could search outside the check
   }
 });
 
+test("#sandbox-glob-pattern refuses a pattern that spells `..`, `/` or `~` another way", () => {
+  // `fs.globSync`, which Advisor's own Glob runs, reads `[.][.]` as `..` and
+  // `\/etc` and `{x,}/etc` as `/etc` (seen 2026-11-14). The policy judges each
+  // brace alternative, and each segment that a class, an escape or an extglob
+  // can make `..`.
+  for (const pattern of [
+    "[.][.]/.ssh/*", "[.]./.ssh/*", ".[.]/.ssh/*", "\\.\\./.ssh/*", ".\\./.ssh/*", "{.,x}./.ssh/*", "{.}{.}/.ssh/*",
+    "{x,.}{.,y}/.ssh/*", "sub/{.,x}./.ssh/*", "[--/][--/]/.ssh/*", "[!x][!x]/.ssh/*", "[[:punct:]][[:punct:]]/.ssh/*",
+    "[.x][.x]/.ssh/*", "+(.)/.ssh/*", "@(.)@(.)/.ssh/*",
+    // Brace groups that Node pairs again: a group with no comma, and a `}`
+    // that closes nothing (code review 2026-11-14).
+    ".{},.}/.ssh/*", ".{},}./.ssh/*", "{x},}/home/u/.ssh/*", "{.}x,}/home/u/.ssh/*", "{a}/*", "x}/*",
+    // A nested extglob, and the POSIX equivalence and collating classes (code review 2026-11-14).
+    "@(@(x)|.)@(@(x)|.)/.ssh/*", "[[=.=]][[=.=]]/.ssh/*", "[[.period.]][[.period.]]/.ssh/*",
+    "\\/home/u/.ssh/*", "{x,}/home/u/.ssh/*", "{,}/home/u/.ssh/*", "{{x,},y}/home/u/.ssh/*", "[/]home/u/.ssh/*",
+    "{x,}~/.ssh/*", "\\~/.ssh/*", "{~/.ssh/*", "{x,/etc/*",
+    // A `\` that Node reads as `/` before it expands braces (code review 2026-11-14).
+    "{x,\\}/home/u/.ssh/*", "{,\\}/home/u/.ssh/*", "sub\\{.,x}.\\{.,x}.\\.ssh/*", "\\./home/u/.ssh/*",
+    // More alternatives or characters than the policy judges, and a class in a brace group.
+    "{a,b}".repeat(7) + "/*", "x".repeat(257), "{[.,][.,],y}/.ssh/*",
+  ]) {
+    assert.equal(decide("Glob", { path: "/home/u/Documents", pattern }), "deny", pattern);
+    assert.equal(decide("Grep", { path: "/home/u/Documents", pattern: "KEY", glob: pattern }), "deny", pattern);
+  }
+});
+
+test("#sandbox-glob-pattern judges a long pattern quickly", () => {
+  // The gate runs on the sidecar's only thread. A 1020-character pattern took
+  // 1.2 s before the limits (code review 2026-11-14).
+  for (const pattern of [
+    "{a,b}".repeat(6) + "[".repeat(226), "{".repeat(238) + "{,}".repeat(6), "[".repeat(128) + "\\]".repeat(64),
+    "{a,b}".repeat(6) + "[[:alpha:]".repeat(22), "{a,b}".repeat(6) + "[\\".repeat(113),
+    "{a,b}".repeat(6) + "[[:".repeat(75),
+  ]) {
+    // About 2 ms each on an M-series Mac, and 40 ms with a scan of each class
+    // to the end of its segment. The best of three runs, after one that
+    // compiles the code, with room for a slow CI runner.
+    decide("Glob", { path: "/home/u/Documents", pattern });
+    let ms = Infinity;
+    for (let run = 0; run < 3; run++) {
+      const started = performance.now();
+      decide("Glob", { path: "/home/u/Documents", pattern });
+      ms = Math.min(ms, performance.now() - started);
+    }
+    assert.ok(ms < 50, `${pattern.slice(0, 40)}…: ${ms.toFixed(0)} ms`);
+  }
+});
+
 test("#sandbox-glob-pattern keeps ordinary relative patterns", () => {
   // A ~ inside a name is literal (editor backups `*~`); only a leading one is home.
-  for (const pattern of ["**/*.md", "*.{md,txt}", "notes/**/2026-*.md", "**/*~"]) {
+  for (const pattern of [
+    "**/*.md", "*.{md,txt}", "notes/**/2026-*.md", "**/*~", ".obsidian/*", "**/.*", ".*", "*", "??.md", "[0-9]*.md",
+    "[ab].md", "[!.]*", "{a,b}/*.md", "a{b,c}d/*", "[[:alpha:]]*.md", "[.]obsidian/*", "notes.d/*",
+    "**/*.{[Mm][Dd],txt}", "**/*(1).md",
+  ]) {
     assert.equal(decide("Glob", { path: "/home/u/Documents", pattern }), "allow", pattern);
     assert.equal(decide("Grep", { path: "/home/u/Documents", pattern: "x", glob: pattern }), "allow", pattern);
   }

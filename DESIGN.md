@@ -297,7 +297,8 @@ One policy, `toolDecision`, now applies in two places:
   resolves against the CLI's working directory, so the policy could judge a
   different file. A search must name its `path`. Glob patterns and Grep `glob`
   filters must be relative: no leading `/`, `~`, `..` or absolute brace
-  alternative.
+  alternative. (Since 2026-11-14, also no other spelling of these: *Search
+  patterns are judged in each spelling*.)
 - **The agents' working directory is an empty folder**,
   `~/Library/Application Support/Advisor/agent-cwd` (`agentCwd()`), so the
   implicit approval inside it reaches nothing. Codex keeps `$HOME`; its
@@ -696,6 +697,89 @@ form counts as unusable, because Swift's dictionary merges them.
   `~/Library`. Its caption gives the rule. A mark needs the denylist on the
   app side, through the protocol or a copy of the list, and a copy could
   differ from the rule that the sidecar enforces.
+
+### Search patterns are judged in each spelling (2026-11-14, GHSA-6xc8-f55f-jxqr)
+
+Decision: `patternStaysInRoot` (`toolPolicy.ts`), which judges a Glob pattern
+and a Grep `glob` for Claude and for Advisor's own file tools, judges the
+pattern and each of its brace alternatives. It refuses one that starts with
+`/`, `\` or `~`, or that has a segment that a glob program can read as `..`:
+two characters that can each be a dot, as a literal, an escape or a class
+(`[.][.]`, `\.\.`, `[[=.=]]`), or an extglob with a dot, a class or an escape
+in its brackets at any depth (`+(.)`, `@(@(x)|.)`). The whole check runs on
+two readings of the pattern: with `\` as an escape, as the Claude CLI reads
+it, and with each `\` as a `/`, as Node reads it before it expands braces.
+It also refuses a pattern longer than 256 characters, and one with more than
+64 alternatives. Braces must be plain, because glob programs group other
+braces in different ways: each `{` closed, each `}` closing one, a comma at
+the level of each group, and in a group no escape and no class with a comma,
+a brace or a leading `]` in it. A plain class in a group passes
+(`*.{[Mm][Dd],txt}`). The refusal names each of these rules, so the agent
+can see what to change.
+
+Reason: the check looked only for the text `..` and a leading `/` or `~`.
+Probed on 2026-11-14:
+
+- `fs.globSync`, which Advisor's own Glob runs, reads `[.][.]` and `{.,x}.` as
+  `..`, `{x,}/etc` as `/etc`, and `\` as `/`, so `\/etc` and `\.\etc` are
+  absolute. Advisor's Glob listed nothing through them, because of two other
+  guards: it leaves out a match with a `..` segment, and it joins an absolute
+  match to the root.
+- The real Claude CLI 2.1.173, with no policy, left `path` only for a pattern
+  that starts with `/`. In Glob and in Grep's `glob`, `../B/*`, `[.][.]/B/*`,
+  `{.,x}./B/*`, `\.\./B/*`, `{x,}` or `\` before an absolute path, and
+  `~/B/*` listed nothing.
+
+So no spelling read a file outside the readable folders. The policy now
+refuses them itself, so a later CLI or Node version that reads a spelling
+another way meets the refusal. Advisor's Glob keeps its two guards as a
+second layer.
+
+The code review of the first version (2026-11-14) found two more spellings:
+`{x,\}` before an absolute path, and `sub\{.,x}.\{.,x}.\Other/*`. That
+version expanded braces only with `\` as an escape, and judged the `/`
+reading of `\` only segment by segment. It also scanned each class to the
+end of its segment: a 1020-character pattern took 1.2 s on the sidecar's
+only thread. Now each segment costs linear time, and the worst pattern under
+the limits takes about 2 ms. The second review found that the rule missed
+its own cases: a nested extglob, and the POSIX equivalence and collating
+classes, which Node does not read as `..` but bash does. It also refused
+`{[Mm][Dd],txt}`, a safe pattern that passed before. The fourth review found
+that Node pairs braces again: it reads `.{},.}` as `.` with the group `{},.}`,
+so as `.}` or `..`, and `{x},}` before an absolute path as that path. The
+policy had paired the first `{` with the first `}`. So braces must now be
+plain, as above.
+
+The rule judges on the safe side. A `*`, `?` or `!(...)` matches only names
+that a folder listing gives, and no listing gives `..`, so `.*` and `*` pass.
+A negated class can match anything but `/` and its own members, and a POSIX
+class other than the letter, digit and space ones can match any punctuation.
+Cost: a few safe patterns are refused, such as a leading `\` (`\[draft\]*`),
+`[.x][.x]`, `{[.,]x,y}`, and an extglob with a dot in it (`+(.)`, and also
+`@(*.md|*.txt)`, which the Claude CLI does not read as an extglob), and
+braces that are not plain, such as `{md}` or a name with a brace in it
+(`notes {draft}.md`). The old textual refusal of a `/` or `~` after any `{`
+or `,` stays as a second check.
+
+Verified: `sandbox.test.ts` refuses each spelling above and passes ordinary
+patterns (`*.{md,txt}`, `.obsidian/*`, `[!.]*`, `**/*(1).md`), and judges
+each of six slow patterns in under 50 ms. The limits are the guard there: a
+scan of each class to the end of its segment takes about 40 ms under them,
+and the linear scan 2 ms. `localFiles.test.ts` runs `fs.globSync` on every
+pattern of up to two characters from 16 glob characters, of up to four from
+eight of them, and of up to five from `.{},\x`, before a relative and an
+absolute path: the policy refuses each one that leaves the folder. A run to
+four characters from all 16 (139,808 patterns) found only `{,\}`, the
+review's spelling, against the first version, and none against the next
+two; it was too short for `.{},.}`, which has five. A run to five
+characters from `.[]{},\x` (74,896 patterns) found none against the rule
+with plain braces. `sandbox.sdk.test.ts`:
+through the real CLI, the gate refuses `[.][.]/.ssh/*` and `{x,}` before an
+absolute path; with the old rule the test fails. A build without each part
+of the rule (the start, the `/` reading, the braces, plain braces and their
+comma rule, the textual check after `{` or `,`, the classes, the limits, the
+nested extglob, the POSIX classes, the plain class in a group) failed a
+test.
 
 ## Connector tools (2026-06-13)
 
@@ -1814,8 +1898,9 @@ commands under the CLI's own sandbox, would need the outer wrapper changed.
   judged the call is judged too. So Glob and Grep give resolved paths: under
   `~/Library/Mobile Documents/...` for a `~/Notes` that is a symlink there. Glob leaves out a match with a `..` in it:
   `fs.globSync` takes `[.][.]` as `..`, which the policy's check of the
-  pattern's text does not see, and the first Glob listed files beside the
-  folder that way. Read and Grep open the resolved path with `O_NOFOLLOW` and
+  pattern's text did not see then, and the first Glob listed files beside the
+  folder that way. The policy now refuses such spellings too (*Search
+  patterns are judged in each spelling*). Read and Grep open the resolved path with `O_NOFOLLOW` and
   `O_NONBLOCK`, and judge what they opened (`fstat`): a symlink swapped in at
   the end of the path is refused, and a pipe gives an error, where the first
   Read waited on it for ever. A tool error is the call's error result: the
