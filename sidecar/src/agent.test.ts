@@ -19,6 +19,8 @@ import { classifyOn } from "./trigger.js";
 interface FakeSpawn {
   messages: AsyncQueue<unknown>;
   interrupted: boolean;
+  /// How many times the session called `close()` on the stream.
+  closed: number;
   args: unknown;
 }
 
@@ -30,7 +32,7 @@ function makeFakeQuery(): { queryFn: QueryFn; spawns: FakeSpawn[] } {
   const spawns: FakeSpawn[] = [];
   const queryFn = ((args: unknown) => {
     const messages = new AsyncQueue<unknown>();
-    const rec: FakeSpawn = { messages, interrupted: false, args };
+    const rec: FakeSpawn = { messages, interrupted: false, closed: 0, args };
     spawns.push(rec);
     return {
       [Symbol.asyncIterator]: () => {
@@ -46,6 +48,11 @@ function makeFakeQuery(): { queryFn: QueryFn; spawns: FakeSpawn[] } {
       },
       interrupt: async () => {
         rec.interrupted = true;
+      },
+      // As the SDK's: it ends the stream, which ends the session's loop.
+      close: () => {
+        rec.closed++;
+        messages.end();
       },
     };
   }) as unknown as QueryFn;
@@ -170,6 +177,45 @@ test("reset() then immediate run() keeps the new task off the old teardown (issu
   const r2 = await r2p;
   assert.equal(r2.text, "answer2"); // not "" with error "agent session ended"
   assert.equal(r2.error, undefined);
+});
+
+// #142: reset() must stop the CLI, not only end its input. A turn that never
+// emits `result` otherwise keeps its process until the sidecar exits.
+test("reset() closes the query of a turn that never emits a result (#142)", async () => {
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(opts, queryFn);
+  const unhandled: unknown[] = [];
+  const onUnhandled = (e: unknown) => unhandled.push(e);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const r1p = session.run("task1", undefined, 1000);
+    session.reset();
+    assert.equal((await r1p).error, "agent session reset");
+    assert.equal(spawns[0].closed, 1, "reset closes the query");
+
+    // The session no longer holds the old stream: interrupt reaches no one.
+    await session.interrupt();
+    assert.equal(spawns[0].interrupted, false);
+
+    // The next generation is not affected by the old loop's end.
+    const r2p = session.run("task2", undefined, 1000);
+    assert.equal(spawns.length, 2);
+    await setImmediate();
+    spawns[1].messages.push(success("answer2"));
+    const r2 = await r2p;
+    assert.equal(r2.text, "answer2");
+    assert.equal(r2.error, undefined);
+    assert.equal(spawns[1].closed, 0);
+    await setImmediate();
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
+});
+
+test("reset() of a session that never started does nothing (#142)", () => {
+  const { queryFn } = makeFakeQuery();
+  new AgentSession(opts, queryFn).reset();
 });
 
 /// The next user message the session sent to `spawn`'s CLI.

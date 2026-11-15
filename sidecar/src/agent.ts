@@ -268,9 +268,18 @@ export class AgentSession implements Agent {
 
   /** Drop the session (and its accumulated context); next run() starts fresh. */
   reset(): void {
+    const stream = this.stream;
     this.input?.end();
     this.input = undefined;
     this.stream = undefined;
+    // Ending the input is not enough: a query with hooks keeps its CLI until
+    // the turn's `result`, so a blocked turn kept its process (#142). close()
+    // ends the CLI and the stream, so the old loop ends by itself.
+    try {
+      stream?.close();
+    } catch (err) {
+      log(`${this.opts.name}: close failed: ${err}`);
+    }
     // Detach the current queue from its (now-abandoned) stream loop and settle
     // anything still unresolved. Pooled lanes are recycled through here on a
     // timeout/error, so a turn that was interrupted but never emitted a `result`

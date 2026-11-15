@@ -449,11 +449,13 @@ rl.on("line", (line) => {
 // our stdin and we exit at once, taking our CLI children with us. The app has
 // already failed every in-flight card by then, so there is nothing to wait for
 // (an idle wait used to sit here, unreachable: the app sent SIGTERM in the same
-// instant — code review 2026-10-17). Every lane is reset first, which aborts
-// its in-flight turn: the Codex SDK kills its CLI on abort and has no exit
-// handler, so leaving without this would orphan a running `codex exec`; the
-// Agent SDK kills its CLIs from Node's exit handlers as well, which a SIGTERM
-// would skip. The exit is scheduled first and waits a tick, so the abort
+// instant — code review 2026-10-17). Every lane is reset first. For Codex that
+// aborts its in-flight turn: the Codex SDK kills its CLI on abort and has no
+// exit handler, so leaving without this would orphan a running `codex exec`.
+// For Claude, a reset closes the query (#142). The SDK ends the CLI's stdin
+// at once, but sends SIGTERM only after 2 s from a timer, which this exit
+// does not wait for. So the Claude CLIs still end through the SDK's Node exit
+// handlers, which a SIGTERM would skip. The exit is scheduled first and waits a tick, so the abort
 // signals are dispatched and a reset that throws (swallowed by the
 // uncaughtException keep-alive above) cannot keep the process here. The log
 // line is written synchronously (`logSync`): an async pipe write would be

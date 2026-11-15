@@ -1519,10 +1519,21 @@ tasks from a new one. As a backstop, `run()` recycles when it finds a settled
 task at the queue head, which also recovers a wedged classifier or warm-up
 turn.
 
-Cost and limits: a failed card pays one cold spawn. A wedged SDK subprocess can
-stay until the sidecar restarts, because interrupt is best-effort, but it no
-longer blocks the pool. (The cursor rule changed 2026-10-06: see *Recycled
-lanes replay the conversation*.)
+Cost and limits: a failed card pays one cold spawn. (The cursor rule changed
+2026-10-06: see *Recycled lanes replay the conversation*.)
+
+Update (2026-11-15, issue #142): for a Claude session, `reset()` now closes
+the SDK query as well as its input. Ending the input was not enough: the CLI
+stayed until the sidecar exited when a turn never produced a `result`, and the
+one-shot reply, document and summary lanes reset through the same path. The
+SDK's `close()` ends the CLI's stdin, sends SIGTERM after 2 s and SIGKILL 5 s
+after that, and ends the stream, so the old loop finishes without an error.
+Verified against the real CLI (`agent.close.sdk.test.ts`): after a reset
+during a blocked turn the CLI process is gone, and without the `close()` call
+it stays. The unit test is in `agent.test.ts`. Codex sessions are unchanged:
+they abort their turn through the Codex SDK. `interrupt()` stays best-effort,
+but a wedged subprocess no longer stays until the sidecar restarts, as long as
+something resets its lane (a failed pooled card does).
 
 ### Recycled lanes replay the conversation (2026-10-06, code review)
 
