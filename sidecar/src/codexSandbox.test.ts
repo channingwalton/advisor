@@ -399,14 +399,16 @@ test("#codex-files the profile write also writes the folder list for Advisor's f
   }
 });
 
-/// Ask Advisor's file tools, started under `profile`, to Read each
-/// file, and return each answer, or undefined when the server gave none.
-function askFileTools(profile: string, cwd: string, server: { command: string; args: string[] }, files: string[]) {
+/// Ask Advisor's file tools, started under `profile`, to make each call (a
+/// Read of each file, by default), and return each answer, or undefined when
+/// the server gave none.
+function askFileTools(
+  profile: string, cwd: string, server: { command: string; args: string[] }, files: string[],
+  calls = files.map((file_path) => ({ name: "Read", arguments: { file_path } as Record<string, unknown> })),
+) {
   const requests = [
     { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18" } },
-    ...files.map((file_path, i) => ({
-      jsonrpc: "2.0", id: i + 1, method: "tools/call", params: { name: "Read", arguments: { file_path } },
-    })),
+    ...calls.map((params, i) => ({ jsonrpc: "2.0", id: i + 1, method: "tools/call", params })),
   ];
   const r = spawnSync("/usr/bin/sandbox-exec", ["-f", profile, server.command, ...server.args], {
     cwd, input: requests.map((m) => JSON.stringify(m)).join("\n") + "\n", encoding: "utf8",
@@ -414,7 +416,7 @@ function askFileTools(profile: string, cwd: string, server: { command: string; a
   const replies = (r.stdout ?? "").split("\n").filter(Boolean).map((l) => JSON.parse(l) as {
     id: number; result?: { content?: { text: string }[]; isError?: boolean };
   });
-  return { err: r.stderr, answers: files.map((_, i) => replies.find((m) => m.id === i + 1)?.result) };
+  return { err: r.stderr, answers: calls.map((_, i) => replies.find((m) => m.id === i + 1)?.result) };
 }
 
 // The file tools run from the sidecar's modules, which are in the home folder
@@ -443,6 +445,14 @@ test("#codex-files Advisor's file tools start under the profile from the home fo
     assert.equal(refused?.isError, true, JSON.stringify(refused));
     assert.doesNotMatch(refused?.content?.[0].text ?? "", /PRIVATE KEY|provider token|private plan/);
   }
+  // Glob and Grep walk the readable folder under the profile.
+  const documents = path.join(home, "Documents");
+  const { err: searchErr, answers: [listed, found] } = askFileTools(profile, cwd, server, [], [
+    { name: "Glob", arguments: { path: documents, pattern: "**/*" } },
+    { name: "Grep", arguments: { path: documents, pattern: "hello" } },
+  ]);
+  assert.equal(listed?.content?.[0].text, files[0], searchErr);
+  assert.equal(found?.content?.[0].text, files[0], searchErr);
   // The control: without their read rules, they do not start.
   writeCodexProfile(tmp, home, readsOf(home), [tmp]);
   assert.equal(askFileTools(profile, cwd, server, files).answers[0], undefined);

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { absolutePath, toolDecision, type SandboxPolicy } from "./toolPolicy.js";
+import { absolutePath, braceAlternatives, toolDecision, type SandboxPolicy } from "./toolPolicy.js";
 
 /// Advisor's own file tools for Codex card lanes (#120): Read, Grep and Glob,
 /// read-only, with the names and inputs of Claude's tools. Codex has no
@@ -74,7 +74,8 @@ export const FILE_TOOLS = [
     name: "Glob",
     description:
       "Find local files by name inside a folder that Advisor lets you read. `path` is the absolute folder; " +
-      "`pattern` is relative to it, such as `**/*.md`. Returns paths, newest first.",
+      "`pattern` is relative to it, such as `**/*.md`. Returns paths, newest first. Symlinks are skipped (Read " +
+      "follows one), and hidden files are listed only when the pattern names them, such as `.obsidian/*`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -208,41 +209,164 @@ function listed(lines: string[]): string {
   return `${lines.slice(0, RESULTS).join("\n")}\n\n(${more} more not shown: narrow the pattern or the path.)`;
 }
 
-/// Glob, from the resolved root. A match with a `..` segment is left out (a
-/// backslash is a character of a name on macOS and Linux, not a separator):
-/// `fs.globSync` takes `[.][.]` as `..`. The policy refuses such a pattern
-/// (`patternStaysInRoot`), and this is the second guard. A pattern can go
-/// through a symlink (`link/*`), so a match that Read would refuse is left out
-/// too. A match whose resolved path is itself has no symlink in it, so it is
-/// in the folder that the policy allowed, which can hold no store
-/// (`readableRoots`). Only the other matches are judged as a Read of them
-/// would be: the full judgement resolves each store's path, and took 20 s for
-/// 10,000 notes.
+/// Glob, from the resolved root (`globFiles`).
 function glob(root: string, args: Record<string, unknown>, policy: SandboxPolicy): FileToolResult {
   const { pattern } = args;
   if (typeof pattern !== "string" || pattern === "") return failure("Glob needs a `pattern`, such as `**/*.md`.");
   const now = resolvedNow("Glob", root, args, policy);
   if ("failure" in now) return now.failure;
-  const realRoot = now.real;
-  let matches: string[];
   try {
-    matches = fs.globSync(pattern, { cwd: realRoot });
+    if (!fs.statSync(now.real).isDirectory()) return failure(`${root} is not a folder: Read it, or give its folder as \`path\`.`);
   } catch (e) {
     return failure(`Glob could not search ${root}: ${reason(e)}.`);
   }
-  const files = matches.flatMap((match) => {
-    if (match.split("/").includes("..")) return [];
-    const file = path.join(realRoot, match);
+  return { text: newestFirst(globFiles(now.real, pattern), "No files found") };
+}
+
+/// The regular files under `root` whose path from `root` matches `pattern`
+/// (`globMatcher`), with their modification times. It walks `root` itself
+/// and follows no symlink that it finds, so a pattern cannot take it out of
+/// the folder that the policy judged, and the folder can hold no store
+/// (`readableRoots`). A folder that another process swaps for a symlink
+/// during the walk gives nothing (`walk`). `fs.globSync`, which Glob ran
+/// before, reads `[.][.]`, `{x,\}/etc` and `.{},.}` in ways that leave the
+/// folder (2026-11-14). As `fs.globSync` did, it enters a hidden folder only
+/// for a pattern that can match a hidden name, and goes no deeper than the
+/// pattern can match (`reach`). It starts at the folder that the pattern's
+/// leading names give (`walkStart`). `fold`, on macOS by default, matches
+/// names as macOS volumes find them (`CASE_FOLDS`). `root` is a resolved
+/// path, as `walk` needs.
+export function globFiles(root: string, pattern: string, fold = CASE_FOLDS): Found[] {
+  const normalised = normalisedGlob(pattern);
+  const matches = globMatcher(normalised, fold);
+  const { hidden, depth } = reach(normalised);
+  const start = walkStart(root, normalised, fold);
+  if (start === undefined) return [];
+  const below = start === root ? 0 : path.relative(root, start).split(path.sep).length;
+  const keep = (file: string): Found | undefined => (matches(path.relative(root, file)) ? statOf(file) : undefined);
+  return walk(start, hidden, keep, depth - below);
+}
+
+type Found = { file: string; mtime: number };
+
+/// The file and its modification time, when it is a regular file.
+function statOf(file: string): Found | undefined {
+  try {
+    const stat = fs.lstatSync(file);
+    return stat.isFile() ? { file, mtime: stat.mtimeMs } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/// Where a normalised glob can match, judged on the safe side for each of its
+/// brace alternatives (`braceAlternatives`, so `{x,}.git` is `.git`), each
+/// without its `.`, `[.]` and empty names (`{./a,x}.md` is one name deep):
+/// whether
+/// it can match a hidden name, and how many names deep. `path.matchesGlob`
+/// matches a hidden name only for a name in the pattern that starts with a
+/// dot, with `[.]`, or with an extglob that holds a dot (`@(x|.git)`) or can be
+/// empty before one (`?(x).git`); not with `[0-9]` or `[!x]` (2026-11-15). The
+/// safe side costs only folder reads: a name that starts with a dot, a class
+/// with a dot, or any extglob. A match has no more names than its alternative,
+/// unless the alternative has `**` (also from `{*,}*`) or an extglob with a
+/// `/` in it (`+(x/)`). More alternatives than the policy expands: anywhere.
+function reach(glob: string): { hidden: boolean; depth: number } {
+  const alternatives = braceAlternatives(glob);
+  if (alternatives === null) return { hidden: true, depth: Infinity };
+  const all = alternatives.map(normalisedGlob);
+  return {
+    hidden: all.some((alt) => /(^|\/)(\.|\[[^\]]*\.|[?*+@]\()/.test(alt)),
+    depth: all.some((alt) => alt.includes("**") || /\([^)]*\//.test(alt))
+      ? Infinity
+      : Math.max(...all.map((alt) => alt.split("/").length)),
+  };
+}
+
+/// A glob with each `\` as a `/`, and without the `.` names and the empty
+/// names after the first that `fs.globSync` skips (`.\*.md` and `.//*.md` are
+/// `*.md`), as `path.matchesGlob` and `fs.globSync` read it. `[.]` is a `.`:
+/// both read a class of one character as that character. A first empty name
+/// stays, so `/x` stays absolute and matches no path in the folder. A last
+/// name stays: `*/.` and `sub/` name folders, which Glob does not list.
+function normalisedGlob(pattern: string): string {
+  return pattern.replaceAll("\\", "/").split("/")
+    .filter((s, i, all) => i === all.length - 1 || (s !== "." && s !== "[.]" && (s !== "" || i === 0)))
+    .join("/");
+}
+
+/// The matcher of a normalised glob (`normalisedGlob`) for a path from the
+/// root, for Glob and for Grep's `glob`: `path.matchesGlob`. A brace
+/// alternative keeps the `.`, `[.]` and empty names in it (`{./a,b}.md`,
+/// `{s/[.],x}/c.md`), which `fs.globSync` skips, so each alternative with such
+/// a name is matched too, without it (code review 2026-11-15). The policy
+/// refuses a pattern whose alternatives it does not expand
+/// (`braceAlternatives`). When `fold`, the path and the globs are matched in
+/// Unicode NFC, so that `!(café).md` leaves out a name in NFD too, or else
+/// both in lower case (`foldedName`). The NFC match keeps each class as
+/// given: lower case turns `[Z-a]` into the empty range `[z-a]`, and on macOS
+/// `path.matchesGlob` matches a class of more than one character in any
+/// letter case itself. The lower-case match takes `[R]`, which
+/// `path.matchesGlob` reads as the literal `R` in its exact case (code review
+/// 2026-11-15). When `byName`, as for Grep, the file name is matched when no
+/// alternative has a `/` (`./b.md`, `{./a,b}.md`), as ripgrep matches a glob
+/// without a `/`.
+function globMatcher(glob: string, fold: boolean, byName = false): (relative: string) => boolean {
+  const alternatives = (braceAlternatives(glob) ?? [glob]).map((alt) => ({ alt, normalised: normalisedGlob(alt) }));
+  const changed = alternatives.flatMap(({ alt, normalised }) => (normalised === alt ? [] : [normalised]));
+  const globs = [glob, ...changed];
+  const name = byName && !alternatives.some(({ normalised }) => normalised.includes("/"));
+  const target = (relative: string): string => (name ? path.basename(relative) : relative);
+  if (!fold) return (relative) => globs.some((g) => path.matchesGlob(target(relative), g));
+  const forms = globs.map((g) => ({ nfc: g.normalize("NFC"), folded: foldedName(g) }));
+  return (relative) => {
+    const nfc = target(relative).normalize("NFC");
+    const folded = foldedName(nfc);
+    return forms.some((g) => path.matchesGlob(nfc, g.nfc) || path.matchesGlob(folded, g.folded));
+  };
+}
+
+/// A name or a glob in lower case and in Unicode NFC, to compare names as a
+/// macOS volume finds them: in any letter case by default, and in any Unicode
+/// form (a name copied from HFS+ is often in NFD, where a typed one is in
+/// NFC).
+function foldedName(name: string): string {
+  return name.normalize("NFC").toLowerCase();
+}
+
+/// On macOS, Glob matches a name in any letter case and Unicode form, also a
+/// literal one, as `fs.globSync` did there (code review 2026-11-15); on a
+/// case-sensitive volume, `a.md` then lists `A.md` too. Grep's `glob` adds no
+/// folding: there `path.matchesGlob` itself ignores letter case in wildcard
+/// parts only, where ripgrep's is exact.
+const CASE_FOLDS = process.platform === "darwin";
+
+/// The folder under `root` that the pattern's leading literal names give
+/// (`sub` for `sub/**/*.md`), in its letter case on disk, or `root` for a
+/// pattern with `..`. Each name is found in its folder's listing, when `fold`
+/// in any letter case and Unicode form (`foldedName`). Several folders that
+/// match, as a case-sensitive volume can hold (`sub` and `SUB`), give the
+/// folder that holds them. A name that matches no folder, or only a symlink,
+/// gives undefined: the walk enters no symlink, so nothing can match.
+function walkStart(root: string, glob: string, fold: boolean): string | undefined {
+  const names = glob.split("/").slice(0, -1);
+  if (names.includes("..")) return root;
+  const literal = names.findIndex((n) => n === "" || /[*?[\]{}()!+@]/.test(n));
+  let dir = root;
+  for (const name of literal === -1 ? names : names.slice(0, literal)) {
+    let entries: fs.Dirent[];
     try {
-      const direct = fs.realpathSync.native(file) === file;
-      if (!direct && toolDecision("Read", { file_path: file }, policy).behavior === "deny") return [];
-      const stat = fs.statSync(file);
-      return stat.isFile() ? [{ file, mtime: stat.mtimeMs }] : [];
+      entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
-      return [];
+      return undefined;
     }
-  });
-  return { text: newestFirst(files, "No files found") };
+    const folders = entries.filter((e) =>
+      e.isDirectory() && (e.name === name || (fold && foldedName(e.name) === foldedName(name)))
+    );
+    if (folders.length !== 1) return folders.length === 0 ? undefined : dir;
+    dir = path.join(dir, folders[0].name);
+  }
+  return dir;
 }
 
 type GrepMode = "files_with_matches" | "content" | "count";
@@ -272,41 +396,78 @@ function grep(root: string, args: Record<string, unknown>, policy: SandboxPolicy
   } catch (e) {
     return failure(`Grep could not open ${root}: ${reason(e)}.`);
   }
-  const files = rootStat.isDirectory() ? walk(now.real, now.real, filter) : [now.real];
-  const found: { file: string; mtime: number }[] = [];
-  const lines: string[] = [];
-  for (const file of files) {
+  // A filter is a glob of the path from the root, or of the file name when
+  // it holds no `/` after its `.` names are dropped.
+  const matches = filter === undefined ? undefined : globMatcher(normalisedGlob(filter), false, true);
+  // Each file is read during the walk, before the walk checks its folder, and
+  // only content mode keeps its lines (code review 2026-11-15).
+  const searched = (file: string): (Found & { count: number; lines: string[] }) | undefined => {
     const content = textOf(file);
-    if ("error" in content) continue;
-    const hits = linesOf(content.text).flatMap((line, i) => (regex.test(line) ? [{ n: i + 1, line }] : []));
-    if (hits.length === 0) continue;
-    if (mode === "files_with_matches") found.push({ file, mtime: content.mtime });
-    else if (mode === "count") lines.push(`${file}:${hits.length}`);
-    else lines.push(...hits.map((h) => `${file}:${h.n}:${cut(h.line)}`));
-  }
-  if (mode === "files_with_matches") return { text: newestFirst(found, "No files found") };
+    if ("error" in content) return undefined;
+    let count = 0;
+    const lines: string[] = [];
+    linesOf(content.text).forEach((line, i) => {
+      if (!regex.test(line)) return;
+      count++;
+      if (mode === "content") lines.push(`${file}:${i + 1}:${cut(line)}`);
+    });
+    return count === 0 ? undefined : { file, mtime: content.mtime, count, lines };
+  };
+  const filtered = (file: string) =>
+    matches === undefined || matches(path.relative(now.real, file)) ? searched(file) : undefined;
+  const results = rootStat.isDirectory()
+    ? walk(now.real, false, filtered)
+    : [searched(now.real)].flatMap((r) => (r === undefined ? [] : [r]));
+  if (mode === "files_with_matches") return { text: newestFirst(results, "No files found") };
+  const lines = results.flatMap((r) => (mode === "count" ? [`${r.file}:${r.count}`] : r.lines));
   return { text: lines.length > 0 ? listed(lines) : "No matches found" };
 }
 
-/// The regular files under `dir`: no hidden names, no symlinks, and only those
-/// that match `filter` (a glob of the file name, or of the path from `root`
-/// when the glob holds a `/`). A folder that cannot be read is skipped.
-function walk(root: string, dir: string, filter: string | undefined): string[] {
+/// What `keep` gives for each regular file under `dir`, a resolved path,
+/// `levels` deep at most (1: only the files in `dir`), and for the hidden
+/// ones only when `hidden`; undefined leaves a file out. A symlink is neither
+/// listed nor entered, and a folder that cannot be read is skipped. So is a
+/// folder whose resolved path is not itself after its listing and `keep` on
+/// its files: another process swapped it, or a folder above it, for a
+/// symlink, so the listing, the stat and the read can be of another folder.
+/// The old Glob judged each match for this (code review 2026-11-15). A swap
+/// that is undone before the check is not seen (DESIGN.md).
+function walk<T>(
+  dir: string, hidden: boolean, keep: (file: string) => T | undefined, levels = Infinity, found: T[] = [],
+): T[] {
+  if (levels < 1) return found;
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return [];
+    return found;
   }
-  return entries.flatMap((entry) => {
-    if (entry.name.startsWith(".")) return [];
+  const kept = found.length;
+  const folders: string[] = [];
+  for (const entry of entries) {
+    if (!hidden && entry.name.startsWith(".")) continue;
     const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) return walk(root, file, filter);
-    if (!entry.isFile()) return [];
-    if (filter === undefined) return [file];
-    const subject = filter.includes("/") ? path.relative(root, file) : entry.name;
-    return path.matchesGlob(subject, filter) ? [file] : [];
-  });
+    if (entry.isDirectory()) folders.push(file);
+    else if (entry.isFile()) {
+      const value = keep(file);
+      if (value !== undefined) found.push(value);
+    }
+  }
+  if (!resolvesToItself(dir)) {
+    found.length = kept;
+    return found;
+  }
+  for (const folder of folders) walk(folder, hidden, keep, levels - 1, found);
+  return found;
+}
+
+/// Whether the folder's resolved path is its path.
+function resolvesToItself(dir: string): boolean {
+  try {
+    return fs.realpathSync.native(dir) === dir;
+  } catch {
+    return false;
+  }
 }
 
 /// The readable folders that the file lists: a JSON list of strings, as the

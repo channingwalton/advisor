@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
-import { FILE_TOOLS, fileTool, mcpReply, readFolderList, type FileToolResult } from "./localFiles.js";
+import { FILE_TOOLS, fileTool, globFiles, mcpReply, readFolderList, type FileToolResult } from "./localFiles.js";
 import { toolDecision, type SandboxPolicy } from "./toolPolicy.js";
 
 // Advisor's own file tools for Codex card lanes (#120), against real files in
@@ -40,6 +40,11 @@ before(() => {
 });
 
 after(() => fs.rmSync(home, { recursive: true, force: true }));
+
+/// The paths that `globFiles` lists.
+function globbed(root: string, pattern: string, fold?: boolean): string[] {
+  return globFiles(root, pattern, fold).map((f) => f.file);
+}
 
 /// A refusal: an error that holds no secret and names the readable folder.
 function assertRefused(r: FileToolResult, what: string): void {
@@ -124,34 +129,253 @@ test("#codex-files Glob refuses a pattern that spells `..` or `/` another way", 
   }
 });
 
-test("#sandbox-glob-pattern the policy refuses each short pattern that takes fs.globSync out of the folder", () => {
-  // Every word of up to two characters from the alphabet, of up to four from
-  // its first eight, and of up to five from the brace characters, before
-  // `/Other/*` and before the absolute path of `Other`. Runs to four
-  // characters from the whole alphabet found `{,\}`, and a review found
-  // `.{},.}` at five (2026-11-14).
+/// Short patterns that try to leave `notes` for `Other`, and those that take
+/// `fs.globSync` out of the folder. Every word of up to two characters from
+/// the alphabet, of up to four from its first eight, and of up to five from
+/// the brace characters, before `/Other/*` and before the absolute path of
+/// `Other`. Runs to four characters from the whole alphabet found `{,\}`, and
+/// a review found `.{},.}` at five (2026-11-14).
+function shortPatterns(): { pattern: string; escapes: boolean }[] {
   const ALPHABET = [".", "[", "]", "{", "}", ",", "\\", "x", "*", "/", "!", "-", "+", "(", ")", "?"];
   const words = (alphabet: string[], n: number): string[] =>
     n === 0 ? [""] : words(alphabet, n - 1).flatMap((w) => alphabet.map((c) => w + c));
   const prefixes = [1, 2].flatMap((n) => words(ALPHABET, n))
     .concat([3, 4].flatMap((n) => words(ALPHABET.slice(0, 8), n)))
     .concat(words([".", "{", "}", ",", "\\", "x"], 5));
-  let escapes = 0;
-  for (const prefix of prefixes) {
-    for (const pattern of [`${prefix}/Other/*`, `${prefix}${path.join(home, "Other")}/*`]) {
+  return prefixes.flatMap((prefix) =>
+    [`${prefix}/Other/*`, `${prefix}${path.join(home, "Other")}/*`].flatMap((pattern) => {
       let matches: string[];
       try {
         matches = fs.globSync(pattern, { cwd: notes });
       } catch {
-        continue; // not a pattern to globSync
+        return []; // not a pattern to globSync
       }
-      const outside = matches.some((m) => !path.resolve(notes, m).startsWith(notes + path.sep));
-      if (!outside) continue;
-      escapes++;
-      assert.equal(toolDecision("Glob", { path: notes, pattern }, policy).behavior, "deny", pattern);
-    }
+      return [{ pattern, escapes: matches.some((m) => !path.resolve(notes, m).startsWith(notes + path.sep)) }];
+    })
+  );
+}
+
+test("#sandbox-glob-pattern the policy refuses each short pattern that takes fs.globSync out of the folder", () => {
+  const escaping = shortPatterns().filter((p) => p.escapes);
+  assert.ok(escaping.length > 0, "no pattern left the folder, so the test checks nothing");
+  for (const { pattern } of escaping) {
+    assert.equal(toolDecision("Glob", { path: notes, pattern }, policy).behavior, "deny", pattern);
   }
-  assert.ok(escapes > 0, "no pattern left the folder, so the test checks nothing");
+});
+
+test("#codex-files Glob walks only its folder, whatever the pattern", () => {
+  // Without the policy: the patterns that take `fs.globSync` out of the
+  // folder, and the review's spellings, list no file outside it.
+  const patterns = shortPatterns().filter((p) => p.escapes).map((p) => p.pattern).concat([
+    "../Other/*", "[.][.]/Other/*", "{.,x}./Other/*", ".{},.}/Other/*", `{x,\\}${home}/Other/*`, `\\${home}/Other/*`,
+    `${home}/Other/*`, "**/../../Other/*",
+  ]);
+  for (const pattern of patterns) {
+    const outside = globbed(notes, pattern).filter((f) => !f.startsWith(notes + path.sep));
+    assert.deepEqual(outside, [], pattern);
+  }
+  // It lists hidden files when the pattern names them, as `fs.globSync` does.
+  fs.mkdirSync(path.join(notes, ".obsidian"));
+  fs.writeFileSync(path.join(notes, ".obsidian", "app.json"), "{}");
+  try {
+    assert.deepEqual(globbed(notes, ".obsidian/*"), [path.join(notes, ".obsidian", "app.json")]);
+    assert.ok(!globbed(notes, "**/*").some((f) => f.includes(".obsidian")));
+  } finally {
+    fs.rmSync(path.join(notes, ".obsidian"), { recursive: true });
+  }
+});
+
+test("#codex-files Glob takes a pattern that starts with `./`, and on macOS a name in another case", () => {
+  // As `fs.globSync` did (code review 2026-11-15).
+  const a = path.join(notes, "a.md");
+  const b = path.join(notes, "sub", "b.md");
+  assert.deepEqual(globbed(notes, "./*.md"), [a]);
+  assert.deepEqual(globbed(notes, "./sub/b.md"), [b]);
+  assert.deepEqual(globbed(notes, "sub/./b.md"), [b]);
+  assert.deepEqual(globbed(notes, "*/."), []); // folders, which Glob does not list
+  // `path.matchesGlob` and `fs.globSync` read a `\` as a `/` (code review 2026-11-15).
+  assert.deepEqual(globbed(notes, "sub\\*.md"), [b]);
+  assert.deepEqual(globbed(notes, ".\\*.md"), [a]);
+  // Empty names, and `./` at the start of a brace alternative (code review and
+  // comparison with `fs.globSync`, 2026-11-15).
+  for (const pattern of [".//*.md", "./\\*.md", ".\\/*.md", ".\\\\*.md", "{./a,x}.md", "{.,x}/a.md"]) {
+    assert.deepEqual(globbed(notes, pattern), [a], pattern);
+  }
+  assert.deepEqual(globbed(notes, "{./sub,x}/*.md"), [b]);
+  assert.deepEqual(globbed(notes, "sub//b.md"), [b]);
+  // `fs.globSync` reads `[.]` as `.` (code review 2026-11-15).
+  for (const pattern of ["[.]/a.md", "[.]//*.md", "{[.],x}/a.md"]) assert.deepEqual(globbed(notes, pattern), [a], pattern);
+  for (const pattern of ["sub/[.]/b.md", "{sub/[.],x}/b.md", "{sub/.,x}/b.md"]) assert.deepEqual(globbed(notes, pattern), [b], pattern);
+  if (process.platform === "darwin") {
+    assert.deepEqual(globbed(notes, "A.md"), [a]);
+    assert.deepEqual(globbed(notes, "SUB/*.md"), [b]);
+  }
+  // Grep's `glob` drops `.` segments too, and then matches a name when it
+  // holds no `/`. In letter case it is exact, as ripgrep's is.
+  const grep = (glob: string) => fileTool("Grep", { path: notes, pattern: "beta", glob }, policy).text.split("\n").sort();
+  assert.deepEqual(grep("./sub/*.md"), [b]);
+  assert.deepEqual(grep("sub\\*.md"), [b]);
+  assert.deepEqual(grep("./*.md"), grep("*.md"));
+  assert.deepEqual(grep(".//sub/*.md"), [b]);
+  assert.deepEqual(grep("{./sub,x}/*.md"), [b]);
+  // The file name, when no brace alternative has a `/`, as for ripgrep (code
+  // review 2026-11-15).
+  assert.deepEqual(grep("./b.md"), [b]);
+  assert.deepEqual(grep("{./b,x}.md"), [b]);
+  assert.deepEqual(grep("{./a,b}.md"), [a, b]);
+  assert.deepEqual(grep("{a,sub/b}.md"), [a, b]);
+  assert.deepEqual(grep("{b,sub/x}.md"), ["No files found"]);
+  assert.deepEqual(grep("*.md"), [a, b]);
+  assert.deepEqual(grep("SUB/*.md"), ["No files found"]);
+});
+
+test("#codex-files Glob opens only the folders that the pattern can match in", () => {
+  // A hidden folder only for a pattern that can match a hidden name, and only
+  // the folder that a pattern's leading names give (code review 2026-11-15).
+  const git = path.join(notes, ".git");
+  fs.mkdirSync(path.join(git, "objects"), { recursive: true });
+  const opened: string[] = [];
+  const readdir = fs.readdirSync;
+  fs.readdirSync = ((dir: fs.PathLike, options?: unknown) => {
+    opened.push(String(dir));
+    return (readdir as (d: fs.PathLike, o?: unknown) => unknown)(dir, options);
+  }) as typeof fs.readdirSync;
+  const opens = (pattern: string): string[] => {
+    opened.length = 0;
+    globbed(notes, pattern);
+    return [...opened];
+  };
+  try {
+    assert.ok(!opens("**/*.md").includes(git));
+    assert.ok(!opens("**/*.[mM][dD]").includes(git));
+    assert.ok(!opens("**/[0-9]*.md").includes(git));
+    assert.ok(opens("?(x).git/*").includes(git));
+    assert.ok(opens("@(x|.git)/*").includes(git));
+    assert.ok(opens(".git/*").includes(git));
+    assert.ok(opens("**/[.]*").includes(git));
+    assert.ok(opens(".git\\*").includes(git));
+    // A brace that leaves a dot first, or makes a `**` (code review 2026-11-15).
+    assert.ok(opens("{x,}.git/*").includes(git));
+    assert.ok(opens("{*,}*/b.md").includes(path.join(notes, "sub")));
+    // A leading folder is found in its folder's listing. One that is missing
+    // or a symlink: nothing can match.
+    assert.deepEqual(opens("missing/**/*.md"), [notes]);
+    assert.deepEqual(opens("link/*"), [notes]);
+    assert.deepEqual(opens("sub/*.md"), [notes, path.join(notes, "sub")]);
+    assert.deepEqual(opens("sub\\*.md"), [notes, path.join(notes, "sub")]);
+    // No deeper than the pattern can match, without `**`.
+    assert.deepEqual(opens("*.md"), [notes]);
+    assert.deepEqual(opens("{./a,x}.md"), [notes]);
+    assert.ok(opens("**/*.md").includes(path.join(notes, "sub")));
+    if (process.platform === "darwin") assert.deepEqual(opens("SUB/*.md"), [notes, path.join(notes, "sub")]);
+  } finally {
+    fs.readdirSync = readdir;
+    fs.rmSync(git, { recursive: true });
+  }
+});
+
+test("#codex-files Glob finds a leading folder in another letter case on a case-sensitive volume", (t) => {
+  // As on a case-sensitive macOS volume, where Glob folds case (code review
+  // 2026-11-15). Linux has such a volume; macOS usually does not.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-case-")));
+  try {
+    fs.mkdirSync(path.join(dir, "sub"));
+    fs.writeFileSync(path.join(dir, "sub", "b.md"), "");
+    if (fs.existsSync(path.join(dir, "SUB"))) {
+      t.skip("this volume ignores letter case");
+      return;
+    }
+    const b = path.join(dir, "sub", "b.md");
+    assert.deepEqual(globbed(dir, "SUB/*.md", true), [b]);
+    assert.deepEqual(globbed(dir, "[S]UB/*.md", true), [b]);
+    assert.deepEqual(globbed(dir, "sub/[B].md", true), [b]);
+    assert.deepEqual(globbed(dir, "sub/[B-B].md", true), [b]);
+    assert.deepEqual(globbed(dir, "SUB/*.md", false), []);
+    // Two folders that match give the folder that holds them.
+    fs.mkdirSync(path.join(dir, "Sub"));
+    fs.writeFileSync(path.join(dir, "Sub", "c.md"), "");
+    assert.deepEqual(globbed(dir, "SUB/*.md", true).sort(), [path.join(dir, "Sub", "c.md"), b].sort());
+    assert.deepEqual(globbed(dir, "sub/*.md", false), [b]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#codex-files Glob and Grep list nothing from a folder that is swapped for a symlink during the walk", () => {
+  // Another process can swap a folder between the walk's steps: before its
+  // listing, before Glob's stat of a file in it, or before Grep's read. The
+  // old Glob judged each match for this (code review 2026-11-15).
+  const sub = path.join(notes, "sub");
+  const b = path.join(sub, "b.md");
+  const outside = fs.mkdtempSync(path.join(home, "outside-"));
+  fs.writeFileSync(path.join(outside, "b.md"), `${SECRET}\n`);
+  // `run`, with `sub` swapped for a symlink to `outside` when `method` is
+  // first called on `at`.
+  const swapped = <T>(method: "readdirSync" | "lstatSync" | "openSync", at: string, run: () => T): T => {
+    const target = fs as unknown as Record<string, (...args: unknown[]) => unknown>;
+    const original = target[method];
+    let done = false;
+    target[method] = (...args: unknown[]) => {
+      if (!done && String(args[0]) === at) {
+        done = true;
+        fs.renameSync(sub, `${sub}-kept`);
+        fs.symlinkSync(outside, sub);
+      }
+      return original.apply(fs, args);
+    };
+    try {
+      return run();
+    } finally {
+      target[method] = original;
+      if (done) {
+        fs.unlinkSync(sub);
+        fs.renameSync(`${sub}-kept`, sub);
+      }
+    }
+  };
+  try {
+    assert.deepEqual(swapped("readdirSync", sub, () => globbed(notes, "sub/*.md")), []);
+    assert.deepEqual(swapped("readdirSync", sub, () => globbed(notes, "**/*.md")), [path.join(notes, "a.md")]);
+    assert.deepEqual(swapped("lstatSync", b, () => globbed(notes, "sub/*.md")), []);
+    for (const [method, at] of [["readdirSync", sub], ["openSync", b]] as const) {
+      const r = swapped(method, at, () => fileTool("Grep", { path: notes, pattern: "PRIVATE", output_mode: "content" }, policy));
+      assert.equal(r.text, "No matches found", method);
+    }
+  } finally {
+    fs.rmSync(outside, { recursive: true });
+  }
+  assert.ok(fs.existsSync(b));
+});
+
+test("#codex-files Glob finds a name in another Unicode form when it folds case", () => {
+  // A name copied from HFS+ is often in NFD, and a typed one is in NFC; a
+  // macOS volume finds either (code review 2026-11-15).
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-nfc-")));
+  try {
+    const nfd = "cafe\u0301";
+    fs.mkdirSync(path.join(dir, nfd));
+    fs.writeFileSync(path.join(dir, nfd, `${nfd}.md`), "");
+    const [name] = fs.readdirSync(dir);
+    const file = path.join(dir, name, fs.readdirSync(path.join(dir, name))[0]);
+    for (const pattern of ["caf\u00e9/*.md", "caf\u00e9/caf\u00e9.md", "*/caf\u00e9.md", "CAFE\u0301/*.md", "caf[\u00e9]/*.md"]) {
+      assert.deepEqual(globbed(dir, pattern, true), [file], pattern);
+    }
+    assert.deepEqual(globbed(dir, "caf\u00e9/*.md", false), name === "caf\u00e9" ? [file] : []);
+    // Matched only in the folded form, a negation leaves the name out in either
+    // form, and a class keeps its range (code review 2026-11-15).
+    assert.deepEqual(globbed(dir, "*/!(caf\u00e9).md", true), []);
+    assert.deepEqual(globbed(dir, "*/[Z-c]af\u00e9.md", true), [file]);
+    // `path.matchesGlob` reads a class of one character as a literal.
+    assert.deepEqual(globbed(dir, "*/[C]AF\u00c9.md", true), [file]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#codex-files Glob of a file gives an error", () => {
+  const r = fileTool("Glob", { path: path.join(notes, "a.md"), pattern: "*" }, policy);
+  assert.equal(r.isError, true, r.text);
+  assert.match(r.text, /not a folder/);
 });
 
 test("#codex-files Glob lists a note whose name holds a backslash and `..`", () => {
@@ -165,11 +389,14 @@ test("#codex-files Glob lists a note whose name holds a backslash and `..`", () 
   }
 });
 
-test("#codex-files Read follows a symlink that stays in a readable folder", () => {
+test("#codex-files Read follows a symlink that stays in a readable folder; Glob and Grep do not list it", () => {
+  // Glob and Grep follow no symlink, as the Claude CLI's search does not.
   const alias = path.join(notes, "alias.md");
   fs.symlinkSync(path.join(notes, "a.md"), alias);
   try {
     assert.match(fileTool("Read", { file_path: alias }, policy).text, /alpha/);
+    assert.ok(!fileTool("Glob", { path: notes, pattern: "*.md" }, policy).text.includes("alias"));
+    assert.ok(!fileTool("Grep", { path: notes, pattern: "alpha" }, policy).text.includes("alias"));
   } finally {
     fs.rmSync(alias);
   }

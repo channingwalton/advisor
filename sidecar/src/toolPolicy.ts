@@ -365,11 +365,12 @@ export function absolutePath(p: unknown, home: string): string | null {
 /// directory (code review 2026-10-06). Refuse the text `..`, and a pattern or
 /// brace alternative of it (`{a, /etc/*}`) that starts with `/` or `~` or has a
 /// segment that can be `..`: the folder belongs in `path`. `fs.globSync`, which
-/// Advisor's own Glob runs, reads `[.][.]` as `..`, `{x,}/etc` as `/etc`, and
-/// each `\` as a `/` before it expands braces (`{x,\}/etc` is `/etc`), where the
-/// Claude CLI reads `\` as an escape (seen 2026-11-14). So the whole check runs
-/// on both readings. A `~` inside a name is literal (`*~`). Grep's `glob` is
-/// optional (undefined passes).
+/// Advisor's own Glob ran until it walked its folder itself (2026-11-15),
+/// reads `[.][.]` as `..`, `{x,}/etc` as `/etc`, and each `\` as a `/` before
+/// it expands braces (`{x,\}/etc` is `/etc`), where the Claude CLI reads `\`
+/// as an escape (seen 2026-11-14). So the whole check runs on both readings.
+/// A `~` inside a name is literal (`*~`). Grep's `glob` is optional (undefined
+/// passes).
 function patternStaysInRoot(p: unknown): boolean {
   if (p === undefined) return true;
   if (typeof p !== "string" || p.length > PATTERN_CHARS || p.includes("..")) return false;
@@ -396,7 +397,9 @@ const BRACE_ALTERNATIVES = 64;
 /// holds an escape or a class with a comma, a brace or a leading `]` in it,
 /// which glob programs split in different ways: the policy refuses the
 /// pattern. A plain class (`{[Mm][Dd],txt}`) splits the same in each.
-function braceAlternatives(p: string): string[] | null {
+/// Advisor's Glob also uses it to find where a pattern can match
+/// (`localFiles.ts`).
+export function braceAlternatives(p: string): string[] | null {
   const group = firstBraceGroup(p);
   if (group === undefined) return [p];
   const { start, end, commas } = group;

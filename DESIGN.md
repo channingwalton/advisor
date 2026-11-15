@@ -732,8 +732,9 @@ Probed on 2026-11-14:
 
 So no spelling read a file outside the readable folders. The policy now
 refuses them itself, so a later CLI or Node version that reads a spelling
-another way meets the refusal. Advisor's Glob keeps its two guards as a
-second layer.
+another way meets the refusal. Since 2026-11-15 Advisor's Glob walks its
+folder itself, so no pattern can take it out (*Advisor's Glob walks its
+folder*).
 
 The code review of the first version (2026-11-14) found two more spellings:
 `{x,\}` before an absolute path, and `sub\{.,x}.\{.,x}.\Other/*`. That
@@ -1883,29 +1884,32 @@ commands under the CLI's own sandbox, would need the outer wrapper changed.
 - **Grep is JavaScript**, not ripgrep: it needs no program path in the CLI's
   package, and it gives the same results on Linux CI. As ripgrep does, it
   skips hidden files and does not follow symlinks. So its patterns are
-  JavaScript regular expressions. Glob uses `fs.globSync`. A pattern can go
-  through a symlink (`link/*`), so a match that Read would refuse is left out.
-  The full judgement resolves each store's path: for 10,000 notes it took
-  20 s. So only a match whose resolved path is not itself is judged in full,
-  and the 10,000 notes take 0.1 s. A match with no symlink is in the folder
-  that the policy allowed, and a readable folder holds no store.
+  JavaScript regular expressions. Glob used `fs.globSync`. A pattern can go
+  through a symlink (`link/*`), so a match that Read would refuse was left
+  out. The full judgement resolves each store's path: for 10,000 notes it
+  took 20 s. So only a match whose resolved path was not itself was judged in
+  full, and the 10,000 notes took 0.1 s. A match with no symlink is in the
+  folder that the policy allowed, and a readable folder holds no store.
+  Since 2026-11-15 Glob walks the folder itself (*Advisor's Glob walks its
+  folder*).
 - **The tools work from the resolved path, judged again** (code review
   2026-11-14). With `A/k -> B/sub` in two readable folders, a `path` of
   `A/k/..` is `B` to the kernel and `A` to a lexical join: the first Grep
-  listed `B` and opened `A/n.txt`, a symlink out of the folders, as if it were
-  `B/n.txt`, and printed what it led to. Now each tool resolves its path, and
-  judges it again when it differs, so a symlink that changed after the policy
-  judged the call is judged too. So Glob and Grep give resolved paths: under
-  `~/Library/Mobile Documents/...` for a `~/Notes` that is a symlink there. Glob leaves out a match with a `..` in it:
-  `fs.globSync` takes `[.][.]` as `..`, which the policy's check of the
-  pattern's text did not see then, and the first Glob listed files beside the
-  folder that way. The policy now refuses such spellings too (*Search
-  patterns are judged in each spelling*). Read and Grep open the resolved path with `O_NOFOLLOW` and
-  `O_NONBLOCK`, and judge what they opened (`fstat`): a symlink swapped in at
-  the end of the path is refused, and a pipe gives an error, where the first
-  Read waited on it for ever. A tool error is the call's error result: the
-  first server ended at an uncaught throw, and with it each later call of the
-  turn.
+  listed `B` and opened `A/n.txt`, a symlink out of the folders, as if it
+  were `B/n.txt`, and printed what it led to. Now each tool resolves its
+  path, and judges it again when it differs, so a symlink that changed after
+  the policy judged the call is judged too. So Glob and Grep give resolved
+  paths: under `~/Library/Mobile Documents/...` for a `~/Notes` that is a
+  symlink there. Glob left out a match with a `..` in it: `fs.globSync`
+  takes `[.][.]` as `..`, which the policy's check of the pattern's text did
+  not see then, and the first Glob listed files beside the folder that way.
+  The policy now refuses such spellings too (*Search patterns are judged in
+  each spelling*), and Glob no longer runs `fs.globSync`. Read and Grep open
+  the resolved path with `O_NOFOLLOW` and `O_NONBLOCK`, and judge what they
+  opened (`fstat`): a symlink swapped in at the end of the path is refused,
+  and a pipe gives an error, where the first Read waited on it for ever. A
+  tool error is the call's error result: the first server ended at an
+  uncaught throw, and with it each later call of the turn.
 - **A server of the user's named `advisor` fails the session**, with a message
   that says to rename it: an override merges into that server's settings and
   does not replace them. To find such a name, a session with connector actions
@@ -1919,19 +1923,20 @@ names `advisor` as a source, and then calls `Read` in it. The calls ran under
 the approval policy `never`, with each tool annotated as read-only.
 
 Verified: `localFiles.test.ts`, on real files: reads in a readable folder, and
-refusals of a store, an unlisted folder, a symlink out of a readable folder,
-a relative path and patterns that leave the folder (`[.][.]` too); Glob
-leaves out a match through a symlink into `~/.ssh`; Grep does not follow a
-symlink, nor a `..` after one; a pipe gives an error; a tool failure is an
-error result; the server process reads the list at each call. `codexSandbox.test.ts`: the server,
-copied with only its three modules into `~/Applications` in a fake home,
-starts under the profile, reads a note, and refuses `~/.ssh`, `~/.codex` and
-an unlisted folder; without its read rules it does not start.
-`codex.sdk.test.ts`, against the real CLI: on a code-mode and on a classic
-model, with connector actions on and off, a card reads a note and is refused
-the key and Codex's config; in the real sidecar, a question after the user
-removes the folder is refused. A build without the server in the client
-options, and one without the policy in the server, each failed these tests.
+refusals of a store, an unlisted folder, a symlink out of a readable folder, a
+relative path and patterns that leave the folder (`[.][.]` too); Glob leaves
+out a match through a symlink into `~/.ssh`; Grep does not follow a symlink,
+nor a `..` after one; a pipe gives an error; a tool failure is an error
+result; the server process reads the list at each call.
+`codexSandbox.test.ts`: the server, copied with only its three modules into
+`~/Applications` in a fake home, starts under the profile, reads a note, and
+refuses `~/.ssh`, `~/.codex` and an unlisted folder; without its read rules it
+does not start. `codex.sdk.test.ts`, against the real CLI: on a code-mode and
+on a classic model, with connector actions on and off, a card reads a note and
+is refused the key and Codex's config; in the real sidecar, a question after
+the user removes the folder is refused. A build without the server in the
+client options, and one without the policy in the server, each failed these
+tests.
 
 Residuals and limits:
 
@@ -1948,6 +1953,113 @@ Residuals and limits:
 - `codex mcp list` runs with plugins off, so a plugin's server named
   `advisor` is not found, and with connector actions on it would meet the
   overrides. Not checked.
+
+### Advisor's Glob walks its folder (2026-11-15)
+
+Decision: Advisor's own Glob (`globFiles` in `localFiles.ts`) walks the
+resolved folder itself, and follows no symlink that it finds: a symlink is
+neither listed nor entered. It keeps each regular file whose path from the
+folder matches the pattern (`path.matchesGlob`). Grep shares the walk,
+without hidden entries, and the matcher for its `glob`. Glob no longer runs
+`fs.globSync`, so it needs no `..` filter, no join of a match to the root,
+and no judgement of a match through a symlink.
+
+Reason: `fs.globSync` takes the pattern as a path to follow, and four code
+reviews found spellings that take it out of the folder (*Search patterns are
+judged in each spelling*). The policy refuses those it knows, but no pattern
+can take a walk of the folder out of it, whatever a later Node reads in a
+pattern. Asked for by Channing on 2026-11-15.
+
+Consequences:
+
+- Like Grep and the Claude CLI's search, Glob lists no symlink, even one
+  that stays in the folder. A symlinked note or folder of a vault drops out
+  of Glob, and its description says so. Read still follows such a symlink.
+- As `fs.globSync` did, the walk reads each `\` as a `/` (`sub\*.md`), as
+  `path.matchesGlob` does, drops `.` and `[.]` names and the empty names
+  after the first, other than a last one (`./*.md`, `.//*.md`, `[.]/*.md`;
+  `*/.` names folders), and matches each brace alternative without such
+  names too (`{./a,x}.md`, `{s/[.],x}/c.md`). It enters a hidden folder only
+  for a pattern that can match a hidden name, goes no deeper than the
+  pattern can match (`*.md` reads only the folder), and on macOS matches a
+  name in any letter case and Unicode form (NFC or NFD). There it matches in
+  Unicode NFC, so `!(café).md` leaves out a name in NFD too, or else in
+  lower case, which takes `[R]`: `path.matchesGlob` reads it as the literal
+  `R` in its exact case. A class of more than one character it matches in
+  any letter case itself, where lower case turns `[Z-a]` into an empty
+  range. It gives each path in the letter case on disk, where `fs.globSync`
+  gave a literal name in the case of the pattern. On a case-sensitive macOS
+  volume, `a.md` then lists `A.md` too.
+- Where a pattern can match is judged for each brace alternative, with the
+  policy's expansion (`{x,}.git` is `.git`, `{*,}*` is `**`), each without
+  its `.`, `[.]` and empty names (`{./a,x}.md` is one name deep), on the safe
+  side, which costs only folder reads. `path.matchesGlob` matches a hidden
+  name only for a name in the pattern that starts with a dot, with `[.]`,
+  or with an extglob that holds a dot (`@(x|.git)`) or can be empty before
+  one (`?(x).git`); not with `[0-9]` or `[!x]`. The walk enters a hidden
+  folder for a name that starts with a dot, a class with a dot, or any
+  extglob. Its depth has no limit for `**` or an extglob with a `/` in it.
+  A pattern with more alternatives than the policy expands is walked
+  everywhere.
+- Grep's `glob` reads `\` and `.` segments in the same way. As ripgrep does
+  with a glob without a `/`, it matches the file name when no brace
+  alternative has a `/` after its `.` names are dropped (`./b.md`,
+  `{./a,b}.md`), and otherwise the path from the folder. Grep reads each
+  file during the walk, and keeps the lines only in content mode. It folds
+  neither letter case nor Unicode form, as ripgrep does not (an NFC glob
+  misses a name in NFD), but on macOS `path.matchesGlob` itself ignores
+  letter case in wildcard parts (`*.MD` matches `a.md`), where ripgrep,
+  Claude's Grep, is exact.
+- It starts at the folder of the pattern's leading names (`sub` for
+  `sub/**/*.md`). It finds each name in its folder's listing, in the letter
+  case on disk, and on macOS in any letter case. Several folders that match,
+  as a case-sensitive volume can hold (`sub` and `SUB`), give the folder that
+  holds them. A leading folder that is missing or a symlink gives no files at
+  once: the walk enters no symlink, so nothing can match. A start through a
+  symlink would list another folder: a build that did so listed `link/*` from
+  `~/.ssh`. A build that found the start with `realpath` found no folder for
+  `SUB/*.md` on a case-sensitive macOS volume, where the match folds case.
+- The walk lists a folder, then stats each file in it for Glob or reads it
+  for Grep, and then checks that the folder's resolved path is still itself.
+  When it is not, it drops what it found there: another process swapped the
+  folder, or one above it, for a symlink, so the listing, the stat or the
+  read can be of another folder. The old Glob judged each match for this;
+  Grep read each file after the whole walk. A swap that is undone before the
+  check is not seen, as for Read (the residuals of #120 above). Node has no
+  `readdir` of an open folder, so the walk cannot open a folder with
+  `O_NOFOLLOW` and list that.
+- The code reviews of 2026-11-15 found each of these missing or wrong.
+- The same files as `fs.globSync` for 50 sample patterns (for two, in the
+  letter case on disk), and for each of 95,429 patterns of up to four
+  characters from `*?./{},[]!@()|asmdg\` that the policy allows, on a tree
+  with hidden, deep and mixed-case names. On 30,000 files (notes, `.git` and
+  `node_modules`): `**/*.md` takes 63 ms, against 29 ms, with the stat of
+  each match; `notes/d5/*.md` takes less than 1 ms; `notes/**/7.md` 25 ms,
+  against 11 ms. `node_modules` is walked, as by `fs.globSync`.
+- Known limits, accepted by Channing on 2026-11-15 (final code review): on
+  macOS, a pattern with both a one-character class and a range across letter
+  case (`[R][Z-a]x.md`) finds nothing, as the NFC match reads `[R]` in its
+  exact case and lower case empties `[Z-a]`. NFC joins a combining mark in a
+  class with the letter before it, so `caf[e\u0301]*` is `caf[é]*` and no
+  longer finds `cafe.md`. Neither takes a pattern out of the folder.
+- A `path` that is a file gives an error. A folder that the walk cannot read
+  is left out without an error, as before.
+
+Verified: `localFiles.test.ts`: without the policy, the short patterns that
+take `fs.globSync` out of the folder, and the reviews' spellings, list no file
+outside it; Glob and Grep do not list a symlink in the folder, and Read reads
+it; `\`, `./`, `*/.`, letter case, Grep's `glob`, the hidden folder, the
+depth, brace alternatives, empty names, `[.]`, `./` and `[.]` in a brace
+alternative, the start folder, a missing or symlinked leading folder, and a
+file as `path`, with a spy on the folders that the walk opens; a leading
+folder in another letter case on a case-sensitive volume (Linux CI; on macOS,
+run on a case-sensitive APFS disk image); a name in NFD for a pattern in NFC;
+and a folder that is swapped for a symlink before its listing, before Glob's
+stat of a file in it and before Grep's read, with a spy that makes the swap.
+`codexSandbox.test.ts`: under the Codex profile, Glob and Grep list the note
+in a readable folder. A build with `fs.globSync` in place of the walk failed
+these tests, also with the old `..` filter, and so did a build without each
+part above.
 
 ## DMG built with `diskutil image` (2026-10-02)
 

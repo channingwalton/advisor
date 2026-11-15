@@ -346,7 +346,9 @@ Codex cards cannot run shell commands. Codex can try one, but the Codex CLI
 cannot start its own sandbox inside the profile, so the command fails. A Codex
 card reads your local notes through Advisor's own file tools instead: Read,
 Grep and Glob, which apply the Claude policy to each call, under the profile.
-It has them with **Allow connector actions** on or off. See
+It has them with **Allow connector actions** on or off. Grep and Glob do not
+follow symlinks, so they do not list a symlinked note, or the notes in a
+symlinked folder, inside a readable folder; Read can still open such a note. See
 [DESIGN.md](../DESIGN.md).
 
 ## Logs
