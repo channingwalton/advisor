@@ -1222,6 +1222,15 @@ leaves a stopped session with Resume, and keeps the note, the context and the
 generation. A start in progress blocks duplicate retries. A close cancels the
 bookkeeping of that start.
 
+**Esc goes through the Space key monitor (2026-11-15, issue #138).** The Stop
+button had `.keyboardShortcut(.escape)`. A probe in the dev build posted Esc
+while the reply field of a card had the focus, and the shortcut fired Stop.
+`.keyboardShortcut` cannot exempt a text field, so Esc now goes through the
+same local key monitor as Space, and `RecordingSpaceKey` applies the same
+rules: the recording window only, no modifier, not while an editable text
+field has the focus, and a key repeat does nothing. Esc acts only while
+recording; otherwise the event goes on to the window.
+
 ## Pre-canned contexts (2026-06-19, issue #10)
 
 Saved contexts (`SavedContext {id, name, text}`) are in `config.json` as

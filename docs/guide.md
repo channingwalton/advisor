@@ -89,7 +89,7 @@ controls then lose their labels.
 - **⌘N**: New Recording, or bring the recording window forward.
 - **Space**: Listen, Stop or Resume, in the recording window (not while you
   type in a field).
-- **Esc**: Stop.
+- **Esc**: Stop, in the recording window (not while you type in a field).
 - **⌘K**: Ask.
 - **⇧⌘N**: Add Note.
 - **⌘,**: Preferences.

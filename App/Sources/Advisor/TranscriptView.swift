@@ -563,12 +563,13 @@ struct TranscriptView: View {
         }
     }
 
-    /// Space toggles start/stop/resume in the recording window, except while
-    /// editing a text field (where space must type a space). SwiftUI's
-    /// `.keyboardShortcut` can't express that exception, so use a local key
-    /// monitor instead. It gets the key events of every Advisor window, so
-    /// `RecordingSpaceKey` lets through Space in any other window (issue #111),
-    /// and stops the key repeats of a held Space (issue #122).
+    /// Space toggles start/stop/resume in the recording window, and Esc stops,
+    /// except while editing a text field (where space must type a space, and
+    /// Esc belongs to the field, issue #138). SwiftUI's `.keyboardShortcut`
+    /// can't express that exception, so use a local key monitor instead. It
+    /// gets the key events of every Advisor window, so `RecordingSpaceKey`
+    /// lets through Space in any other window (issue #111), and stops the key
+    /// repeats of a held Space (issue #122).
     private func installSpaceMonitor() {
         guard spaceMonitor == nil else { return }
         spaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -576,6 +577,10 @@ struct TranscriptView: View {
             switch RecordingSpaceKey.effect(of: event, recordingWindow: hostWindow.window) {
             case .pass: return event
             case .ignore: return nil
+            case .stop:
+                guard recordingControl.state == .recording else { return event }
+                stopRecording()
+                return nil
             case .toggle: break
             }
             switch recordingControl.state {

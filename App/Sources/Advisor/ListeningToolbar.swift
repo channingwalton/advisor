@@ -166,8 +166,9 @@ struct ListeningToolbar: View {
                     .background(Theme.recordRed, in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
+            // Esc is handled by the recording window's key monitor, which
+            // leaves it to a text field that has the focus (issue #138).
             .help("Stop (Esc)")
-            .keyboardShortcut(.escape, modifiers: [])
         }
         .padding(.horizontal, 9)
         .frame(height: 40)

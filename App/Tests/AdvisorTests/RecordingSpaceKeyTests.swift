@@ -90,3 +90,40 @@ private func key(_ code: UInt16, in window: NSWindow, modifiers: NSEvent.Modifie
     first.contentView = nil
     #expect(host.window === second)
 }
+
+// Issue #138: Esc stopped the recording while the user typed in a text field.
+private let escape: UInt16 = 53
+
+@MainActor
+@Test func escInTheRecordingWindowStops() {
+    let recording = window()
+    #expect(RecordingSpaceKey.effect(of: key(escape, in: recording), recordingWindow: recording) == .stop)
+}
+
+@MainActor
+@Test func escInAnotherWindowOrWithAModifierDoesNotStop() {
+    let recording = window()
+    let sessions = window()
+    #expect(RecordingSpaceKey.effect(of: key(escape, in: sessions), recordingWindow: recording) == .pass)
+    #expect(RecordingSpaceKey.effect(of: key(escape, in: recording, modifiers: .option),
+                                     recordingWindow: recording) == .pass)
+}
+
+@MainActor
+@Test func escInAnEditableFieldOfTheRecordingWindowGoesToTheField() {
+    let recording = window()
+    let field = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+    recording.contentView?.addSubview(field)
+    #expect(recording.makeFirstResponder(field))
+    #expect(RecordingSpaceKey.effect(of: key(escape, in: recording), recordingWindow: recording) == .pass)
+    // The selectable transcript is a non-editable text view: Esc still stops.
+    field.isEditable = false
+    #expect(RecordingSpaceKey.effect(of: key(escape, in: recording), recordingWindow: recording) == .stop)
+}
+
+@MainActor
+@Test func aHeldEscStopsOnce() {
+    let recording = window()
+    #expect(RecordingSpaceKey.effect(of: key(escape, in: recording, isARepeat: true),
+                                     recordingWindow: recording) == .ignore)
+}
