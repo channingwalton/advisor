@@ -180,6 +180,9 @@ final class SidecarManager {
     private let healthyRunSeconds: TimeInterval
     /// The backoff before restart attempt n (1-based): 1, 2, 4, 8, 8 s.
     private let restartDelay: (Int) -> TimeInterval
+    /// The time for the healthy-run window. A test gives its own, so the
+    /// window does not depend on how fast the test runs (issue #149).
+    private let now: () -> Date
     nonisolated static func defaultRestartDelay(_ attempt: Int) -> TimeInterval {
         min(8.0, pow(2.0, Double(attempt - 1)))
     }
@@ -197,7 +200,8 @@ final class SidecarManager {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         exitGrace: TimeInterval = 2,
         healthyRunSeconds: TimeInterval = 60,
-        restartDelay: @escaping (Int) -> TimeInterval = SidecarManager.defaultRestartDelay
+        restartDelay: @escaping (Int) -> TimeInterval = SidecarManager.defaultRestartDelay,
+        now: @escaping () -> Date = Date.init
     ) {
         self.store = store
         self.loadConfig = loadConfig
@@ -206,6 +210,7 @@ final class SidecarManager {
         self.exitGrace = exitGrace
         self.healthyRunSeconds = healthyRunSeconds
         self.restartDelay = restartDelay
+        self.now = now
         baseEnvironment = environment
         // Writing to a sidecar that has died closes its read end → SIGPIPE, which
         // would kill the app. Ignore it; the write throws EPIPE instead, handled
@@ -312,7 +317,7 @@ final class SidecarManager {
             process = p
             stdinHandle = inPipe.fileHandleForWriting
             spawnedAuth = auth
-            lastSpawn = Date()
+            lastSpawn = now()
         } catch {
             // The process never started, so its terminationHandler will never fire.
             // Detach the handlers and schedule a retry here, or a spawn failure
@@ -340,7 +345,7 @@ final class SidecarManager {
         // (restart and exhausted-attempts alike), before the restart backoff below.
         failResearchingCards()
         // A crash after a healthy run is a fresh failure, not part of a loop.
-        if let lastSpawn, Date().timeIntervalSince(lastSpawn) > healthyRunSeconds {
+        if let lastSpawn, now().timeIntervalSince(lastSpawn) > healthyRunSeconds {
             restartAttempts = 0
         }
         scheduleRestart(reason: "sidecar crashed (\(code))")

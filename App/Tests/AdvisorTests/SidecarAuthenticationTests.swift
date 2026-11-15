@@ -45,12 +45,14 @@ private final class AuthHarness {
         },
         environment: environment,
         exitGrace: exitGrace,
-        healthyRunSeconds: healthyRunSeconds,
-        restartDelay: { [unowned self] _ in self.restartDelay }
+        restartDelay: { [unowned self] _ in self.restartDelay },
+        now: { [unowned self] in self.now }
     )
     /// Fast in tests: the crash path's logic is under test, not its timing.
     var restartDelay: TimeInterval = 0.01
-    var healthyRunSeconds: TimeInterval = 60
+    /// The manager's time. A test moves it, so the healthy-run window does not
+    /// depend on how fast the runner is (issue #149).
+    var now = Date()
 
     func messageTypes(_ child: Int) -> [String] {
         messages(child).compactMap { $0["type"] as? String }
@@ -352,6 +354,10 @@ private func waitFor(seconds: Double = 0.5, _ predicate: () -> Bool) async -> Bo
     h.manager.sendAuto(true)
     h.manager.sendSessionStart("s1", context: "the context")
     h.store.cards = [Card(id: "c1", created: Date(), kind: "answer", title: "t", body: "…", state: "streaming")]
+    // The frames above are written on a queue. A crash before they arrive
+    // makes a write fail, and that status replaced "restarting" before the
+    // poll saw it (found with issue #149).
+    #expect(await waitFor(seconds: 5) { h.messageTypes(0).last == "session_start" })
     h.children[0].terminate() // a crash, from the manager's point of view
     // Generous windows, as for the crash loop below: noticing the exit and
     // respawning took over 0.5 s on a loaded CI runner.
@@ -384,16 +390,17 @@ private func waitFor(seconds: Double = 0.5, _ predicate: () -> Bool) async -> Bo
     let h = try AuthHarness()
     defer { h.close() }
     // Crashes within the window count towards the budget; one after it resets
-    // the budget. The window is wide enough that a crash right after spawn is
-    // inside it even on a loaded runner, and the "healthy" run is longer still.
-    h.healthyRunSeconds = 0.5
+    // the budget. The test moves the manager's time itself: with the real
+    // time and a short window, a slow runner put the second crash after the
+    // window, and the budget reset too early (issue #149). The waits are for
+    // real child processes, so they are generous on a loaded runner.
     h.manager.start()
     h.children[0].terminate()
-    #expect(await waitFor { h.children.count == 2 })
+    #expect(await waitFor(seconds: 5) { h.children.count == 2 })
     h.children[1].terminate()
-    #expect(await waitFor { h.store.status.contains("restarting (2/5)") })
-    #expect(await waitFor { h.children.count == 3 })
-    try await Task.sleep(for: .milliseconds(700)) // a healthy run
+    #expect(await waitFor(seconds: 5) { h.store.status.contains("restarting (2/5)") })
+    #expect(await waitFor(seconds: 5) { h.children.count == 3 })
+    h.now += 61 // a healthy run: longer than the 60 s window
     h.children[2].terminate()
-    #expect(await waitFor { h.store.status.contains("restarting (1/5)") })
+    #expect(await waitFor(seconds: 5) { h.store.status.contains("restarting (1/5)") })
 }

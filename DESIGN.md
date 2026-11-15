@@ -2505,7 +2505,10 @@ TCC prompt. Residual: other routes to launchd (see #88 below). Commit:
 **The crash path is tested at the manager.** Tests drive the recovery in
 `SidecarManager` directly: failed cards, the restart budget, the reset after a
 healthy run, and the replay to the new sidecar. The backoff delay and the
-healthy-run threshold are injectable, so the tests take under a second. Commits:
+healthy-run threshold are injectable, so the tests take under a second.
+(2026-11-15, issue #149: the time is injectable too. With the real time and a
+0.5 s threshold, a slow CI runner put a crash after the threshold, and the
+budget reset too early in the test.) Commits:
 `5fa0507`, `5efbe83`.
 
 **Two files became seven.** `AdvisorApp.swift` (1,200 lines) and
