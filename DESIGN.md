@@ -658,6 +658,44 @@ form counts as unusable, because Swift's dictionary merges them.
   Files tab. **Reload** posts `advisorConfigChanged`, so the Files tab and the
   other windows take the corrected file. A context that the recording window
   cannot save shows in its status line and not in the popover.
+- **A reader that never saves takes the keys that decode** (2026-11-15, issue
+  #137). `AdvisorConfig.load()` serves the session folder, the recorder, the
+  appearance at launch, and the libraries and trigger flags that the recording
+  window and the Sessions browser show. `load()` decodes in a lenient mode: a key that does not
+  decode keeps its default and the others keep the file's value, as the
+  sidecar does (`mergeConfig`). For a file that decodes as a whole, the result
+  is the same as the strict decode. The trigger flags are merged one by one, as
+  there. Before, one value of the wrong type gave the default for every
+  setting, so a recording went to the default session folder. This does not
+  reverse the rejection above: the reason for it was a default that reaches
+  the file at the next save, and no save uses `load()`. For a save the file
+  stays unusable (`fileState`), and the window's save and `saveContext` leave
+  it as it is. So Preferences shows its notice and locked settings that can
+  differ from the ones in use. The lenient mode is one decode with the same
+  parser. A first version wrote each key out again to decode it alone, and
+  that write raises an exception that Swift cannot catch for a number out of
+  range (code review 2026-11-15). In `contexts` and `tags`, one bad entry
+  drops that entry only: the windows filter the tags of the notes by the
+  library, so an empty library would hide them all. Limits: a file that is
+  not a JSON object gives the defaults. A partial library still hides the
+  tags that it does not hold, and "no save uses `load()`" is true for
+  `config.json` only: the windows filter a folder's tags by the library, so
+  an edit of those tags there writes the list without a tag whose entry was
+  dropped. Before, the same edit wrote it without every tag. For a file that Swift's decoder reads and Node
+  refuses (a trailing comma for example), the app uses the file's values and
+  the sidecar its defaults, also for the keys that both sides read
+  (`triggers`, `logTranscriptText`). That was so before this change for a
+  file that decodes as a whole.
+- **The API key for the sidecar has its own read** (2026-11-15,
+  `loadForSidecarKey`), because the key must match the provider that the
+  sidecar runs. A file that decodes as a whole gives its settings, as before.
+  A file with a key that does not decode gives the keys that decode only when
+  the sidecar reads the file as the app does (`ConfigFile.read`), and no key
+  for any other such file: the sidecar then runs on its defaults, or on
+  values that the app cannot know. Residual, as before this change: a file
+  that decodes as a whole is not checked against the sidecar's read, so a
+  trailing comma or two equal `provider` keys can give the sidecar the key of
+  a provider that it does not run.
 - **A view that reloads on `advisorConfigChanged` keeps what it shows** when
   the file cannot be used (`loadIfUsable`). The Files tab posts the notice for
   such a file, and the defaults would reset the appearance, the triggers and

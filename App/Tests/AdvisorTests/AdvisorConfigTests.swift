@@ -527,3 +527,155 @@ private func canonical(_ json: Any) throws -> Data {
     let c = try JSONDecoder().decode(AdvisorConfig.self, from: json)
     #expect(c.readableFolders == ["~/Notes", "/Users/x/dev"])
 }
+
+// MARK: load() keeps the keys that decode (issue #137)
+
+// A reader such as the session folder must not take every default because one
+// other key has the wrong type: a recording then went to the default folder.
+@Test func loadKeepsTheKeysThatDecodeWhenOneKeyHasTheWrongType() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try Data(#"{"allowMcpActions":"true","sessionDir":"/Notes/Advisor","provider":"codex","sttLocale":"en_GB"}"#.utf8)
+        .write(to: file)
+    let config = AdvisorConfig.load(from: file)
+    #expect(config.sessionDir == "/Notes/Advisor")
+    #expect(config.provider == "codex")
+    #expect(config.sttLocale == "en_GB")
+    #expect(config.allowMcpActions == false, "the key that does not decode keeps its default")
+}
+
+// A library that is not a list gives an empty library, and the other keys stay.
+@Test func loadGivesAnEmptyLibraryForALibraryThatIsNotAList() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try Data(#"{"contexts":"none","sessionDir":"/Notes/Advisor","triggers":{"question":false,"context":true,"factcheck":true}}"#.utf8)
+        .write(to: file)
+    let config = AdvisorConfig.load(from: file)
+    #expect(config.contexts.isEmpty)
+    #expect(config.sessionDir == "/Notes/Advisor")
+    #expect(config.triggers.question == false)
+}
+
+// The tolerant read is for readers only. The file still counts as unusable
+// for a save, so a default in place of the bad value never reaches the file.
+@Test func aFileWithOneBadKeyStaysUnusableForASave() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let broken = Data(#"{"allowMcpActions":"true","sessionDir":"/Notes/Advisor"}"#.utf8)
+    try broken.write(to: file)
+    guard case .unusable = AdvisorConfig.fileState(at: file) else {
+        Issue.record("the file must stay unusable")
+        return
+    }
+    #expect(AdvisorConfig.loadIfUsable(from: file) == nil)
+    var edited = AdvisorConfig.load(from: file)
+    let window = edited
+    edited.appearance = "dark"
+    #expect(!edited.saveChanges(from: window, to: file))
+    #expect(AdvisorConfig.saveContext(named: "a", text: "b", at: file) == nil)
+    #expect(try Data(contentsOf: file) == broken)
+}
+
+// Text that is not JSON, or not a JSON object, has no keys to keep.
+@Test func loadGivesTheDefaultsForAFileThatIsNotAJSONObject() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    for body in [#"{"sessionDir":"/Notes/Advisor""#, #"["sessionDir"]"#, ""] {
+        try Data(body.utf8).write(to: file)
+        #expect(AdvisorConfig.load(from: file) == AdvisorConfig(), "\(body)")
+    }
+}
+
+// A number that JSON cannot hold (it parses to infinity) must not stop the
+// app: a re-serialise of such a value raises an exception that Swift cannot
+// catch (code review 2026-11-15).
+@Test func loadDoesNotFailOnANumberOutOfRange() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    for body in [#"{"sessionDir":-1e999}"#, #"{"zzz":-1e999,"allowMcpActions":"true","provider":"codex"}"#] {
+        try Data(body.utf8).write(to: file)
+        #expect(AdvisorConfig.load(from: file).sessionDir == "", "\(body)")
+    }
+    // The second file: the keys that decode are kept, also beside such a number.
+    #expect(AdvisorConfig.load(from: file).provider == "codex")
+}
+
+// One bad entry in a library drops that entry only: the reader filters the
+// tags of the notes by the library, so an empty library would hide them all.
+@Test func loadKeepsTheGoodEntriesOfALibraryWithABadEntry() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    var disk = AdvisorConfig()
+    disk.tags = [SavedTag(name: "work", colorHex: "#112233")]
+    disk.contexts = [SavedContext(name: "standup", text: "the team")]
+    disk.save(to: file)
+    var json = try rawJSON(file)
+    json["tags"] = (json["tags"] as! [Any]) + [["name": 5]]
+    json["contexts"] = [["name": 5]] + (json["contexts"] as! [Any])
+    try JSONSerialization.data(withJSONObject: json).write(to: file)
+    guard case .unusable = AdvisorConfig.fileState(at: file) else {
+        Issue.record("the file must stay unusable for a save")
+        return
+    }
+    let config = AdvisorConfig.load(from: file)
+    #expect(config.tags == disk.tags)
+    #expect(config.contexts == disk.contexts)
+}
+
+// The session folder and the other app-side keys do not depend on how the
+// sidecar reads the file: a trailing comma, which the sidecar refuses, beside
+// a key that does not decode still gives the file's session folder.
+@Test func loadKeepsTheAppSideKeysOfAFileThatTheSidecarRefuses() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try Data(#"{"sessionDir":"/Notes/Advisor","allowMcpActions":"true",}"#.utf8).write(to: file)
+    #expect(AdvisorConfig.load(from: file).sessionDir == "/Notes/Advisor")
+}
+
+// The API key that the app gives the sidecar must match the provider that the
+// sidecar runs (code review 2026-11-15).
+@Test func theSidecarKeyFollowsTheSidecarsReadOfTheFile() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    #expect(AdvisorConfig.loadForSidecarKey(from: file) == AdvisorConfig(), "no file")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let key = { (body: String) -> [String] in
+        try Data(body.utf8).write(to: file)
+        let config = AdvisorConfig.loadForSidecarKey(from: file)
+        return [config.provider, config.authMode]
+    }
+    // A file that decodes as a whole.
+    #expect(try key(#"{"provider":"codex","authMode":"apiKey"}"#) == ["codex", "apiKey"])
+    // A key that does not decode: the sidecar merges the other keys, and so
+    // does the app. A provider of the wrong type is the default on both sides.
+    #expect(try key(#"{"provider":"codex","authMode":"apiKey","allowMcpActions":"true"}"#) == ["codex", "apiKey"])
+    #expect(try key(#"{"provider":5,"authMode":"apiKey"}"#) == ["claude", "apiKey"])
+    // Such a key in a file that the sidecar refuses (a trailing comma) or
+    // reads to other values (two equal keys), and a file that is cut off: no key.
+    #expect(try key(#"{"provider":"codex","authMode":"apiKey","allowMcpActions":"true",}"#) == ["claude", "subscription"])
+    #expect(try key(#"{"provider":"claude","provider":"codex","authMode":"apiKey","model":5}"#) == ["claude", "subscription"])
+    #expect(try key(#"{"provider":"codex","authMode":"apiKey""#) == ["claude", "subscription"])
+    // As before issue #137: a trailing comma in a file that decodes. The
+    // sidecar runs its default provider, and the key for it still arrives.
+    #expect(try key(#"{"authMode":"apiKey",}"#) == ["claude", "apiKey"])
+}
+
+// The sidecar merges each trigger flag, so the reader keeps the flags that
+// the file gives when another key does not decode.
+@Test func loadKeepsTheTriggerFlagsThatTheFileGives() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try Data(#"{"triggers":{"question":false,"context":"no"},"allowMcpActions":"true"}"#.utf8).write(to: file)
+    let triggers = AdvisorConfig.load(from: file).triggers
+    #expect(triggers.question == false)
+    #expect(triggers.context == true, "a flag of the wrong type keeps its default")
+    #expect(triggers.factcheck == true)
+}

@@ -27,6 +27,26 @@ struct AdvisorConfig: Codable, Equatable {
         var question = true
         var context = true
         var factcheck = true
+
+        init(question: Bool = true, context: Bool = true, factcheck: Bool = true) {
+            self.question = question
+            self.context = context
+            self.factcheck = factcheck
+        }
+
+        /// Every flag, as the synthesised decode asks. For a reader
+        /// (`AdvisorConfig.load`), each flag that is a boolean and the
+        /// default for the others, as the sidecar merges them (`mergeConfig`).
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let lenient = decoder.userInfo[AdvisorConfig.lenientKey] as? Bool == true
+            func flag(_ key: CodingKeys, _ fallback: Bool) throws -> Bool {
+                lenient ? (try? c.decodeIfPresent(Bool.self, forKey: key)) ?? fallback : try c.decode(Bool.self, forKey: key)
+            }
+            question = try flag(.question, question)
+            context = try flag(.context, context)
+            factcheck = try flag(.factcheck, factcheck)
+        }
     }
 
     var triggerSensitivity = "balanced"
@@ -103,37 +123,55 @@ struct AdvisorConfig: Codable, Equatable {
     /// A key of the wrong type still fails the decode: a default in its place
     /// would reach the file at the next save (a bad entry would empty the whole
     /// context library). The Files tab reads its list without this decode
-    /// (`ReadableFolders`).
+    /// (`ReadableFolders`), and a reader that never saves takes the keys that
+    /// decode (`load`).
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        triggerSensitivity = try c.decodeIfPresent(String.self, forKey: .triggerSensitivity) ?? "balanced"
-        triggers = try c.decodeIfPresent(Triggers.self, forKey: .triggers) ?? Triggers()
-        allowMcpActions = try c.decodeIfPresent(Bool.self, forKey: .allowMcpActions) ?? false
-        sttLocale = try c.decodeIfPresent(String.self, forKey: .sttLocale) ?? ""
-        provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
-        model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        // For a reader (`load`), a key that does not decode keeps its default.
+        let lenient = decoder.userInfo[Self.lenientKey] as? Bool == true
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) throws -> T {
+            if lenient { return (try? c.decodeIfPresent(T.self, forKey: key)) ?? fallback }
+            return try c.decodeIfPresent(T.self, forKey: key) ?? fallback
+        }
+        triggerSensitivity = try value(.triggerSensitivity, "balanced")
+        triggers = try value(.triggers, Triggers())
+        allowMcpActions = try value(.allowMcpActions, false)
+        sttLocale = try value(.sttLocale, "")
+        provider = try value(.provider, "claude")
+        model = try value(.model, "")
         // An unknown level falls back to Default, as the sidecar does, so the
         // picker never shows a blank selection for a level that isn't running.
-        let rawEffort = try c.decodeIfPresent(String.self, forKey: .effort) ?? ""
+        let rawEffort = try value(.effort, "")
         effort = AgentEffort.levels.contains { $0.0 == rawEffort } ? rawEffort : ""
-        authMode = try c.decodeIfPresent(String.self, forKey: .authMode) ?? "subscription"
-        appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? "system"
-        contexts = try c.decodeIfPresent([SavedContext].self, forKey: .contexts) ?? []
-        tags = try c.decodeIfPresent([SavedTag].self, forKey: .tags) ?? []
-        sessionDir = try c.decodeIfPresent(String.self, forKey: .sessionDir) ?? ""
-        logTranscriptText = try c.decodeIfPresent(Bool.self, forKey: .logTranscriptText) ?? false
+        authMode = try value(.authMode, "subscription")
+        appearance = try value(.appearance, "system")
+        // For a reader, one bad entry drops that entry only: the windows
+        // filter the tags of the notes by the library.
+        func library<T: Decodable>(_ key: CodingKeys) throws -> [T] {
+            if lenient {
+                return (try? c.decodeIfPresent([Lossy<T>].self, forKey: key))?.compactMap(\.value) ?? []
+            }
+            return try c.decodeIfPresent([T].self, forKey: key) ?? []
+        }
+        contexts = try library(.contexts)
+        tags = try library(.tags)
+        sessionDir = try value(.sessionDir, "")
+        logTranscriptText = try value(.logTranscriptText, false)
         // Strings only, as the sidecar keeps them. A value that is not a list
         // gives no folders, rather than a failed decode that the next save
         // turns into a reset of every setting.
-        readableFolders = (try? c.decodeIfPresent([LossyString].self, forKey: .readableFolders))?
+        readableFolders = (try? c.decodeIfPresent([Lossy<String>].self, forKey: .readableFolders))?
             .compactMap(\.value) ?? []
     }
 
-    /// A list entry that is kept only when it is a string.
-    private struct LossyString: Decodable {
-        let value: String?
+    /// Set in a decoder's `userInfo` for the reader's decode (`load`).
+    fileprivate static let lenientKey = CodingUserInfoKey(rawValue: "advisor.lenient")!
+
+    /// A list entry that is kept only when it decodes.
+    private struct Lossy<T: Decodable>: Decodable {
+        let value: T?
         init(from decoder: Decoder) {
-            value = try? decoder.singleValueContainer().decode(String.self)
+            value = try? T(from: decoder)
         }
     }
 
@@ -143,11 +181,39 @@ struct AdvisorConfig: Codable, Equatable {
             .appendingPathComponent("Advisor/config.json")
     }
 
+    /// The settings for a reader that never writes them, such as the session
+    /// folder, the recorder and the appearance at launch. A key that does not
+    /// decode keeps its default and every other key keeps the file's value,
+    /// as the sidecar merges them (`mergeConfig`). Before, one such key gave
+    /// the default for every setting, so a recording went to the default
+    /// session folder (issue #137). A save does not use this: for a save the
+    /// file stays unusable (`fileState`), so a default never reaches the file.
+    /// The defaults when the file is missing or is not a JSON object.
     static func load(from url: URL = fileURL) -> AdvisorConfig {
-        guard let data = try? Data(contentsOf: url),
-            let config = try? JSONDecoder().decode(AdvisorConfig.self, from: data)
-        else { return AdvisorConfig() }
-        return config
+        (try? Data(contentsOf: url)).flatMap(lenient) ?? AdvisorConfig()
+    }
+
+    /// `data` in the lenient mode of the decode; nil when it is not a JSON object.
+    private static func lenient(_ data: Data) -> AdvisorConfig? {
+        let decoder = JSONDecoder()
+        decoder.userInfo[lenientKey] = true
+        return try? decoder.decode(AdvisorConfig.self, from: data)
+    }
+
+    /// The settings that choose the API key for the sidecar (`provider` and
+    /// `authMode`). The key must match the provider that the sidecar runs. A
+    /// file that decodes as a whole gives its settings, as before issue #137.
+    /// A file with a key that does not decode gives the keys that decode, as
+    /// the sidecar merges them, but only when the sidecar reads the file as
+    /// the app does (`ConfigFile.read`). For any other such file the sidecar
+    /// runs on its defaults or on values that the app cannot know, so this
+    /// gives the defaults: no key.
+    static func loadForSidecarKey(from url: URL = fileURL) -> AdvisorConfig {
+        guard let data = try? Data(contentsOf: url) else { return AdvisorConfig() }
+        if let config = try? JSONDecoder().decode(AdvisorConfig.self, from: data) { return config }
+        // The bytes that passed the check are the bytes that are decoded.
+        guard case .object(_, let checked) = ConfigFile.read(at: url) else { return AdvisorConfig() }
+        return lenient(checked) ?? AdvisorConfig()
     }
 
     /// Write this config to `url`; false when the write failed.

@@ -194,7 +194,7 @@ final class SidecarManager {
 
     init(
         store: TranscriptStore,
-        loadConfig: @escaping () -> AdvisorConfig = { AdvisorConfig.load() },
+        loadConfig: @escaping () -> AdvisorConfig = { AdvisorConfig.loadForSidecarKey() },
         readKey: @escaping (Keychain.Key) -> String? = { Keychain.read($0) },
         launchProcess: @escaping (Process) throws -> Void = { try $0.run() },
         environment: [String: String] = ProcessInfo.processInfo.environment,
