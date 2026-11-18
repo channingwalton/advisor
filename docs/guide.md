@@ -171,17 +171,22 @@ date), a gist, the duration, the card count and a coloured dot for each tag
 ### Folders
 
 Folders show as collapsible sections above the sessions. To add one, hover the
-**Folders** label and click `+`.
+**Folders** label and click `+`. Right-click a folder and choose **New Subfolder…**
+to nest another inside it. Collapse a folder to hide its whole subtree; search
+reveals matching sessions with their parent folders, even when collapsed.
 
 - **Filing.** Drag a session onto a folder, or right-click it and choose
   **Move to Folder** (a folder, **No Folder** for a session in a folder, or
   **New Folder…**).
-- **Rename and delete.** Right-click a folder header. A delete moves the
-  folder's sessions back out and keeps them. Folders are real folders in the
-  storage folder, so Finder shows them too.
+- **Rename and delete.** Right-click a folder header. Renaming keeps its
+  subfolders. A delete moves its sessions and subfolders up one level and keeps
+  them, including the subfolders' defaults. A name collision or unknown file
+  prevents deletion; nothing is overwritten. Folders are real folders in the
+  storage folder, so Finder shows them too. Move to Folder shows full paths to
+  distinguish subfolders with the same name.
 - **The live session.** You cannot move the session of the recording window
-  until that window closes. You also cannot rename or delete its folder, also
-  while it is stopped.
+  until that window closes. You also cannot rename or delete its folder or any
+  parent folder, also while it is stopped.
 - **Record into a folder.** Hover a folder header and click its red **record
   button**. The recording window opens, and the note is saved in that folder
   from the start. The folder is fixed when you press Listen; to move the
@@ -194,6 +199,10 @@ Folders show as collapsible sections above the sessions. To add one, hover the
   recording started from the folder takes them, and you can change them before
   or during the session. Existing sessions, and sessions that you move into the
   folder, do not change.
+
+Context and tags belong only to the folder where they are set. A subfolder does
+not inherit its parent's context or tags; a recording uses only its own folder's
+defaults.
 
 ### Session detail
 

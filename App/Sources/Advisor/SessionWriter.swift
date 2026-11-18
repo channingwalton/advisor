@@ -48,7 +48,7 @@ final class SessionWriter {
     /// Start a session. `folder`, when set, files the note directly into that
     /// sub-folder of the archive (issue #35: start a recording from a folder so it
     /// lands there) — `<root>/<folder>/…` — instead of the un-foldered root. An
-    /// unusable name (`sanitiseFolderName`) falls back to the root.
+    /// unusable path (`folderURL`) falls back to the root.
     func start(context: String = "", name: String = "", tags: [String] = [], folder: String? = nil) {
         started = Date()
         ended = nil
@@ -60,8 +60,7 @@ final class SessionWriter {
         // folder changed in Preferences since launch applies to this session. A
         // target sub-folder, when given, nests under it.
         let base = resolveDirectory()
-        let directory = folder.flatMap(SessionArchive.sanitiseFolderName)
-            .map { base.appendingPathComponent($0, isDirectory: true) } ?? base
+        let directory = folder.flatMap { SessionArchive.folderURL($0, root: base) } ?? base
         try? FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true)
         fileURL = directory.appendingPathComponent(SessionArchive.fileName(for: started!))

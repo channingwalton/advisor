@@ -53,6 +53,8 @@ struct SessionsView: View {
     // Folder create/rename/delete are driven from the sidebar inline.
     @State private var creatingFolder = false
     @State private var newFolderName = ""
+    @State private var newFolderParent: String?
+    @State private var folderError: String?
     /// When a folder is created from a row's "New Folder…", file this session into
     /// it once created; nil when creating an empty folder from the Folders bar.
     @State private var fileIntoNewFolder: LoadedSession?
@@ -74,7 +76,9 @@ struct SessionsView: View {
     @State private var hoveredFolder: String?
     @State private var hoveringFoldersBar = false
 
-    var body: some View {
+    var body: some View { folderAlerts }
+
+    private var sessionAlerts: some View {
         // Native NavigationSplitView: on macOS 26 (Tahoe) the sidebar column
         // renders as a floating Liquid-Glass panel over the full-bleed detail —
         // the "floating sidebar" look (Calendar/Notes). No opaque background on
@@ -128,6 +132,10 @@ struct SessionsView: View {
             Text("Delete “\(session.detail.title)”? This permanently removes its transcript "
                 + "and cards, and can't be undone.")
         }
+    }
+
+    private var folderAlerts: some View {
+        sessionAlerts
         .alert("New folder", isPresented: $creatingFolder) {
             TextField("Folder name", text: $newFolderName)
             Button("Create") {
@@ -136,7 +144,7 @@ struct SessionsView: View {
             }
             Button("Cancel", role: .cancel) { fileIntoNewFolder = nil }
         } message: {
-            Text("Name the new folder.")
+            Text(newFolderParent.map { "Name the new subfolder in “\($0)”." } ?? "Name the new folder.")
         }
         .alert("Rename folder", isPresented: presenting($renamingFolder), presenting: renamingFolder) { folder in
             TextField("Folder name", text: $folderRenameText)
@@ -149,8 +157,11 @@ struct SessionsView: View {
             Button("Delete", role: .destructive) { deleteFolder(folder) }
             Button("Cancel", role: .cancel) {}
         } message: { folder in
-            Text("Delete the folder “\(folder)”? Its sessions move back out and are kept.")
+            Text("Delete the folder “\(folder)”? Its sessions and subfolders move up one level and are kept.")
         }
+        .alert("Folder could not be changed", isPresented: presenting($folderError)) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(folderError ?? "") }
     }
 
     /// Bridge an optional-item state to the `Bool` an `.alert` wants: presented
@@ -193,11 +204,13 @@ struct SessionsView: View {
                 // (the same reason `foldersBar`'s + button works).
                 ForEach(visibleFolders, id: \.self) { folder in
                     Group {
-                        folderHeader(folder).plainSidebarRow()
-                        if !collapsedFolders.contains(folder) {
+                        folderHeader(folder)
+                            .padding(.leading, CGFloat(SessionFolderTree.ancestors(of: folder).count * 16))
+                            .plainSidebarRow()
+                        if !collapsedFolders.contains(folder) || !query.trimmingCharacters(in: .whitespaces).isEmpty {
                             ForEach(sessions(in: folder)) { session in
                                 sessionRow(session)
-                                    .padding(.leading, 16)
+                                    .padding(.leading, CGFloat((SessionFolderTree.ancestors(of: folder).count + 1) * 16))
                                     .plainSidebarRow()
                             }
                         }
@@ -239,6 +252,7 @@ struct SessionsView: View {
             Spacer()
             Button {
                 newFolderName = ""
+                newFolderParent = nil
                 fileIntoNewFolder = nil
                 creatingFolder = true
             } label: {
@@ -270,7 +284,7 @@ struct SessionsView: View {
                 .frame(width: 10)
             Image(systemName: targeted ? "folder.fill" : "folder")
                 .font(.system(size: 12)).foregroundStyle(targeted ? Theme.accent : Theme.textSecondary)
-            Text(folder).font(.system(size: 13))
+            Text((folder as NSString).lastPathComponent).font(.system(size: 13))
                 .foregroundStyle(targeted ? Theme.accent : Theme.textStrong).lineLimit(1)
             Spacer(minLength: 6)
             // Opacity, not removal: an open context/tags popover stays anchored
@@ -377,6 +391,7 @@ struct SessionsView: View {
     /// could miss later rows.
     private func fileSessions(_ urls: [URL], to folder: String) {
         collapsedFolders.remove(folder)
+        collapsedFolders.subtract(SessionFolderTree.ancestors(of: folder))
         let toFile = urls.compactMap { url in sessions.first { $0.file.url == url } }
         for session in toFile {
             fileSession(session, to: folder)
@@ -394,12 +409,13 @@ struct SessionsView: View {
 
     @ViewBuilder private func folderMenu(_ folder: String) -> some View {
         Button("Rename Folder…") {
-            folderRenameText = folder
+            folderRenameText = (folder as NSString).lastPathComponent
             renamingFolder = folder
         }
         .disabled(SessionArchive.folderContains(ctx.liveFileURL, folder: folder))
-        Button("New Folder…") {
+        Button("New Subfolder…") {
             newFolderName = ""
+            newFolderParent = folder
             fileIntoNewFolder = nil
             creatingFolder = true
         }
@@ -590,6 +606,7 @@ struct SessionsView: View {
             if !folders.isEmpty { Divider() }
             Button("New Folder…") {
                 newFolderName = ""
+                newFolderParent = nil
                 fileIntoNewFolder = session
                 creatingFolder = true
             }
@@ -671,14 +688,27 @@ struct SessionsView: View {
         guard !SessionArchive.isSameNote(session.file.url, ctx.liveFileURL) else { return }
         if let moved = SessionArchive.setFolder(folder, for: session.file) {
             if selection == session.file.url { selection = moved.url }
+            if let folder {
+                collapsedFolders.remove(folder)
+                collapsedFolders.subtract(SessionFolderTree.ancestors(of: folder))
+            }
         }
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
     /// Create `name`; if `session` is set (from a row's "New Folder…"), file it in.
     private func createFolder(named name: String, fileIn session: LoadedSession?) {
-        guard SessionArchive.createFolder(name) else { return }
-        if let session, let folder = SessionArchive.sanitiseFolderName(name) {
+        guard let leaf = SessionArchive.sanitiseFolderName(name) else {
+            folderError = "Use a non-empty folder name without /, : or a leading dot."
+            return
+        }
+        let folder = newFolderParent.map { $0 + "/" + leaf } ?? leaf
+        guard SessionArchive.createFolder(folder) else {
+            folderError = "The folder could not be created. Check its name and storage permissions."
+            return
+        }
+        collapsedFolders.subtract(SessionFolderTree.ancestors(of: folder))
+        if let session {
             fileSession(session, to: folder) // posts the reload notification
         } else {
             NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
@@ -690,7 +720,10 @@ struct SessionsView: View {
     /// notes' URLs change — reload reconciles it.
     private func renameFolder(_ old: String, to new: String) {
         guard SessionArchive.renameFolder(from: old, to: new, excluding: ctx.liveFileURL)
-        else { return }
+        else {
+            folderError = "The folder could not be renamed. Check its name, existing folders and storage permissions."
+            return
+        }
         collapsedFolders.remove(old)
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
@@ -712,9 +745,13 @@ struct SessionsView: View {
         folderTags[folder] = SessionArchive.parseTags(SessionArchive.tagsLine(tags))
     }
 
-    /// Delete a folder; its sessions are un-filed back to the root, not deleted.
+    /// Delete a folder; its direct sessions and children move up one level.
     private func deleteFolder(_ folder: String) {
-        guard SessionArchive.deleteFolder(folder, excluding: ctx.liveFileURL) else { return }
+        guard SessionArchive.deleteFolder(folder, excluding: ctx.liveFileURL) else {
+            folderError = "The folder could not be removed. It may contain unknown files, or a session or subfolder with the same name already exists in its parent. Nothing is overwritten."
+            NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+            return
+        }
         collapsedFolders.remove(folder)
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
@@ -749,9 +786,11 @@ struct SessionsView: View {
     /// Which folders to show: all of them when unfiltered (so empty folders still
     /// appear and can be managed), only folders with a match when searching.
     private var visibleFolders: [String] {
-        query.trimmingCharacters(in: .whitespaces).isEmpty
-            ? folders
-            : folders.filter { !sessions(in: $0).isEmpty }
+        SessionFolderTree.visible(
+            folders: folders,
+            matching: query.trimmingCharacters(in: .whitespaces).isEmpty
+                ? nil : Set(filtered.compactMap { $0.file.folder }),
+            collapsed: collapsedFolders)
     }
 
     /// Un-foldered filtered sessions grouped into relative-date sections, in list

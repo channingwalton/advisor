@@ -1,8 +1,8 @@
 import Foundation
 
 /// A saved session note on disk: the file and its start time, parsed from the
-/// `yyyy-MM-dd-HHmmss.md` filename `SessionWriter` assigns. `folder` is the name
-/// of the immediate sub-directory the note lives in (issue #25), or `nil` when it
+/// `yyyy-MM-dd-HHmmss.md` filename `SessionWriter` assigns. `folder` is the
+/// archive-relative path of the directory the note lives in, or `nil` when it
 /// sits directly in the archive root (un-foldered).
 struct SessionFile: Identifiable, Hashable {
     var id: URL { url }
@@ -98,58 +98,65 @@ enum SessionArchive {
         return fileNameFormatter.date(from: String(filename.dropLast(3)))
     }
 
-    /// Session notes in `directory`, newest first; non-session files are skipped.
-    /// Descends one level into sub-directories (issue #25): a note in `<dir>/Work`
-    /// is returned with `folder == "Work"`, a note directly in `dir` with `folder
-    /// == nil`. Only one level is scanned — deeper nesting and dot-directories are
-    /// ignored. The folder is resolved first: `contentsOfDirectory` fails with
-    /// "Not a directory" when the folder itself is a symlink (issue #114).
-    static func list(in directory: URL = SessionArchive.directory) -> [SessionFile] {
-        let fm = FileManager.default
-        let entries = (try? fm.contentsOfDirectory(
-            at: resolvedFolder(directory), includingPropertiesForKeys: [.isDirectoryKey])) ?? []
-        var files: [SessionFile] = []
-        for entry in entries {
-            let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            if isDir {
-                let folder = entry.lastPathComponent
-                guard !folder.hasPrefix(".") else { continue }
-                let inner = (try? fm.contentsOfDirectory(
-                    at: entry, includingPropertiesForKeys: nil)) ?? []
-                for url in inner {
-                    if let date = date(from: url.lastPathComponent) {
-                        files.append(SessionFile(url: url, date: date, folder: folder))
-                    }
+    /// One recursive walk shared by notes and folders. Never follow symlinks:
+    /// a linked directory could escape the archive or form a cycle (issue #155).
+    private static func scan(_ directory: URL) -> (files: [SessionFile], folders: [String]) {
+        let root = resolvedFolder(directory)
+        var files: [SessionFile] = [], folders: [String] = []
+        func walk(_ dir: URL, folder: String?) {
+            let entries = (try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])) ?? []
+            for entry in entries {
+                let name = entry.lastPathComponent
+                guard !name.hasPrefix("."),
+                    let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                    values.isSymbolicLink != true else { continue }
+                if values.isDirectory == true {
+                    let path = folder.map { $0 + "/" + name } ?? name
+                    folders.append(path)
+                    walk(entry, folder: path)
+                } else if let date = date(from: name) {
+                    files.append(SessionFile(url: entry, date: date, folder: folder))
                 }
-            } else if let date = date(from: entry.lastPathComponent) {
-                files.append(SessionFile(url: entry, date: date, folder: nil))
             }
         }
-        return files.sorted { $0.date > $1.date }
+        walk(root, folder: nil)
+        return (files.sorted { $0.date > $1.date },
+            folders.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
     }
 
-    /// The folder names in `directory` (issue #25): every immediate sub-directory,
-    /// dot-directories excluded, case-insensitively sorted. Empty folders are
-    /// included — the folder list is derived from disk, so an empty folder simply
-    /// persists as an empty directory (no separate config registry, unlike tags).
-    /// The folder is resolved first, as in `list`.
+    /// All saved notes, newest first, with archive-relative folder paths.
+    static func list(in directory: URL = SessionArchive.directory) -> [SessionFile] {
+        scan(directory).files
+    }
+
+    /// Every folder, including empty descendants, as an archive-relative path.
     static func folders(in directory: URL = SessionArchive.directory) -> [String] {
-        let fm = FileManager.default
-        let entries = (try? fm.contentsOfDirectory(
-            at: resolvedFolder(directory), includingPropertiesForKeys: [.isDirectoryKey])) ?? []
-        return entries
-            .compactMap { entry -> String? in
-                let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                let name = entry.lastPathComponent
-                return (isDir && !name.hasPrefix(".")) ? name : nil
-            }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        scan(directory).folders
+    }
+
+    /// Validate every component without normalising away traversal or empty parts.
+    static func sanitiseFolderPath(_ path: String) -> String? {
+        let parts = path.components(separatedBy: "/")
+        guard parts.allSatisfy({ sanitiseFolderName($0) != nil && !$0.contains("\u{0}") }) else { return nil }
+        return path
+    }
+
+    /// A validated nested path, excluding symlink components even for mutations.
+    static func folderURL(_ path: String, root: URL = SessionArchive.directory) -> URL? {
+        guard let safe = sanitiseFolderPath(path) else { return nil }
+        var url = resolvedFolder(root)
+        for part in safe.components(separatedBy: "/") {
+            url.appendPathComponent(part, isDirectory: true)
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true { return nil }
+        }
+        return url
     }
 
     /// A folder name reduced to a safe single path component, or `nil` if unusable.
     /// Trims, then rejects empty, dot-leading (hidden / `.`/`..`), and names
     /// carrying a path separator (`/`) or HFS separator (`:`). The single gate
-    /// behind `createFolder`/`renameFolder`/`setFolder`.
+    /// for a single name; `sanitiseFolderPath` validates nested paths.
     static func sanitiseFolderName(_ name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("."),
@@ -440,8 +447,7 @@ enum SessionArchive {
     /// Idempotent: creating a folder that already exists succeeds.
     @discardableResult
     static func createFolder(_ name: String, in directory: URL = SessionArchive.directory) -> Bool {
-        guard let folder = sanitiseFolderName(name) else { return false }
-        let url = directory.appendingPathComponent(folder, isDirectory: true)
+        guard let url = folderURL(name, root: directory) else { return false }
         return (try? FileManager.default.createDirectory(
             at: url, withIntermediateDirectories: true)) != nil
     }
@@ -451,9 +457,7 @@ enum SessionArchive {
     /// and not a session-date name, so `list`/`folders` ignore it (a file, not a
     /// directory), and it travels with the directory on `renameFolder`.
     static func folderContextURL(_ folder: String, root: URL = SessionArchive.directory) -> URL? {
-        guard let safe = sanitiseFolderName(folder) else { return nil }
-        return root.appendingPathComponent(safe, isDirectory: true)
-            .appendingPathComponent(".context.md")
+        folderURL(folder, root: root)?.appendingPathComponent(".context.md")
     }
 
     /// A folder's saved context (issue #36), or "" when none is set or the name is
@@ -493,9 +497,7 @@ enum SessionArchive {
     /// `<root>/<folder>/.tags`. It travels with the directory on rename and is
     /// ignored by session listing.
     static func folderTagsURL(_ folder: String, root: URL = SessionArchive.directory) -> URL? {
-        guard let safe = sanitiseFolderName(folder) else { return nil }
-        return root.appendingPathComponent(safe, isDirectory: true)
-            .appendingPathComponent(".tags")
+        folderURL(folder, root: root)?.appendingPathComponent(".tags")
     }
 
     /// A folder's default session tags (issue #76), or an empty list when unset.
@@ -543,7 +545,7 @@ enum SessionArchive {
         let fm = FileManager.default
         let folderName: String?
         if let folder {
-            guard let safe = sanitiseFolderName(folder) else { return nil }
+            guard let safe = sanitiseFolderPath(folder), folderURL(safe, root: root) != nil else { return nil }
             folderName = safe
         } else {
             folderName = nil
@@ -598,8 +600,8 @@ enum SessionArchive {
     static func folderContains(
         _ note: URL?, folder: String, in directory: URL = SessionArchive.directory
     ) -> Bool {
-        guard let note, let safe = sanitiseFolderName(folder) else { return false }
-        let parent = resolvedFolder(directory.appendingPathComponent(safe, isDirectory: true)).path.lowercased()
+        guard let note, let url = folderURL(folder, root: directory) else { return false }
+        let parent = resolvedFolder(url).path.lowercased()
         let path = resolvedNoteURL(note).path.lowercased()
         return path.hasPrefix(parent + "/")
     }
@@ -614,11 +616,11 @@ enum SessionArchive {
         excluding ownedNote: URL? = nil
     ) -> Bool {
         guard let newName = sanitiseFolderName(new),
-            let oldName = sanitiseFolderName(old) else { return false }
+            let oldName = sanitiseFolderPath(old),
+            let src = folderURL(oldName, root: directory) else { return false }
         guard !folderContains(ownedNote, folder: oldName, in: directory) else { return false }
         let fm = FileManager.default
-        let src = directory.appendingPathComponent(oldName, isDirectory: true)
-        let dst = directory.appendingPathComponent(newName, isDirectory: true)
+        let dst = src.deletingLastPathComponent().appendingPathComponent(newName, isDirectory: true)
         guard fm.fileExists(atPath: src.path) else { return false }
         if src.standardizedFileURL == dst.standardizedFileURL { return true }
         // Block only a collision with a genuinely different folder; a case-only
@@ -629,8 +631,8 @@ enum SessionArchive {
         return (try? fm.moveItem(at: src, to: dst)) != nil
     }
 
-    /// Delete folder `name` (issue #25) without deleting its sessions: each note is
-    /// un-filed back to `directory` (collisions skipped), then the directory is
+    /// Delete folder `name` without deleting its sessions: direct notes and child
+    /// folders move up to its parent (collisions abort), then the directory is
     /// removed only if nothing remains in it — so unknown non-session files there
     /// are never destroyed. Returns true when the directory was removed.
     @discardableResult
@@ -638,15 +640,11 @@ enum SessionArchive {
         _ name: String, in directory: URL = SessionArchive.directory,
         excluding ownedNote: URL? = nil
     ) -> Bool {
-        guard let safe = sanitiseFolderName(name) else { return false }
+        guard let safe = sanitiseFolderPath(name),
+            let folderURL = folderURL(safe, root: directory) else { return false }
         guard !folderContains(ownedNote, folder: safe, in: directory) else { return false }
         let fm = FileManager.default
-        let folderURL = directory.appendingPathComponent(safe, isDirectory: true)
-        for file in list(in: folderURL) {
-            let dest = directory.appendingPathComponent(file.url.lastPathComponent)
-            if fm.fileExists(atPath: dest.path) { continue }
-            try? fm.moveItem(at: file.url, to: dest)
-        }
+
         // Our own folder metadata shouldn't block removal, but it must not be
         // destroyed if the delete is aborted: ignore it when checking emptiness,
         // and only remove it once everything else is gone.
@@ -654,12 +652,25 @@ enum SessionArchive {
             folderContextURL(safe, root: directory),
             folderTagsURL(safe, root: directory),
         ].compactMap { $0 }
-        let remaining = ((try? fm.contentsOfDirectory(
-            at: folderURL, includingPropertiesForKeys: nil)) ?? [])
+        guard let entries = try? fm.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else { return false }
+        let remaining = entries
             .filter { entry in
                 !metadata.contains { $0.standardizedFileURL == entry.standardizedFileURL }
             }
-        guard remaining.isEmpty else { return false }
+        let parent = folderURL.deletingLastPathComponent()
+        // Preflight the whole level before moving anything. Unknown files stay
+        // put, and a child collision must not merge directories or lose defaults.
+        guard remaining.allSatisfy({ entry in
+            guard let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                values.isSymbolicLink != true, !entry.lastPathComponent.hasPrefix(".") else { return false }
+            return (values.isDirectory == true || date(from: entry.lastPathComponent) != nil)
+                && !fm.fileExists(atPath: parent.appendingPathComponent(entry.lastPathComponent).path)
+        }) else { return false }
+        for entry in remaining {
+            do { try fm.moveItem(at: entry, to: parent.appendingPathComponent(entry.lastPathComponent)) }
+            catch { return false }
+        }
         for url in metadata where fm.fileExists(atPath: url.path) {
             try? fm.removeItem(at: url)
         }

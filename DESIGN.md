@@ -2177,6 +2177,26 @@ The `www/` site was a design-tool export with a generated React runtime and no
 real window captures and no pricing section. (Superseded 2026-10-17: see
 *Website removed*.) Commit: `d3ad3d5`.
 
+## Nested session folders (2026-11-18, issue #155)
+
+Folder identity is an archive-relative path (`Work/Project`), not a leaf name.
+The archive walks all non-hidden directories without following symlinks; the
+configured archive root itself may still be a symlink. Existing on-disk names
+are enumerated as-is, including whitespace. Mutating paths validate each
+component and refuse symlink components, traversal and hidden directories.
+
+The sidebar keeps plain List rows so its controls and drop targets continue to
+work, with tree order and indentation supplied by `SessionFolderTree`. Collapsing
+an ancestor hides its descendants; search reveals matching paths and ancestors.
+Move to Folder uses full paths to distinguish duplicate leaf names.
+
+Context (`.context.md`) and tag defaults (`.tags`) remain local to each directory:
+there is no parent fallback or merge. A recording uses only its target folder's
+defaults. Renaming moves the whole subtree in place. Deleting promotes direct
+sessions and child directories one level, retaining child defaults, and preflights
+collisions and unknown files before moving anything. A recording's owned note
+protects every ancestor from rename or deletion, including while stopped.
+
 ## MIT licence (2026-10-04)
 
 Advisor is free and open source under the MIT licence (`LICENSE`, copyright

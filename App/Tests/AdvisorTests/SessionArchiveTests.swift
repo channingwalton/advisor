@@ -262,7 +262,7 @@ private func makeFolderedArchive(
     #expect(SessionArchive.folders(in: dir) == ["Work"])
     // Creating it again succeeds; an unusable name is rejected.
     #expect(SessionArchive.createFolder("Work", in: dir))
-    #expect(!SessionArchive.createFolder("a/b", in: dir))
+    #expect(!SessionArchive.createFolder("a/../b", in: dir))
     #expect(SessionArchive.folders(in: dir) == ["Work"])
 }
 
@@ -304,7 +304,7 @@ private func makeFolderedArchive(
     defer { try? FileManager.default.removeItem(at: dir) }
 
     let file = try #require(SessionArchive.list(in: dir).first)
-    #expect(SessionArchive.setFolder("bad/name", for: file, root: dir) == nil)
+    #expect(SessionArchive.setFolder("bad/../name", for: file, root: dir) == nil)
     #expect(FileManager.default.fileExists(atPath: file.url.path)) // untouched
 }
 
@@ -636,9 +636,9 @@ private func symlinkedArchive() throws -> (top: URL, viaParent: URL, viaLeaf: UR
     let dir = try makeFolderedArchive()
     defer { try? FileManager.default.removeItem(at: dir) }
 
-    #expect(!SessionArchive.setFolderContext("x", for: "a/b", root: dir))
-    #expect(SessionArchive.folderContextURL("a/b", root: dir) == nil)
-    #expect(SessionArchive.folderContext("a/b", root: dir).isEmpty)
+    #expect(!SessionArchive.setFolderContext("x", for: "a/../b", root: dir))
+    #expect(SessionArchive.folderContextURL("a/../b", root: dir) == nil)
+    #expect(SessionArchive.folderContext("a/../b", root: dir).isEmpty)
 }
 
 @Test func renameFolderCarriesContext() throws {
@@ -719,9 +719,9 @@ private func symlinkedArchive() throws -> (top: URL, viaParent: URL, viaLeaf: UR
     let dir = try makeFolderedArchive()
     defer { try? FileManager.default.removeItem(at: dir) }
 
-    #expect(!SessionArchive.setFolderTags(["work"], for: "a/b", root: dir))
-    #expect(SessionArchive.folderTagsURL("a/b", root: dir) == nil)
-    #expect(SessionArchive.folderTags("a/b", root: dir).isEmpty)
+    #expect(!SessionArchive.setFolderTags(["work"], for: "a/../b", root: dir))
+    #expect(SessionArchive.folderTagsURL("a/../b", root: dir) == nil)
+    #expect(SessionArchive.folderTags("a/../b", root: dir).isEmpty)
 }
 
 @Test func setFolderTagsReportsWriteFailure() throws {
