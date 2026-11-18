@@ -157,8 +157,8 @@ function deniedRoots(home: string, realpath: (p: string) => string): string[] {
 
 /// The readable folders that the policy honours (GHSA-6xc8-f55f-jxqr): Read,
 /// Grep and Glob reach only paths inside one. The user lists them in
-/// Preferences → Files (`readableFolders` in config.json), and the default is
-/// none, so an agent reads no local file until the user lists a folder. A
+/// Preferences → Files (`readableFolders` in config.json), augmented with
+/// Advisor's session archive by `loadReadableFolders` (#154). A
 /// folder is refused when it is not in the home folder, or when it is at,
 /// under or above a denied path, in its listed or its resolved form: `~`,
 /// `~/Library` and a symlink into `~/.ssh` give nothing, while

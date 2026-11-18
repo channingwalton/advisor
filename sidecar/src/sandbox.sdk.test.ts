@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { AgentSession } from "./agent.js";
 import { claudeWriteFolders } from "./claudeSandbox.js";
+import { loadReadableFolders } from "./config.js";
 import { fakeModelQuery, sse, stubMcp, SYNTHETIC_HOME_ROOT } from "./fakeModel.js";
 
 // The sandbox against the real bundled Claude CLI, not just the policy
@@ -245,6 +246,14 @@ async function toolResult(s: AgentSession, id: string): Promise<string> {
   assert.ok(out !== undefined, `${id}: the CLI never returned a tool result`);
   return out;
 }
+
+test("#session-history Claude reads a previous session from the configured archive without a Files allowance", async () => {
+  const file = path.join(home, "history-config.json");
+  fs.writeFileSync(file, JSON.stringify({ readableFolders: [], sessionDir: path.join(home, "later") }));
+  const s = session(work, loadReadableFolders(file));
+  assert.ok((await toolResult(s, "laterPlan")).includes(LATER));
+  assert.ok(!(await toolResult(s, "unnamedStore")).includes(SECRET));
+});
 
 test("#sandbox-sdk-gate harness control: an ordinary file reaches the model", async () => {
   const out = await toolResult(session(work), "notes");

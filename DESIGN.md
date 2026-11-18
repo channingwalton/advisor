@@ -74,7 +74,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Logging.** All app and sidecar diagnostics go through `FileLog` (`Log.swift`) to `~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so the file shows up under Console.app → Log Reports and survives a packaged run (where stderr goes nowhere). The app is the *sole* writer: its own lines arrive via `appLog.write`, the sidecar's stderr is captured by `SidecarManager` and funnelled in via `appLog.appendSidecar` (lines reassembled across chunk boundaries, each wall-clock-timestamped). One serial queue → no write contention and a single chronological timeline that interleaves app and `[sidecar +Xs]` lines. Mirrored to stderr too for dev runs. Rotates by size (5 MB), keeping one previous file (`advisor.log.1`). A watchdog (`MainThreadWatchdog.swift`), started in `applicationDidFinishLaunching`, pings the main queue each second from its own queue; when a ping goes unanswered for 5 s it logs the stall and runs `/usr/bin/sample` on the app into `hang-<n>-<UTC time>.txt` beside the log. It measures from the unanswered ping, not from the last answer, so a late tick under App Nap is not a stall, and the logged length counts from the ping, not from the start of the stall. A stall of about 7 s or more is caught: its first ping goes out up to 1 s after it starts, and a ping tick that fires late moves the report one tick later. App Nap can delay ticks more. If `sample` fails, the log gives its exit status or the launch error, and the file can be missing or incomplete. After a sample is saved, it keeps the newest five by `n`, because the clock can go back. The recording window's close guard logs each window's first responder. Both came from a hang on close (2026-10-31) that left no trace in the log and that could not be reproduced.
 
-**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, saved contexts and tags never reach the sidecar; `logTranscriptText` does, for the sidecar's utterance line). Tabs: Agent (provider, model, effort, authentication, connector actions), Files (the folders that Claude agents may read), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
+**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, saved contexts and tags never reach the sidecar; `sessionDir` does, so card agents can search past sessions, as does `logTranscriptText` for the sidecar's utterance line). Tabs: Agent (provider, model, effort, authentication, connector actions), Files (the folders that Claude agents may read), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
 
 ### TS sidecar
 
@@ -386,6 +386,32 @@ Limits:
   fault.
 - Until the allowlist is in place, a credential store that the denylist does
   not name is readable, and so is each file that a local connector reads.
+
+### Historical session context (2026-11-18, issue #154)
+
+Card lanes now add Advisor's session archive to their effective readable folders.
+This deliberately widens the default read boundary from no local files to the
+archive only, superseding that default in *Readable folders* below. `sessionDir`
+is shared with the sidecar; `sessionDirectory` mirrors `SessionArchive.directory`
+for blank, relative and tilde paths. `loadReadableFolders` merges the current
+archive with the explicit Files list, without writing it into that list. A move
+therefore removes the implicit old allowance under the existing Claude idle
+recycle / per-call gate and Codex per-turn refresh rules. An absent config uses
+the default archive; malformed or unreadable config gives no folders.
+
+The archive is not a sandbox exception. The same home-folder restriction,
+credential denylist and symlink checks apply in the tool policy and both Seatbelt
+profiles. A dedicated custom archive makes its whole subtree readable, as an
+explicit Files entry would. An archive outside the home folder remains unavailable
+to agents. No write permission is added.
+
+The research prompt asks for relevant dated, cited history and distinguishes it
+from current speech and from instructions. Retrieval uses the existing read-only
+Read/Grep/Glob tools, including subfolders; transcripts are not bulk-loaded and
+the classifier remains current-session-only. This avoids archive-sized prompts
+and keeps older statements from becoming new triggers. Tests tagged
+`#session-history` cover path resolution, live moves, prompt rules and reads
+through both real CLIs with a synthetic model endpoint.
 
 ### Readable folders (2026-11-10, GHSA-6xc8-f55f-jxqr)
 

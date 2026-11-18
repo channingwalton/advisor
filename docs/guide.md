@@ -4,6 +4,23 @@ The everyday guide: recording, the Sessions browser, preferences, providers,
 safety and logs. For the short version, see
 [Getting started](../README.md#getting-started).
 
+## Historical context
+
+Cards can search Advisor's saved session notes for relevant earlier discussions,
+decisions and action items, alongside your other readable files. You do not need
+to add the sessions folder in Preferences → Files. This uses the session folder
+in Preferences → General (including its subfolders), or the built-in
+`~/Library/Application Support/Advisor/sessions` folder. Moving it changes where
+agents look; the old folder is not kept as an extra allowance.
+
+History is retrieved on demand, not copied wholesale into each new conversation.
+Answers should cite the session file and distinguish earlier statements from
+current facts. The trigger classifier still sees only the current conversation.
+The usual read-only sandbox applies: an archive outside your home folder, at or
+above a credential store, or symlinked into one cannot be searched by agents.
+Choose a dedicated sessions folder, not a general-purpose parent folder: all
+files inside it become readable to card agents, just as with a Files allowance.
+
 ## Recording
 
 Advisor opens on the **Sessions** browser (see [below](#sessions-browser)). To
@@ -312,8 +329,9 @@ On **Claude**, a tool policy limits each research agent call:
   tools, and tools that the policy does not recognise, need **Allow connector
   actions**.
 - Files can be read, but not changed, only inside your readable folders. Add
-  and remove them in Preferences → **Files**. There are none by default, so the
-  agents read no local file until you add a folder. Claude's own file tools
+  and remove extra folders in Preferences → **Files**. Advisor's session archive
+  is included automatically for historical context; no other folders are listed
+  by default. Claude's own file tools
   refuse a removed folder at once, also in a card that is in progress. Other
   changes apply from the next card. An agent that is busy, or has cards
   waiting, keeps its folders until it is idle: until then its connectors can

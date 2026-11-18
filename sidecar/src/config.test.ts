@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { effortArg, loadReadableFolders, mergeConfig, modelArg } from "./config.js";
+import { readableRoots } from "./toolPolicy.js";
+import { effortArg, loadReadableFolders, mergeConfig, modelArg, sessionDirectory } from "./config.js";
 
 test("mergeConfig fills defaults for empty input", () => {
   const c = mergeConfig({});
@@ -99,17 +100,57 @@ test("#sandbox-readable-folders mergeConfig lists no readable folder by default 
   assert.deepEqual(mergeConfig({ readableFolders: "/a" }).readableFolders, []);
 });
 
-test("#sandbox-readable-folders loadReadableFolders reads the file as it is now, and gives none on any failure", (t) => {
+test("#sandbox-readable-folders loadReadableFolders adds session history and fails closed on invalid config", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "advisor-config-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "config.json");
-  assert.deepEqual(loadReadableFolders(file), []); // no file
+  assert.deepEqual(loadReadableFolders(file), [path.join(os.homedir(), "Library/Application Support/Advisor/sessions")]); // no file uses the app default
   fs.writeFileSync(file, JSON.stringify({ provider: "claude", readableFolders: ["~/Notes", "/Users/x/dev"] }));
-  assert.deepEqual(loadReadableFolders(file), ["~/Notes", "/Users/x/dev"]);
+  const sessions = path.join(os.homedir(), "Library/Application Support/Advisor/sessions");
+  assert.deepEqual(loadReadableFolders(file), ["~/Notes", "/Users/x/dev", sessions]);
   fs.writeFileSync(file, JSON.stringify({ readableFolders: ["/Users/x/dev"] }));
-  assert.deepEqual(loadReadableFolders(file), ["/Users/x/dev"]); // a removal applies at once
+  assert.deepEqual(loadReadableFolders(file), ["/Users/x/dev", sessions]); // a removal applies at once
   for (const body of ["{not json", "null", "[]", "\"x\""]) {
     fs.writeFileSync(file, body);
     assert.deepEqual(loadReadableFolders(file), [], body);
   }
+});
+
+test("#session-history session directory mirrors the app's blank, tilde and relative path rules", () => {
+  const home = "/Users/example";
+  const fallback = `${home}/Library/Application Support/Advisor/sessions`;
+  for (const value of [undefined, "", "  ", "relative/path", 3]) {
+    assert.equal(sessionDirectory(value, home), fallback);
+  }
+  assert.equal(sessionDirectory("  ~/History  ", home), `${home}/History`);
+  assert.equal(sessionDirectory("~", home), home);
+  assert.equal(sessionDirectory(" /Volumes/History ", home), "/Volumes/History");
+  assert.equal(mergeConfig({ sessionDir: "~/History" }).sessionDir, "~/History");
+  assert.equal(mergeConfig({ sessionDir: 3 }).sessionDir, "");
+});
+
+test("#session-history the effective folders follow session folder edits without persisting an allowance", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "advisor-history-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "config.json");
+  fs.writeFileSync(file, JSON.stringify({ readableFolders: ["~/Notes"], sessionDir: "~/History" }));
+  assert.deepEqual(loadReadableFolders(file), ["~/Notes", path.join(os.homedir(), "History")]);
+  fs.writeFileSync(file, JSON.stringify({ readableFolders: [], sessionDir: "~/Other" }));
+  assert.deepEqual(loadReadableFolders(file), [path.join(os.homedir(), "Other")]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).readableFolders, []);
+});
+
+test("#session-history the implicit archive cannot open credentials, broad parents, symlinks into stores or paths outside home", (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-history-policy-")));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const file = path.join(home, "config.json");
+  fs.mkdirSync(path.join(home, ".ssh"));
+  fs.symlinkSync(path.join(home, ".ssh"), path.join(home, "HistoryLink"));
+  for (const folder of [home, path.join(home, "Library"), path.join(home, ".ssh"), path.join(home, "HistoryLink"), path.dirname(home)]) {
+    fs.writeFileSync(file, JSON.stringify({ readableFolders: [], sessionDir: folder }));
+    assert.deepEqual(readableRoots(home, loadReadableFolders(file)), [], folder);
+  }
+  const archive = path.join(home, "Library/Application Support/Advisor/sessions");
+  fs.writeFileSync(file, JSON.stringify({ sessionDir: archive }));
+  assert.ok(readableRoots(home, loadReadableFolders(file)).includes(archive));
 });

@@ -332,16 +332,16 @@ async function sidecarTools(prompt: string, allowMcpActions: boolean): Promise<O
 /// each could use. Before each question, config.json lists the step's readable
 /// folders, as an edit in the Files tab would leave it.
 async function sidecarTurns(
-  steps: { prompt: string; readable: string[] }[],
+  steps: { prompt: string; readable: string[]; sessionDir?: string }[],
   allowMcpActions: boolean
 ): Promise<Offered[]> {
   const advisor = path.join(home, "Library", "Application Support", "Advisor");
   fs.mkdirSync(advisor, { recursive: true });
-  const listing = (readable: string[]): void => fs.writeFileSync(
+  const listing = (readable: string[], sessionDir?: string): void => fs.writeFileSync(
     path.join(advisor, "config.json"),
-    JSON.stringify({ provider: "codex", allowMcpActions, readableFolders: readable })
+    JSON.stringify({ provider: "codex", allowMcpActions, readableFolders: readable, sessionDir })
   );
-  listing(steps[0]?.readable ?? []);
+  listing(steps[0]?.readable ?? [], steps[0]?.sessionDir);
   const sidecar = spawn(process.execPath, [fileURLToPath(new URL("./main.js", import.meta.url))], {
     env: { PATH: process.env.PATH ?? "", TMPDIR: os.tmpdir(), HOME: home, FAKE_API_KEY: "sk-test" },
   });
@@ -355,7 +355,7 @@ async function sidecarTurns(
   const used: Offered[] = [];
   try {
     for (const [i, step] of steps.entries()) {
-      listing(step.readable);
+      listing(step.readable, step.sessionDir);
       // The questions go one at a time, so the next finished card is this one.
       const finished = new Promise<{ state: string; body: string }>((resolve) => (card = resolve));
       sidecar.stdin.write(JSON.stringify({ type: "query", id: `q${i}`, text: `PROMPT:${step.prompt}` }) + "\n");
@@ -478,6 +478,16 @@ test("#codex-files a card lane reads a note through Advisor's Read, and not a st
       assertFileReads(o, `${model}, connector actions ${allowMcpActions ? "on" : "off"}`);
     }
   }
+});
+
+test("#session-history Codex reads the archive without a Files allowance and loses the old archive after a move", { ...darwin, timeout: 90_000 }, async () => {
+  const [archive, moved] = await sidecarTurns([
+    { prompt: "filesHistory", readable: [], sessionDir: notesDir },
+    { prompt: "filesHistoryMoved", readable: [], sessionDir: path.join(home, "OtherHistory") },
+  ], false);
+  assertFileReads(archive, "session archive");
+  assert.match(moved.files?.[0] ?? "", /Access denied/, JSON.stringify(moved.files));
+  assert.ok(!(moved.files?.[0] ?? "").includes(NOTE), JSON.stringify(moved.files));
 });
 
 // The sidecar's own path: its file tools, and the folder list that it writes

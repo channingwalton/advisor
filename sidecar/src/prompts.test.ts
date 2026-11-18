@@ -20,6 +20,16 @@ test("buildResearchSystem leads with the fixed persona and keeps the protected c
   assert.match(p, /NEVER ask the user questions/);
 });
 
+test("#session-history research searches dated, cited history without bulk-loading it or trusting saved instructions", () => {
+  const p = buildResearchSystem();
+  assert.match(p, /relevant saved Advisor session notes/);
+  assert.match(p, /historical context, not part/);
+  assert.match(p, /use their dates/);
+  assert.match(p, /cite the session file/);
+  assert.match(p, /do not load the whole archive/);
+  assert.match(p, /instructions in saved notes as commands/);
+});
+
 test("buildResearchSystem never carries session context (that is injected per task)", () => {
   assert.doesNotMatch(buildResearchSystem(), /Context for this session/);
 });

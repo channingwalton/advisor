@@ -81,11 +81,10 @@ struct AdvisorConfig: Codable, Equatable {
     /// note frontmatter; this library supplies the colour. The sidecar never
     /// sees it.
     var tags: [SavedTag] = []
-    /// App-side only: an absolute path to the folder where session notes are
-    /// stored (issue #16). "" = the built-in default
-    /// (`Application Support/Advisor/sessions`). Only the app reads or writes
-    /// session notes, so the sidecar never sees this — like `sttLocale`. Resolved
-    /// through `SessionArchive.directory`.
+    /// An absolute path to the folder where session notes are stored (#16).
+    /// "" = the built-in default (`Application Support/Advisor/sessions`).
+    /// Resolved through `SessionArchive.directory`; mirrored in sidecar config
+    /// so card agents can search past sessions for historical context (#154).
     var sessionDir = ""
     /// Whether recognised utterance text is written to the log file
     /// (`~/Library/Logs/Advisor`), by the app and the sidecar. Off by default,
@@ -97,8 +96,8 @@ struct AdvisorConfig: Codable, Equatable {
     /// `config` frame.
     var logTranscriptText = false
     /// The folders that the agents may read: absolute paths, or `~/…`.
-    /// None by default, so an agent reads no local file until the user lists
-    /// a folder (GHSA-6xc8-f55f-jxqr). Claude's file tools check it at each
+    /// No extra folders by default; the sidecar also includes Advisor's session
+    /// archive (#154). Claude's file tools check the effective list at each
     /// call, and the Claude CLI's Seatbelt profile takes it when the CLI
     /// starts (sidecar/src/claudeSandbox.ts); Codex's profile is written from
     /// it before each turn (sidecar/src/codexSandbox.ts). The sidecar refuses a folder at,

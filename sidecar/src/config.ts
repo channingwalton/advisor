@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import path from "node:path";
 import type { EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 import { log } from "./protocol.js";
 
@@ -33,6 +34,9 @@ export interface AdvisorConfig {
   /// starts, and the Codex Seatbelt profile before each turn
   /// (`loadReadableFolders`, `refreshCodexSandbox`).
   readableFolders: string[];
+  /// Session archive location, mirrored by Preferences.swift. Included in the
+  /// effective readable folders so cards can research previous conversations.
+  sessionDir: string;
 }
 
 const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
@@ -46,6 +50,7 @@ const DEFAULTS: AdvisorConfig = {
   effort: "",
   logTranscriptText: false,
   readableFolders: [],
+  sessionDir: "",
 };
 
 /// The model id to pass to the SDK, or undefined to use the provider's default.
@@ -91,18 +96,34 @@ export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
     readableFolders: Array.isArray(raw.readableFolders)
       ? raw.readableFolders.filter((f): f is string => typeof f === "string")
       : [...DEFAULTS.readableFolders],
+    sessionDir: str("sessionDir", DEFAULTS.sessionDir),
   };
 }
 
-/// The readable folders that config.json lists now. Each Read, Grep and Glob
-/// call reads them, so a folder that the user removes is refused at once, not
-/// at the next session (code review 2026-11-10). Any failure gives none.
+/// Mirror SessionArchive.directory(for:): trim spaces, expand ~, and use the
+/// built-in archive for blank or relative paths. The policy still judges this
+/// folder, including its symlinks; this is not a sandbox exception.
+export function sessionDirectory(value: unknown, home = homedir()): string {
+  let folder = typeof value === "string" ? value.replace(/^[\t ]+|[\t ]+$/g, "") : "";
+  if (folder === "~") folder = home;
+  else if (folder.startsWith("~/")) folder = path.join(home, folder.slice(2));
+  return path.isAbsolute(folder) ? folder : path.join(home, "Library/Application Support/Advisor/sessions");
+}
+
+/// Effective folders: the user's list plus Advisor's session archive (#154).
+/// Read fresh so removing a folder or moving the archive takes effect under
+/// the existing Claude/Codex refresh rules. Invalid/unreadable config fails
+/// closed; an absent config uses the same default archive as the app.
 export function loadReadableFolders(file: string = CONFIG_PATH): string[] {
+  let raw: unknown;
   try {
-    return mergeConfig(JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>).readableFolders;
-  } catch {
-    return [];
+    raw = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? [sessionDirectory("")] : [];
   }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [];
+  const config = mergeConfig(raw as Record<string, unknown>);
+  return [...new Set([...config.readableFolders, sessionDirectory(config.sessionDir)])];
 }
 
 export function loadConfig(): AdvisorConfig {
