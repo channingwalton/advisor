@@ -90,6 +90,10 @@ A personal macOS tool that listens to conversations in realtime (calls, in-perso
 - F16d. Folder context (issue #36): a folder can hold a context that seeds the session prompt of every recording started in it, editable per session; it can be loaded from a saved context (F7b).
 - F16e. Past sessions in cards (issue #154): with a Preferences toggle, off by default, the card agents can read the session folder as one more readable folder.
   - The folder is the one that the app writes (`sessionDir`, else the default), it is added only while the toggle is on, and the readable-folder rules apply to it. Turned off, it is refused at once. Each task says which readable folder holds the earlier sessions, and how the notes are named. `#past-sessions`
+- F16f. Nested folders (issue #155): a folder can hold folders, to any depth, and each one works as a folder (filing, recording into it, context and tags).
+  - Sessions and folders at every depth are listed with their folder path, each folder before its subfolders. `#nested-folders`
+  - A new subfolder starts with a copy of its parent's context and tags; later edits of either do not change the other. `#nested-folder-inherit`
+  - Deleting a folder moves its sessions and subfolders into its parent (out of all folders for a top-level folder), and moves nothing when one of their names is already used there or the folder holds another file. `#nested-folder-delete`
 - F17. Session tags (issue #15): a user-managed library of coloured tags (Preferences), applied to a session from the live toolbar or the browser, shown as coloured dots on session rows (and pills in the session detail) and searchable. Stored by name in the note's frontmatter.
 - F17a. Folder tag defaults (issue #76): folders can hold tags from the library; a new recording started from that folder inherits them, with per-session editing still available. Existing sessions and sessions moved into the folder are unchanged.
 - F17b. Owned session folders (issue #78):

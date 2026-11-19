@@ -350,7 +350,7 @@ struct ListeningToolbar: View {
                 Image(systemName: "folder.fill").font(.system(size: 12))
                     .foregroundStyle(Theme.accent)
                 if !compact {
-                    Text(folder).font(.system(size: 12, weight: .medium))
+                    Text(FolderTree.displayPath(folder)).font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.textStrong)
                         .lineLimit(1).truncationMode(.tail)
                 }
@@ -361,7 +361,7 @@ struct ListeningToolbar: View {
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Metric.buttonRadius)
                     .stroke(Theme.hairline, lineWidth: 0.5))
-            .help("This recording is filed into the “\(folder)” folder")
+            .help("This recording is filed into the “\(FolderTree.displayPath(folder))” folder")
         }
     }
 

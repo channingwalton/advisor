@@ -1357,13 +1357,16 @@ folder or in none. Rejected: a `folder:` frontmatter key. Real directories show
 in Finder and need no registry in `config.json`. Empty folders stay.
 
 - `SessionArchive` owns the layout. `list` descends one level and ignores
-  deeper and dot-prefixed directories.
+  deeper and dot-prefixed directories. (Superseded 2026-11-19: folders nest,
+  see *Nested session folders*.)
 - Each change is a `moveItem` behind a check for an existing file, so nothing
   is overwritten.
 - `deleteFolder` never deletes sessions. It moves them back to the root and
-  removes the directory only when it is empty.
+  removes the directory only when it is empty. (Superseded 2026-11-19: they
+  move to the parent, all or nothing; see *Nested session folders*.)
 - `sanitiseFolderName` is the one name check. It rejects empty and dot-prefixed
-  names, `/` and `:`.
+  names, `/` and `:`. (Superseded 2026-11-19: a folder path goes through
+  `sanitiseFolderPath`; see *Nested session folders*.)
 - The live note cannot be filed, because its writer owns the path.
 - The storage move (issue #16) keeps the folder structure.
 
@@ -3835,6 +3838,69 @@ built sidecar and the real `config.json`): with the toggle on, "What did I
 talk about in my most recent earlier Advisor session?" took one Glob of the
 session folder, one Read and 11.5 s. With it off, the card searched for 60 s
 and said that it could not read the sessions.
+
+## Nested session folders (2026-11-19, issue #155)
+
+A folder can hold folders, to any depth. A folder is a relative path, such as
+`Work/Client A`, and a subfolder is a real sub-directory, so the model of
+*Session folders* stays: no registry, and Finder shows the same tree.
+
+- **One gate for a path.** `sanitiseFolderPath` refuses a blank name and a
+  name that starts with a dot (so `..`), so a path cannot leave the archive.
+  Each function that takes a folder uses it; a name that the user types still
+  goes through `sanitiseFolderName`, so a rename keeps a folder in its parent.
+  See *A path is exact* below for why it does not trim.
+- **`list` and `folders` walk every level** (`walk`). They skip
+  dot-directories and packages (an app or a Keynote file), and do not follow a
+  symlink inside the archive, so the walk cannot loop. `folders` sorts name by
+  name (`folderOrder`), so each folder comes just before its subfolders; two
+  names that differ only in case keep their subfolders apart. Accepted: the
+  walk has no depth limit and runs on the main thread at each reload, as the
+  note reads already did. The session folder is assumed to be Advisor's own; a
+  large folder chosen as `sessionDir`, such as a whole vault, makes each
+  reload slow and fills the sidebar with its sub-directories. The storage
+  move, tag rename and tag delete take `folders`, so they reach every level
+  with no change of their own.
+- **A subfolder copies its parent's defaults once.** `createFolder(_:inside:)`
+  copies `.context.md` and `.tags` when it creates the directory. Rejected: a
+  live link to the parent, because the issue asks for defaults that the user
+  can change afterwards. An existing folder keeps its own defaults.
+- **A delete moves the contents into the parent.** The notes directly in the
+  folder and its subfolders move up one level. A top-level folder's parent is
+  the root, as before. Rejected: a move to the root, which flattens the tree,
+  and a block on a folder with subfolders.
+- **A delete is all or nothing.** The contents are checked before anything
+  moves. When a name is already in the parent, or is the folder itself
+  (`Work/Work`), or the folder holds a file that is not a session (a package,
+  say), nothing moves and an alert says so: with nesting a collision is
+  likely, and a half-done delete left notes moved and the folder kept. Before,
+  a folder with another file had its notes moved out and stayed. The hidden
+  files that macOS writes (`isSystemFile`: `.DS_Store`, `.localized`,
+  `Icon\r`, `._*`) do not refuse a delete. When a move fails, the moves before
+  it are put back; the notes move first, so a test can fail a subfolder's move
+  after them. Then the folder holds only its context, its tags and those
+  system files, and is deleted with them. If that fails (a file locked in
+  Finder), the moves are put back too.
+- **No guard against outside changes during a delete.** A person operates the
+  app, so nothing else is assumed to write into a folder in the milliseconds
+  between the check and the delete. Rejected after review rounds on race
+  windows (a sync client or a recording that writes during a delete): the
+  Trash for the leftovers, a non-recursive `rmdir` with a retry, restoring
+  leftovers from their bytes, a no-Trash fallback, and checks in
+  `createFolder` for a parent removed or linked outside the app. Each fix
+  opened a smaller window and added code.
+- **A path is exact.** `sanitiseFolderPath` takes each name as it is on disk,
+  and refuses only a blank name and a name that starts with a dot. So the
+  folder `Work ` or `a:b` (Finder's `a/b`), made outside the app, works by its
+  own name and never acts on `Work`. Before, the gate trimmed the name, so an
+  action on `Work ` acted on `Work`.
+- **The owned note.** `folderContains` already compared a path prefix, so the
+  live note blocks a rename or delete of each folder that holds it.
+- **The sidebar** is a flat `List`, as before, in the order that
+  `FolderTree.layout` gives: a header, its subfolders, then its own sessions.
+  `FolderTree` holds the tree rules as pure functions: which folders show
+  (collapse and search), the counts, which include subfolders, and the
+  children for the nested **Move to Folder** menu.
 
 ## Revisit as it grows
 

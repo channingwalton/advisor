@@ -173,15 +173,30 @@ date), a gist, the duration, the card count and a coloured dot for each tag
 Folders show as collapsible sections above the sessions. To add one, hover the
 **Folders** label and click `+`.
 
+- **Subfolders.** A folder can hold other folders, to any depth. Right-click a
+  folder header and choose **New Folder Inside…**. The new folder starts with a
+  copy of its parent's context and tags. You can change them afterwards, and a
+  later change to the parent does not change the subfolder. A subfolder shows
+  indented under its parent, before the parent's own sessions. A folder's count
+  includes the sessions in its subfolders, and collapsing a folder also hides
+  its subfolders. While you search, a folder shows when it or one of its
+  subfolders holds a match.
 - **Filing.** Drag a session onto a folder, or right-click it and choose
   **Move to Folder** (a folder, **No Folder** for a session in a folder, or
-  **New Folder…**).
-- **Rename and delete.** Right-click a folder header. A delete moves the
-  folder's sessions back out and keeps them. Folders are real folders in the
-  storage folder, so Finder shows them too.
+  **New Folder…**). A folder that has subfolders opens its own menu: its first
+  item is the folder itself.
+- **Rename and delete.** Right-click a folder header. A rename keeps the folder
+  in its parent. A delete moves the folder's sessions and subfolders into its
+  parent folder, or out of all folders for a top-level folder, and keeps them.
+  Nothing moves, and the folder stays, when a session or subfolder in it has
+  the same name as one already in the parent, or when the folder holds a file
+  that is not a session, also a hidden one. The hidden files that macOS adds
+  itself, such as Finder's `.DS_Store`, do not count. A message then says so.
+  The folder's context and tags are deleted with it. Folders are real folders in
+  the storage folder, so Finder shows them too.
 - **The live session.** You cannot move the session of the recording window
-  until that window closes. You also cannot rename or delete its folder, also
-  while it is stopped.
+  until that window closes. You also cannot rename or delete its folder, or a
+  folder that holds its folder, also while it is stopped.
 - **Record into a folder.** Hover a folder header and click its red **record
   button**. The recording window opens, and the note is saved in that folder
   from the start. The folder is fixed when you press Listen; to move the

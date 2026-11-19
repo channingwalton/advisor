@@ -44,15 +44,20 @@ struct SessionsView: View {
     @State private var renameText = ""
     @State private var deleting: LoadedSession?
 
-    /// The folders in the archive (issue #25), derived from disk sub-directories.
+    /// The folder paths in the archive (issues #25, #155), such as
+    /// `Work/Client A`, derived from disk sub-directories in tree order.
     /// Refreshed alongside `sessions` on appear and on session changes.
     @State private var folders: [String] = []
     /// Folders the user has collapsed. Absence = expanded, so new folders default
     /// open. Kept in view state only (resets per window open), like the selection.
+    /// A collapsed folder also hides its subfolders.
     @State private var collapsedFolders: Set<String> = []
     // Folder create/rename/delete are driven from the sidebar inline.
     @State private var creatingFolder = false
     @State private var newFolderName = ""
+    /// The folder that a new folder goes inside (issue #155), from a folder's
+    /// "New Folder Inside…"; nil for a top-level folder.
+    @State private var newFolderParent: String?
     /// When a folder is created from a row's "New Folder…", file this session into
     /// it once created; nil when creating an empty folder from the Folders bar.
     @State private var fileIntoNewFolder: LoadedSession?
@@ -131,12 +136,21 @@ struct SessionsView: View {
         .alert("New folder", isPresented: $creatingFolder) {
             TextField("Folder name", text: $newFolderName)
             Button("Create") {
-                createFolder(named: newFolderName, fileIn: fileIntoNewFolder)
+                createFolder(named: newFolderName, inside: newFolderParent, fileIn: fileIntoNewFolder)
                 fileIntoNewFolder = nil
+                newFolderParent = nil
             }
-            Button("Cancel", role: .cancel) { fileIntoNewFolder = nil }
+            Button("Cancel", role: .cancel) {
+                fileIntoNewFolder = nil
+                newFolderParent = nil
+            }
         } message: {
-            Text("Name the new folder.")
+            if let parent = newFolderParent {
+                Text("Name the new folder inside “\(FolderTree.displayPath(parent))”. "
+                    + "It starts with a copy of that folder's context and tags.")
+            } else {
+                Text("Name the new folder.")
+            }
         }
         .alert("Rename folder", isPresented: presenting($renamingFolder), presenting: renamingFolder) { folder in
             TextField("Folder name", text: $folderRenameText)
@@ -149,7 +163,7 @@ struct SessionsView: View {
             Button("Delete", role: .destructive) { deleteFolder(folder) }
             Button("Cancel", role: .cancel) {}
         } message: { folder in
-            Text("Delete the folder “\(folder)”? Its sessions move back out and are kept.")
+            Text(Self.deleteFolderMessage(folder))
         }
     }
 
@@ -190,14 +204,17 @@ struct SessionsView: View {
                 // Folders render as plain rows, not a `Section` header: a sidebar
                 // Section header flattens nested controls, so the header's record
                 // button (issue #35) wouldn't show — a regular row keeps it live
-                // (the same reason `foldersBar`'s + button works).
-                ForEach(visibleFolders, id: \.self) { folder in
-                    Group {
+                // (the same reason `foldersBar`'s + button works). Each level of
+                // subfolder (issue #155) indents one step.
+                ForEach(FolderTree.layout(visibleFolders), id: \.self) { entry in
+                    switch entry {
+                    case .header(let folder):
                         folderHeader(folder).plainSidebarRow()
+                    case .sessions(let folder):
                         if !collapsedFolders.contains(folder) {
                             ForEach(sessions(in: folder)) { session in
                                 sessionRow(session)
-                                    .padding(.leading, 16)
+                                    .padding(.leading, 16 + Self.folderIndent(folder))
                                     .plainSidebarRow()
                             }
                         }
@@ -240,6 +257,7 @@ struct SessionsView: View {
             Button {
                 newFolderName = ""
                 fileIntoNewFolder = nil
+                newFolderParent = nil
                 creatingFolder = true
             } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
@@ -261,7 +279,7 @@ struct SessionsView: View {
     /// `Button` keeps its own tap target rather than being swallowed by an outer one.
     private func folderHeader(_ folder: String) -> some View {
         let collapsed = collapsedFolders.contains(folder)
-        let count = sessions(in: folder).count
+        let count = FolderTree.sessionCount(of: folder, in: filtered.map(\.file.folder))
         let targeted = dropTargetFolder == folder
         let hovered = hoveredFolder == folder
         return HStack(spacing: 6) {
@@ -270,7 +288,7 @@ struct SessionsView: View {
                 .frame(width: 10)
             Image(systemName: targeted ? "folder.fill" : "folder")
                 .font(.system(size: 12)).foregroundStyle(targeted ? Theme.accent : Theme.textSecondary)
-            Text(folder).font(.system(size: 13))
+            Text(SessionArchive.folderName(folder)).font(.system(size: 13))
                 .foregroundStyle(targeted ? Theme.accent : Theme.textStrong).lineLimit(1)
             Spacer(minLength: 6)
             // Opacity, not removal: an open context/tags popover stays anchored
@@ -301,6 +319,7 @@ struct SessionsView: View {
             }
         }
         .padding(.horizontal, 10)
+        .padding(.leading, Self.folderIndent(folder))
         .frame(height: 28)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -392,15 +411,40 @@ struct SessionsView: View {
             .padding(.top, 16).padding(.bottom, 4)
     }
 
+    /// How far a folder's header and sessions indent: one step for each folder
+    /// that holds it (issue #155).
+    private static func folderIndent(_ folder: String) -> CGFloat {
+        CGFloat(SessionArchive.folderDepth(folder)) * 14
+    }
+
+    /// The delete confirmation names where the folder's contents go: its parent
+    /// (issue #155), or out of all folders for a top-level folder.
+    private static func deleteFolderMessage(_ folder: String) -> String {
+        let name = SessionArchive.folderName(folder)
+        if let parent = SessionArchive.parentFolder(folder) {
+            return "Delete the folder “\(name)”? Its sessions and folders move into "
+                + "“\(FolderTree.displayPath(parent))” and are kept."
+        }
+        return "Delete the folder “\(name)”? Its sessions move back out and are kept, "
+            + "and its folders become top-level folders."
+    }
+
     @ViewBuilder private func folderMenu(_ folder: String) -> some View {
         Button("Rename Folder…") {
-            folderRenameText = folder
+            folderRenameText = SessionArchive.folderName(folder)
             renamingFolder = folder
         }
         .disabled(SessionArchive.folderContains(ctx.liveFileURL, folder: folder))
+        Button("New Folder Inside…") {
+            newFolderName = ""
+            fileIntoNewFolder = nil
+            newFolderParent = folder
+            creatingFolder = true
+        }
         Button("New Folder…") {
             newFolderName = ""
             fileIntoNewFolder = nil
+            newFolderParent = nil
             creatingFolder = true
         }
         Divider()
@@ -440,7 +484,7 @@ struct SessionsView: View {
         }
         .buttonStyle(.plain)
         .focusEffectDisabled()
-        .help("Start a new recording in “\(folder)”")
+        .help("Start a new recording in “\(FolderTree.displayPath(folder))”")
     }
 
     /// A plain search field (a `#tag` term filters by tag — see the tooltip), with
@@ -574,7 +618,8 @@ struct SessionsView: View {
     }
 
     /// "Move to Folder" submenu (issue #25): existing folders, "No Folder" to
-    /// un-file, and "New Folder…" to create-and-file. Disabled for the live/owned
+    /// un-file, and "New Folder…" to create-and-file. A folder with subfolders is
+    /// a submenu of its own (issue #155). Disabled for the live/owned
     /// note — filing it would move the file out from under its writer (mirrors the
     /// Delete exemption and the #16 storage move, which also skip the live note).
     @ViewBuilder private func moveToFolderMenu(_ session: LoadedSession) -> some View {
@@ -583,14 +628,14 @@ struct SessionsView: View {
                 Button("No Folder") { fileSession(session, to: nil) }
                 Divider()
             }
-            ForEach(folders, id: \.self) { folder in
-                Button(folder) { fileSession(session, to: folder) }
-                    .disabled(folder == session.file.folder)
+            FolderMenuItems(parent: nil, folders: folders, current: session.file.folder) { folder in
+                fileSession(session, to: folder)
             }
             if !folders.isEmpty { Divider() }
             Button("New Folder…") {
                 newFolderName = ""
                 fileIntoNewFolder = session
+                newFolderParent = nil
                 creatingFolder = true
             }
         }
@@ -638,14 +683,15 @@ struct SessionsView: View {
         tagLibrary = config.tags
         savedContexts = config.contexts
         triggers = config.triggers
-        folders = SessionArchive.folders()
+        let scan = SessionArchive.scan()
+        folders = scan.folders
         folderContexts = folders.reduce(into: [:]) { $0[$1] = SessionArchive.folderContext($1) }
         folderTags = folders.reduce(into: [:]) {
             $0[$1] = SessionArchive.folderTags($1).filter {
                 TagLibrary.named($0, in: tagLibrary) != nil
             }
         }
-        sessions = SessionArchive.list().map { file in
+        sessions = scan.notes.map { file in
             let contents = SessionArchive.contents(of: file)
             let detail = SessionDetail.parse(
                 contents: contents, fallbackTitle: Self.rowTitle(file.date))
@@ -675,10 +721,14 @@ struct SessionsView: View {
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
-    /// Create `name`; if `session` is set (from a row's "New Folder…"), file it in.
-    private func createFolder(named name: String, fileIn session: LoadedSession?) {
-        guard SessionArchive.createFolder(name) else { return }
-        if let session, let folder = SessionArchive.sanitiseFolderName(name) {
+    /// Create `name`, inside `parent` when set (issue #155: the new folder takes
+    /// a copy of the parent's context and tags); if `session` is set (from a
+    /// row's "New Folder…"), file it in.
+    private func createFolder(named name: String, inside parent: String?, fileIn session: LoadedSession?) {
+        guard SessionArchive.createFolder(name, inside: parent) else { return }
+        if let parent { collapsedFolders = FolderTree.expanding(collapsedFolders, toShow: parent) }
+        if let session, let leaf = SessionArchive.sanitiseFolderName(name) {
+            let folder = parent.map { "\($0)/\(leaf)" } ?? leaf
             fileSession(session, to: folder) // posts the reload notification
         } else {
             NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
@@ -689,9 +739,11 @@ struct SessionsView: View {
     /// to the first visible session if it pointed inside the folder, since those
     /// notes' URLs change — reload reconciles it.
     private func renameFolder(_ old: String, to new: String) {
-        guard SessionArchive.renameFolder(from: old, to: new, excluding: ctx.liveFileURL)
+        guard SessionArchive.renameFolder(from: old, to: new, excluding: ctx.liveFileURL),
+            let name = SessionArchive.sanitiseFolderName(new)
         else { return }
-        collapsedFolders.remove(old)
+        let renamed = SessionArchive.parentFolder(old).map { "\($0)/\(name)" } ?? name
+        collapsedFolders = FolderTree.renaming(collapsedFolders, from: old, to: renamed)
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
@@ -712,10 +764,28 @@ struct SessionsView: View {
         folderTags[folder] = SessionArchive.parseTags(SessionArchive.tagsLine(tags))
     }
 
-    /// Delete a folder; its sessions are un-filed back to the root, not deleted.
+    /// Delete a folder; its sessions and subfolders move into its parent, not
+    /// deleted. The delete is all or nothing (`SessionArchive.deleteFolder`),
+    /// and a refused delete says why it can be refused, so the folder does not
+    /// stay with no reason given.
     private func deleteFolder(_ folder: String) {
-        guard SessionArchive.deleteFolder(folder, excluding: ctx.liveFileURL) else { return }
-        collapsedFolders.remove(folder)
+        guard SessionArchive.deleteFolder(folder, excluding: ctx.liveFileURL) else {
+            NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+            let parent = SessionArchive.parentFolder(folder).map { "“\(FolderTree.displayPath($0))”" }
+                ?? "the top level"
+            // After the confirmation alert has closed, not inside its action.
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Couldn't delete “\(SessionArchive.folderName(folder))”"
+                alert.informativeText = "The folder was not deleted. A session or folder in it may "
+                    + "have the same name as one in \(parent), the folder may hold something that is "
+                    + "not a session or a folder (it can be hidden), or a file in it may be locked. "
+                    + "Finder shows what is in the folder."
+                alert.runModal()
+            }
+            return
+        }
+        collapsedFolders = FolderTree.removing(collapsedFolders, folder: folder)
         NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
     }
 
@@ -740,18 +810,22 @@ struct SessionsView: View {
             }
     }
 
-    /// Filtered sessions that sit in `folder`, in sort order (folders show a flat
-    /// list, not date-grouped — date grouping is for the un-foldered area).
+    /// Filtered sessions that sit directly in `folder`, in sort order (folders
+    /// show a flat list, not date-grouped — date grouping is for the un-foldered
+    /// area).
     private func sessions(in folder: String) -> [LoadedSession] {
         filtered.filter { $0.file.folder == folder }
     }
 
-    /// Which folders to show: all of them when unfiltered (so empty folders still
-    /// appear and can be managed), only folders with a match when searching.
+    /// Which folders to show (`FolderTree.visible`): all of them when unfiltered
+    /// (so empty folders still appear and can be managed), only folders with a
+    /// match in them or in a subfolder when searching, and no subfolder of a
+    /// collapsed folder.
     private var visibleFolders: [String] {
-        query.trimmingCharacters(in: .whitespaces).isEmpty
-            ? folders
-            : folders.filter { !sessions(in: $0).isEmpty }
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        return FolderTree.visible(
+            folders, collapsed: collapsedFolders,
+            matching: searching ? Set(filtered.compactMap(\.file.folder)) : nil)
     }
 
     /// Un-foldered filtered sessions grouped into relative-date sections, in list
@@ -794,6 +868,33 @@ struct SessionsView: View {
     /// Fallback title (no context in the note): date + time.
     private static func rowTitle(_ date: Date) -> String {
         date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+    }
+}
+
+// MARK: - Move to Folder menu (issue #155)
+
+/// The folders inside `parent` for the Move to Folder menu. A folder with
+/// subfolders is a submenu: its first item files into the folder itself, and
+/// its subfolders follow. `AnyView` breaks the recursion of the view type.
+private struct FolderMenuItems: View {
+    let parent: String?
+    let folders: [String]
+    let current: String?
+    let file: (String) -> Void
+
+    var body: some View {
+        ForEach(FolderTree.children(of: parent, in: folders), id: \.self) { folder in
+            let name = SessionArchive.folderName(folder)
+            if FolderTree.children(of: folder, in: folders).isEmpty {
+                Button(name) { file(folder) }.disabled(folder == current)
+            } else {
+                Menu(name) {
+                    Button(name) { file(folder) }.disabled(folder == current)
+                    Divider()
+                    AnyView(FolderMenuItems(parent: folder, folders: folders, current: current, file: file))
+                }
+            }
+        }
     }
 }
 
