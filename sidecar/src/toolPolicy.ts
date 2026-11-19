@@ -203,18 +203,29 @@ export function honouredFolders(
 /// started with folder names (`A/B/*.md`), with or without the Seatbelt
 /// profile, while `*.md` with `A/B` in `path` found its 12 notes. An agent
 /// then decided that the notes did not exist, and searched for a minute
-/// (2026-11-12).
+/// (2026-11-12). When `sessions`, the session folder, is one of the folders,
+/// the note says that it holds Advisor's earlier transcripts and how they are
+/// named, so the agent knows to look there (issue #154).
 export function readableFoldersNote(
   home: string,
   folders: readonly string[],
-  realpath: (p: string) => string = REALPATH
+  realpath: (p: string) => string = REALPATH,
+  sessions: string | null = null
 ): string {
   const honoured = [...new Set(honouredFolders(home, folders, realpath).map((h) => h.folder))];
-  return honoured.length > 0
-    ? `Advisor lets you read local files only inside these folders: ${honoured.map((f) => JSON.stringify(f)).join(", ")}. ` +
-      "To find files with Glob, put the folder in `path`, and start the pattern with `*` or `**`, such as `**/*.md`: " +
-      "a pattern that starts with a folder name can find nothing."
-    : `You can read no local file: Advisor's Preferences (Files) list no folder that Advisor lets you read.`;
+  if (honoured.length === 0) {
+    return `You can read no local file: Advisor's Preferences (Files) list no folder that Advisor lets you read.`;
+  }
+  const abs = sessions === null ? null : absolutePath(sessions, home);
+  const pastSessions = abs !== null && honoured.includes(path.resolve(abs))
+    ? ` The folder ${JSON.stringify(path.resolve(abs))} holds the transcripts of the user's earlier Advisor sessions: ` +
+      "one Markdown note for each session, named by its start time (yyyy-MM-dd-HHmmss.md), some in sub-folders. " +
+      "The note of this session is there too. Search it when the conversation refers to an earlier meeting, " +
+      "decision or person."
+    : "";
+  return `Advisor lets you read local files only inside these folders: ${honoured.map((f) => JSON.stringify(f)).join(", ")}. ` +
+    "To find files with Glob, put the folder in `path`, and start the pattern with `*` or `**`, such as `**/*.md`: " +
+    "a pattern that starts with a folder name can find nothing." + pastSessions;
 }
 
 /// Each form of `abs` is in a readable root.

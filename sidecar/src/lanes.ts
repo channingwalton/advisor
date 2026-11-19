@@ -1,5 +1,5 @@
 import { Agent, type AgentSessionOptions } from "./agent.js";
-import { AdvisorConfig, effortArg, loadReadableFolders, modelArg } from "./config.js";
+import { AdvisorConfig, effortArg, loadPastSessionsFolder, loadReadableFolders, modelArg } from "./config.js";
 import { cardUpdateFrame, guardedRun, type Frame } from "./guardedRun.js";
 import { buildResearchSystem, escapeTags, sessionContextPrefix, transcriptLine, TranscriptSource } from "./prompts.js";
 import { log, Outbound, type Inbound } from "./protocol.js";
@@ -20,6 +20,7 @@ export function cardLaneOptions(config: AdvisorConfig, name: string): AgentSessi
     // the config that made it, and a folder that the user removes must stop
     // being read at once.
     readableFolders: loadReadableFolders,
+    pastSessions: loadPastSessionsFolder,
   };
 }
 

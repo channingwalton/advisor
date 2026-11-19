@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { TaskResult } from "./agent.js";
 import type { Outbound } from "./protocol.js";
 import { cardLaneOptions, claimQueryLane, LanePool, LiveSession, QueryLanes, runCard, Transcript, type Lane, type RunCardDeps } from "./lanes.js";
-import { loadReadableFolders, mergeConfig } from "./config.js";
+import { loadPastSessionsFolder, loadReadableFolders, mergeConfig } from "./config.js";
 
 /// A session that records each prompt and answers from a script; `reset()` is
 /// counted so a test can see the lane recycle.
@@ -176,6 +176,11 @@ test("#sandbox-readable-folders card lane options read the readable folders from
   // that the user removes must stop being read at once.
   const o = cardLaneOptions(mergeConfig({ readableFolders: ["/Users/x/Old"] }), "research0");
   assert.equal(o.readableFolders, loadReadableFolders);
+});
+
+test("#past-sessions card lane options read the folder of past sessions from config.json at each call", () => {
+  const o = cardLaneOptions(mergeConfig({ readPastSessions: true }), "research0");
+  assert.equal(o.pastSessions, loadPastSessionsFolder);
 });
 
 test("card lane options inherit the user's effort when none is configured", () => {

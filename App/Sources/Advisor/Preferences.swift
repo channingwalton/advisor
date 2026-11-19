@@ -81,11 +81,14 @@ struct AdvisorConfig: Codable, Equatable {
     /// note frontmatter; this library supplies the colour. The sidecar never
     /// sees it.
     var tags: [SavedTag] = []
-    /// App-side only: an absolute path to the folder where session notes are
-    /// stored (issue #16). "" = the built-in default
-    /// (`Application Support/Advisor/sessions`). Only the app reads or writes
-    /// session notes, so the sidecar never sees this — like `sttLocale`. Resolved
-    /// through `SessionArchive.directory`.
+    /// An absolute path to the folder where session notes are stored
+    /// (issue #16). "" = the built-in default
+    /// (`Application Support/Advisor/sessions`). Only the app writes session
+    /// notes. Resolved through `SessionArchive.directory`. The sidecar reads
+    /// it only to let the agents read the folder when `readPastSessions` is
+    /// on, by the rule of `directory(for:)` (`sessionFolder` in
+    /// sidecar/src/config.ts), except that it adds no folder for `~name/…`.
+    /// Change the two together (DESIGN.md, *Past sessions in cards*).
     var sessionDir = ""
     /// Whether recognised utterance text is written to the log file
     /// (`~/Library/Logs/Advisor`), by the app and the sidecar. Off by default,
@@ -107,13 +110,19 @@ struct AdvisorConfig: Codable, Equatable {
     /// file again at each file-tool call. Preferences → Files edits it in the
     /// file (`ReadableFolders`); `saveChanges` never writes it.
     var readableFolders: [String] = []
+    /// The agents may also read the session folder, so that a card can draw
+    /// on earlier sessions (issue #154). Off by default. The sidecar adds the
+    /// folder to the readable folders at each file-tool call, under the same
+    /// rules (`loadReadableFolders` in sidecar/src/config.ts), and the task
+    /// note says what the folder holds. Mirrors sidecar/src/config.ts.
+    var readPastSessions = false
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
         case triggerSensitivity, triggers, allowMcpActions
         case provider, model, effort, sttLocale, authMode, appearance, contexts, tags, sessionDir
-        case logTranscriptText, readableFolders
+        case logTranscriptText, readableFolders, readPastSessions
     }
 
     /// Tolerant decode: missing keys keep their default, unknown keys are
@@ -157,6 +166,7 @@ struct AdvisorConfig: Codable, Equatable {
         tags = try library(.tags)
         sessionDir = try value(.sessionDir, "")
         logTranscriptText = try value(.logTranscriptText, false)
+        readPastSessions = try value(.readPastSessions, false)
         // Strings only, as the sidecar keeps them. A value that is not a list
         // gives no folders, rather than a failed decode that the next save
         // turns into a reset of every setting.
@@ -848,7 +858,8 @@ struct PreferencesFile {
     /// The file cannot be read or does not decode, so the window's copy is
     /// not the file's: the defaults, or an older copy. The window takes no
     /// edits until a reload finds a file that it can use. The Files tab edits
-    /// its list in the raw file, so it stays usable.
+    /// its list in the raw file, so the list stays usable; its past-sessions
+    /// toggle is a setting of the window's copy, so it is locked too.
     private(set) var unusable = false
     /// The window shows a change that the file does not hold, because its
     /// write failed. The next change, or a reload, writes it again.
@@ -936,7 +947,8 @@ struct PreferencesView: View {
             )
             .tabItem { Label("Agent", systemImage: "brain") }
 
-            FilesSettingsView()
+            FilesSettingsView(
+                readPastSessions: $config.readPastSessions, sessionDir: config.sessionDir, locked: file.unusable)
                 .tabItem { Label("Files", systemImage: "folder") }
 
             TriggersSettingsView(
@@ -1062,7 +1074,14 @@ private struct AgentSettingsView: View {
 /// Files tab: the folders that the Claude agents may read (GHSA-6xc8-f55f-jxqr).
 /// Its edits go to the file through `ReadableFolders`, which reads the file's
 /// list at each edit; the window's own copy of the config never writes it.
+/// The past-sessions toggle (issue #154) is a setting of the window's copy,
+/// saved as the window saves the others.
 struct FilesSettingsView: View {
+    @Binding var readPastSessions: Bool
+    /// The session folder setting, to name the folder that the toggle opens.
+    let sessionDir: String
+    /// config.json cannot be used, so the window's settings take no edits.
+    let locked: Bool
     /// The config file; a test can give a file of its own.
     var configURL = AdvisorConfig.fileURL
     @State private var folders: [String] = []
@@ -1079,7 +1098,9 @@ struct FilesSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 } else if folders.isEmpty {
-                    Text("No folders yet, so agents read no local files.")
+                    Text(readPastSessions
+                        ? "No folders yet, so agents read no local files outside your session folder."
+                        : "No folders yet, so agents read no local files.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1108,6 +1129,14 @@ struct FilesSettingsView: View {
                     .focusEffectDisabled()
                     .disabled(unusable)
                 Text("Agents can read the files in these folders, but cannot change them. A credential folder such as ~/.ssh is not used, and nor is a folder inside one or a folder that holds one, such as ~ or ~/Library. A folder beside them, such as ~/Library/Mobile Documents (iCloud Drive), is used. A folder outside your home folder is not used. Claude's own file tools refuse a removed folder at once. Other changes apply from the next card, or when a busy agent is idle.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Past sessions") {
+                Toggle("Agents can read past sessions", isOn: $readPastSessions)
+                    .disabled(locked)
+                Text("Agents can also read every file in your session folder, \(ReadableFolders.display(SessionArchive.directory(for: sessionDir).path)), so a card can draw on an earlier conversation. They are told what the folder holds. Choose the folder in General → Session storage. The same rules apply as for the folders above: a session folder outside your home folder is not used. When you turn this off, Claude's own file tools refuse the folder at once. Other changes apply from the next card, or when a busy agent is idle.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1283,7 +1312,7 @@ private struct GeneralSettingsView: View {
                         Button("Change…") { chooseSessionFolder() }
                     }
                 }
-                Text("Where transcripts are saved. Changing the folder offers to move your existing transcripts across.")
+                Text("Where transcripts are saved. Changing the folder offers to move your existing transcripts across. With Agents can read past sessions on (Files), agents can read every file in this folder.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

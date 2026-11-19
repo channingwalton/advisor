@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { effortArg, loadReadableFolders, mergeConfig, modelArg } from "./config.js";
+import { effortArg, loadPastSessionsFolder, loadReadableFolders, mergeConfig, modelArg, sessionFolder } from "./config.js";
 
 test("mergeConfig fills defaults for empty input", () => {
   const c = mergeConfig({});
@@ -112,4 +112,54 @@ test("#sandbox-readable-folders loadReadableFolders reads the file as it is now,
     fs.writeFileSync(file, body);
     assert.deepEqual(loadReadableFolders(file), [], body);
   }
+});
+
+test("#past-sessions mergeConfig reads past sessions only when readPastSessions is true", () => {
+  assert.equal(mergeConfig({}).readPastSessions, false);
+  assert.equal(mergeConfig({ readPastSessions: "yes" }).readPastSessions, false);
+  assert.equal(mergeConfig({ readPastSessions: true }).readPastSessions, true);
+  assert.equal(mergeConfig({}).sessionDir, "");
+  assert.equal(mergeConfig({ sessionDir: 5 }).sessionDir, "");
+  assert.equal(mergeConfig({ sessionDir: "/Users/x/S" }).sessionDir, "/Users/x/S");
+});
+
+// The app's rule (`SessionArchive.directory(for:)`), so the agents read the
+// folder that the app writes.
+test("#past-sessions sessionFolder resolves sessionDir as the app does", () => {
+  const home = "/Users/x";
+  const fallback = "/Users/x/Library/Application Support/Advisor/sessions";
+  assert.equal(sessionFolder("", home), fallback);
+  assert.equal(sessionFolder("relative/S", home), fallback);
+  assert.equal(sessionFolder(" \t/Users/x/S \u00a0", home), "/Users/x/S");
+  assert.equal(sessionFolder("~/S", home), "/Users/x/S");
+  assert.equal(sessionFolder("~", home), "/Users/x");
+  // The app trims spaces and tabs only, so a newline stays in the name.
+  assert.equal(sessionFolder("/Users/x/S\n", home), "/Users/x/S\n");
+  // Another user's home: the app finds it, the sidecar cannot be sure of it.
+  assert.equal(sessionFolder("~other/S", home), null);
+});
+
+test("#past-sessions loadReadableFolders adds the session folder while readPastSessions is on", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "advisor-config-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "config.json");
+  const home = "/Users/x";
+  const fallback = "/Users/x/Library/Application Support/Advisor/sessions";
+  fs.writeFileSync(file, JSON.stringify({ readableFolders: ["~/Notes"], sessionDir: "/Users/x/S" }));
+  assert.deepEqual(loadReadableFolders(file, home), ["~/Notes"]);
+  assert.equal(loadPastSessionsFolder(file, home), null);
+  fs.writeFileSync(file, JSON.stringify({ readableFolders: ["~/Notes"], readPastSessions: true }));
+  assert.deepEqual(loadReadableFolders(file, home), ["~/Notes", fallback]);
+  assert.equal(loadPastSessionsFolder(file, home), fallback);
+  fs.writeFileSync(file, JSON.stringify({ readPastSessions: true, sessionDir: "/Users/x/S" }));
+  assert.deepEqual(loadReadableFolders(file, home), ["/Users/x/S"]);
+  assert.equal(loadPastSessionsFolder(file, home), "/Users/x/S");
+  fs.writeFileSync(file, JSON.stringify({ readPastSessions: true, sessionDir: "~other/S" }));
+  assert.deepEqual(loadReadableFolders(file, home), []);
+  // The user turns it off: the next call reads no session.
+  fs.writeFileSync(file, JSON.stringify({ readPastSessions: false, sessionDir: "/Users/x/S" }));
+  assert.deepEqual(loadReadableFolders(file, home), []);
+  assert.equal(loadPastSessionsFolder(file, home), null);
+  fs.writeFileSync(file, "{not json");
+  assert.equal(loadPastSessionsFolder(file, home), null);
 });

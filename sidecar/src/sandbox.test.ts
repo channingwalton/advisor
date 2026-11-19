@@ -6,7 +6,7 @@ import path from "node:path";
 import type { HookInput } from "@anthropic-ai/claude-agent-sdk";
 import { sandboxGate } from "./agent.js";
 import {
-  readPathAllowed, searchRootAllowed, readableRoots, mcpPermission, normaliseVerbName, bareMcpName, toolDecision,
+  readPathAllowed, searchRootAllowed, readableRoots, readableFoldersNote, mcpPermission, normaliseVerbName, bareMcpName, toolDecision,
   type SandboxPolicy,
 } from "./toolPolicy.js";
 
@@ -759,4 +759,21 @@ test("#sandbox-sdk-gate the PreToolUse gate fails closed when the policy or its 
   const loud = sandboxGate(POLICY, () => { throw new Error("log failed"); });
   const out2 = await loud(preToolUse("Read", { file_path: "/home/u/.ssh/id_rsa" }), "toolu_1", { signal });
   assert.equal((out2 as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput?.permissionDecision, "deny");
+});
+
+// The session folder is one more readable folder, so the agent must be told
+// what it holds, or it does not know to look there (issue #154).
+test("#past-sessions the note says which readable folder holds the earlier sessions", () => {
+  const sessions = "/home/u/Library/Application Support/Advisor/sessions";
+  const said = /"\/home\/u\/Library\/Application Support\/Advisor\/sessions" holds the transcripts of the user's earlier Advisor sessions/;
+  const note = readableFoldersNote(HOME, ["/home/u/Documents", sessions], idFs, sessions);
+  assert.match(note, /only inside these folders: "\/home\/u\/Documents", "\/home\/u\/Library\/Application Support\/Advisor\/sessions"\. /);
+  assert.match(note, said);
+  assert.match(note, /yyyy-MM-dd-HHmmss\.md/);
+  // In another spelling, it is the same folder.
+  assert.match(readableFoldersNote(HOME, [sessions + "/"], idFs, "~/Library/Application Support/Advisor/sessions"), said);
+  // Not said for a folder that the agent cannot read now.
+  assert.doesNotMatch(readableFoldersNote(HOME, ["/home/u/Documents"], idFs, sessions), /earlier Advisor sessions/);
+  assert.doesNotMatch(readableFoldersNote(HOME, ["/home/u/.ssh"], idFs, "/home/u/.ssh"), /earlier Advisor sessions/);
+  assert.doesNotMatch(readableFoldersNote(HOME, ["/home/u/Documents"], idFs), /earlier Advisor sessions/);
 });

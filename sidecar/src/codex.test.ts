@@ -217,6 +217,28 @@ test("#classifier-recap a recap goes into the first turn of each Codex thread on
   await third;
 });
 
+test("#past-sessions a Codex card lane is told which readable folder holds the earlier sessions", async () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-codex-note-")));
+  const sessions = path.join(home, "Sessions");
+  fs.mkdirSync(sessions);
+  const { calls, factory } = controlledThreads();
+  const session = new CodexAgentSession(
+    { ...base, home, readableFolders: () => [sessions], pastSessions: () => sessions }, factory
+  );
+  try {
+    const note = codexFilesNote(home, [sessions], sessions);
+    assert.ok(note.includes(`${JSON.stringify(sessions)} holds the transcripts of the user's earlier Advisor sessions`), note);
+    assert.match(note, /mcp__advisor__Read/);
+    const first = session.run("task1", undefined, 60_000);
+    await setImmediate();
+    assert.equal(calls[0].input, `sp\n\n${note}\n\ntask1`);
+    complete(calls[0], "a1");
+    await first;
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("#codex-files each task of a Codex card lane starts with its readable folders and where its file tools are", async () => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "advisor-codex-note-")));
   const notes = path.join(home, "Notes");

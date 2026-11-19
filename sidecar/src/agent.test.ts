@@ -296,6 +296,30 @@ test("#sandbox-readable-folders each run names the folders that the agent can re
   await r2;
 });
 
+test("#past-sessions each run says which readable folder holds the earlier sessions", async () => {
+  const sessions = path.join(home, "Sessions");
+  fs.mkdirSync(sessions, { recursive: true });
+  let on = true;
+  const { queryFn, spawns } = makeFakeQuery();
+  const session = new AgentSession(
+    { ...opts, readableFolders: () => (on ? [sessions] : []), pastSessions: () => (on ? sessions : null) },
+    queryFn
+  );
+  const r1 = session.run("task1", undefined, 1000);
+  const first = await nextPrompt(spawns[0]);
+  assert.ok(first.includes(`${JSON.stringify(sessions)} holds the transcripts of the user's earlier Advisor sessions`), first);
+  spawns[0].messages.push(success("a1"));
+  await r1;
+
+  on = false; // the user turns it off
+  const r2 = session.run("task2", undefined, 1000);
+  const latest = spawns[spawns.length - 1];
+  const second = await nextPrompt(latest);
+  assert.doesNotMatch(second, /earlier Advisor sessions/);
+  latest.messages.push(success("a2"));
+  await r2;
+});
+
 /// The automatic-card classifier over `session`: `say` hears a line, and
 /// `pass` lets the debounce fire and the classify reach the session. Needs the
 /// test's setTimeout mocked.

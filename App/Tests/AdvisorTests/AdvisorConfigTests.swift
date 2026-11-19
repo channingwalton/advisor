@@ -21,6 +21,7 @@ import Testing
     #expect(c.triggers == AdvisorConfig.Triggers())
     #expect(c.logTranscriptText == false)      // transcript text stays out of the log by default
     #expect(c.readableFolders == [])           // agents read no local file by default
+    #expect(c.readPastSessions == false)       // nor past sessions
 }
 
 @Test func configDecodeIgnoresUnknownKeys() throws {
@@ -54,6 +55,7 @@ import Testing
     c.sessionDir = "/tmp/notes"
     c.logTranscriptText = true
     c.readableFolders = ["/Users/x/Documents", "~/Library/Mobile Documents"]
+    c.readPastSessions = true
     let decoded = try JSONDecoder().decode(
         AdvisorConfig.self, from: JSONEncoder().encode(c))
     #expect(decoded == c) // any dropped CodingKey breaks equality
@@ -69,6 +71,7 @@ import Testing
     #expect(d.triggerSensitivity == "balanced")
     #expect(d.allowMcpActions == false)
     #expect(d.readableFolders == [])
+    #expect(d.readPastSessions == false)
     #expect(d.triggers == AdvisorConfig.Triggers(question: true, context: true, factcheck: true))
 }
 
@@ -678,4 +681,22 @@ private func canonical(_ json: Any) throws -> Data {
     #expect(triggers.question == false)
     #expect(triggers.context == true, "a flag of the wrong type keeps its default")
     #expect(triggers.factcheck == true)
+}
+
+// The sidecar reads the key by this name (`readPastSessions` in
+// sidecar/src/config.ts), and the window's save writes only it (issue #154).
+@Test func pastSessionsToggleIsSavedUnderTheSidecarsKey() throws {
+    let (dir, file) = tempConfigFile()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    var disk = AdvisorConfig()
+    disk.readableFolders = ["~/Notes"]
+    disk.save(to: file)
+    let window = AdvisorConfig.load(from: file)
+    var edited = window
+    edited.readPastSessions = true
+    #expect(edited.saveChanges(from: window, to: file))
+    let raw = try rawJSON(file)
+    #expect(raw["readPastSessions"] as? Bool == true)
+    #expect(raw["readableFolders"] as? [String] == ["~/Notes"])
+    #expect(AdvisorConfig.load(from: file).readPastSessions)
 }

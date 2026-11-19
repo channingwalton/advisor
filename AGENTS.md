@@ -132,7 +132,9 @@ change in the running app, or report it as unverified.
 - User preferences are in `~/Library/Application Support/Advisor/config.json`,
   mirrored by `App/.../Preferences.swift` and `sidecar/src/config.ts`. Change
   both together. Keys commented "App-side only" in Preferences.swift (such as
-  `sttLocale` and `sessionDir`) are absent from the sidecar config on purpose.
+  `sttLocale`) are absent from the sidecar config on purpose. The sidecar
+  reads `sessionDir` only for `readPastSessions`, by the app's rule
+  (`sessionFolder`).
 - Authentication defaults to the user's Claude Code or Codex CLI login
   (subscription), and an API key stays optional. API keys live in the macOS
   Keychain (`Keychain.swift`), not in `config.json`: see *Optional API-key

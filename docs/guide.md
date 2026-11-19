@@ -246,6 +246,15 @@ under a `# Follow-ups` heading. While an answer or a Summarise runs, the ✕ on
 its panel stops it: nothing is saved, and a stopped question goes back into the
 Ask box.
 
+### Past sessions in cards
+
+With **Agents can read past sessions** on in Preferences → **Files**, the
+research agents can also read your session folder. Each task tells them that
+the folder holds your earlier transcripts, so a card can draw on an earlier
+meeting, decision or person when the conversation refers to one. It is off by
+default. The same rules apply as for the other readable folders (see
+[Safety](#safety)): a session folder outside your home folder is not used.
+
 ## Preferences
 
 ⌘, opens the settings:
@@ -253,9 +262,10 @@ Ask box.
 - **Agent:** the backend (one provider and model for the classifier, the
   research lanes and the query lane), the card **effort**, authentication, the
   number of parallel agents, and connector actions.
-- **Files:** the folders that the agents may read (see [Safety](#safety)).
-  Claude's own file tools refuse a removed folder at once. Other changes apply
-  from the next card, or when a busy agent is idle.
+- **Files:** the folders that the agents may read (see [Safety](#safety)),
+  and **Agents can read past sessions**, which adds your session folder to
+  them. Claude's own file tools refuse a removed folder at once. Other changes
+  apply from the next card, or when a busy agent is idle.
 - **Triggers:** sensitivity (conservative, balanced or eager), and a toggle for
   each card kind.
 - **Transcription:** system-audio capture and the speech-recognition locale.
@@ -313,7 +323,8 @@ On **Claude**, a tool policy limits each research agent call:
   actions**.
 - Files can be read, but not changed, only inside your readable folders. Add
   and remove them in Preferences → **Files**. There are none by default, so the
-  agents read no local file until you add a folder. Claude's own file tools
+  agents read no local file until you add a folder. **Agents can read past
+  sessions** adds your session folder, and turning it off removes it. Claude's own file tools
   refuse a removed folder at once, also in a card that is in progress. Other
   changes apply from the next card. An agent that is busy, or has cards
   waiting, keeps its folders until it is idle: until then its connectors can

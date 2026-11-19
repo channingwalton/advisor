@@ -33,6 +33,15 @@ export interface AdvisorConfig {
   /// starts, and the Codex Seatbelt profile before each turn
   /// (`loadReadableFolders`, `refreshCodexSandbox`).
   readableFolders: string[];
+  /// The agents may also read the session folder, so a card can draw on the
+  /// transcripts of earlier sessions (issue #154). Off by default.
+  /// `loadReadableFolders` adds the folder to the list, so every layer of the
+  /// sandbox that takes the list takes the folder too.
+  readPastSessions: boolean;
+  /// The app's session folder setting, as the app reads it
+  /// (`SessionArchive.directory(for:)`): "" is the built-in default. The
+  /// sidecar reads it only for `readPastSessions` (`sessionFolder`).
+  sessionDir: string;
 }
 
 const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
@@ -46,6 +55,8 @@ const DEFAULTS: AdvisorConfig = {
   effort: "",
   logTranscriptText: false,
   readableFolders: [],
+  readPastSessions: false,
+  sessionDir: "",
 };
 
 /// The model id to pass to the SDK, or undefined to use the provider's default.
@@ -91,18 +102,54 @@ export function mergeConfig(raw: Record<string, unknown>): AdvisorConfig {
     readableFolders: Array.isArray(raw.readableFolders)
       ? raw.readableFolders.filter((f): f is string => typeof f === "string")
       : [...DEFAULTS.readableFolders],
+    readPastSessions: bool(raw.readPastSessions, DEFAULTS.readPastSessions),
+    sessionDir: str("sessionDir", DEFAULTS.sessionDir),
   };
 }
 
-/// The readable folders that config.json lists now. Each Read, Grep and Glob
-/// call reads them, so a folder that the user removes is refused at once, not
-/// at the next session (code review 2026-11-10). Any failure gives none.
-export function loadReadableFolders(file: string = CONFIG_PATH): string[] {
+/// The session folder for a `sessionDir` setting, by the app's rule
+/// (`SessionArchive.directory(for:)`), so that the agents read the folder
+/// that the app writes: spaces and tabs trimmed, a leading `~` or `~/` is the
+/// home folder, and a path that is not absolute gives the built-in default.
+/// The app finds another user's home folder for `~name/…`; the sidecar cannot
+/// be sure of that folder, so it gives null.
+export function sessionFolder(sessionDir: string, home: string): string | null {
+  const trimmed = sessionDir.replace(/^[\t\p{Zs}]+|[\t\p{Zs}]+$/gu, "");
+  if (trimmed.startsWith("~") && trimmed !== "~" && !trimmed.startsWith("~/")) return null;
+  const expanded = trimmed === "~" ? home : trimmed.startsWith("~/") ? home + trimmed.slice(1) : trimmed;
+  return expanded.startsWith("/") ? expanded : `${home}/Library/Application Support/Advisor/sessions`;
+}
+
+/// The session folder when the agents may read past sessions, else null.
+function pastSessionsFolder(c: AdvisorConfig, home: string): string | null {
+  return c.readPastSessions ? sessionFolder(c.sessionDir, home) : null;
+}
+
+/// The config file's settings now, or null on any failure.
+function readConfigFile(file: string): AdvisorConfig | null {
   try {
-    return mergeConfig(JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>).readableFolders;
+    return mergeConfig(JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>);
   } catch {
-    return [];
+    return null;
   }
+}
+
+/// The readable folders that config.json lists now, and the session folder
+/// while `readPastSessions` is on (issue #154). Each Read, Grep and Glob call
+/// reads them, so a folder that the user removes is refused at once, not at
+/// the next session (code review 2026-11-10). Any failure gives none.
+export function loadReadableFolders(file: string = CONFIG_PATH, home: string = homedir()): string[] {
+  const c = readConfigFile(file);
+  if (c === null) return [];
+  const sessions = pastSessionsFolder(c, home);
+  return sessions === null ? c.readableFolders : [...c.readableFolders, sessions];
+}
+
+/// The session folder that `loadReadableFolders` adds now, or null: the task
+/// note tells the agent what the folder holds (`readableFoldersNote`).
+export function loadPastSessionsFolder(file: string = CONFIG_PATH, home: string = homedir()): string | null {
+  const c = readConfigFile(file);
+  return c === null ? null : pastSessionsFolder(c, home);
 }
 
 export function loadConfig(): AdvisorConfig {

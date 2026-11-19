@@ -4,8 +4,9 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { AgentSession } from "./agent.js";
+import { AgentSession, type AgentSessionOptions } from "./agent.js";
 import { claudeWriteFolders } from "./claudeSandbox.js";
+import { loadPastSessionsFolder, loadReadableFolders } from "./config.js";
 import { fakeModelQuery, sse, stubMcp, SYNTHETIC_HOME_ROOT } from "./fakeModel.js";
 
 // The sandbox against the real bundled Claude CLI, not just the policy
@@ -28,6 +29,8 @@ const NOT_READABLE = "folders that the user lists as readable";
 const MATCH = "SYNTHETIC_ORDINARY_MATCH";
 /// A file in a folder that a test lists as readable only during a session.
 const LATER = "SYNTHETIC_LATER_CONTENT";
+/// The transcript of an earlier session, in the default session folder.
+const PAST = "SYNTHETIC_PAST_SESSION";
 /// On macOS the CLI runs under a Seatbelt profile (claudeSandbox.ts). The
 /// kernel then refuses a file operation that the CLI makes before the tool
 /// gate sees the call, such as Glob's `stat` of its folder.
@@ -133,6 +136,10 @@ function scripted(id: string): { name: string; input: Record<string, unknown> } 
     case "connectorMove": return { name: "mcp__files__move_file", input: { from: p(".ssh"), to: p("Documents", "moved") } };
     // A file in a folder that becomes readable during the session.
     case "laterPlan": return { name: "Read", input: { file_path: p("later", "plan.txt") } };
+    // A note in the default session folder (issue #154).
+    case "pastSession": return {
+      name: "Read", input: { file_path: p("Library", "Application Support", "Advisor", "sessions", "2026-11-01-090000.md") },
+    };
     case "grepRealNamed": return {
       name: "Grep", input: { path: p("Documents"), pattern: "SYNTHETIC", glob: "**/real/*", output_mode: "content" },
     };
@@ -199,6 +206,9 @@ before(async () => {
   fs.writeFileSync(path.join(home, "Documents", "real", "inner.md"), MATCH);
   fs.writeFileSync(path.join(home, "later", "plan.txt"), LATER);
   fs.writeFileSync(path.join(home, "Library", "Keychains", "login.keychain-db"), SECRET);
+  const sessionsDir = path.join(home, "Library", "Application Support", "Advisor", "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionsDir, "2026-11-01-090000.md"), PAST);
   // The user's own settings allow a path the denylist refuses — the shape found
   // in a real ~/.claude/settings.json (`Read(~/.claude/**)`).
   fs.writeFileSync(
@@ -222,7 +232,12 @@ after(() => {
 /// A session whose CLI runs in the synthetic home against the fake endpoint.
 /// `~/Documents` and `~/work` are readable unless a test lists other folders.
 /// The policy reads the list at each call, as it reads config.json.
-function session(cwd: string, readable = ["Documents", "work"].map((d) => path.join(home, d)), allowMcpActions = false): AgentSession {
+function session(
+  cwd: string,
+  readable = ["Documents", "work"].map((d) => path.join(home, d)),
+  allowMcpActions = false,
+  extra: Partial<AgentSessionOptions> = {}
+): AgentSession {
   const { port } = server.address() as { port: number };
   const queryFn = fakeModelQuery(home, port);
   const s = new AgentSession(
@@ -230,6 +245,7 @@ function session(cwd: string, readable = ["Documents", "work"].map((d) => path.j
       name: "sdk-sandbox", systemPrompt: "test", model: "claude-test", allowedTools: ["WebSearch", "WebFetch"],
       // A new list at each call, as a read of config.json gives.
       cwd, home, allowMcpActions, readableFolders: () => [...readable],
+      ...extra,
     },
     queryFn
   );
@@ -425,6 +441,28 @@ test("#sandbox-readable-folders the model gets the readable folders in the task 
   const task = prompts.get("unnamedStore") ?? "";
   assert.ok(task.includes(`Advisor lets you read local files only inside these folders${named}`), task);
   assert.ok(!task.includes(".ssh"), task);
+});
+
+// The session folder reaches the CLI through the same list as the readable
+// folders, read from config.json at each call (issue #154).
+test("#past-sessions a past session is read while the toggle is on, and refused once it is off", async (t) => {
+  const config = path.join(home, "past-sessions-config.json");
+  t.after(() => fs.rmSync(config, { force: true }));
+  fs.writeFileSync(config, JSON.stringify({ readPastSessions: true }));
+  const s = session(work, [], false, {
+    readableFolders: () => loadReadableFolders(config, home),
+    pastSessions: () => loadPastSessionsFolder(config, home),
+  });
+  const on = await toolResult(s, "pastSession");
+  assert.ok(on.includes(PAST), on);
+  const task = prompts.get("pastSession") ?? "";
+  const folder = JSON.stringify(path.join(home, "Library", "Application Support", "Advisor", "sessions"));
+  assert.ok(task.includes(`${folder} holds the transcripts of the user's earlier Advisor sessions`), task);
+  fs.writeFileSync(config, JSON.stringify({ readPastSessions: false }));
+  const off = await toolResult(s, "pastSession");
+  assert.ok(!off.includes(PAST), off);
+  assert.ok(refused(off, NOT_READABLE), off);
+  assert.ok(!(prompts.get("pastSession") ?? "").includes("earlier Advisor sessions"));
 });
 
 test("#sandbox-readable-folders a search of a readable folder does not follow a symlink out of it", async () => {

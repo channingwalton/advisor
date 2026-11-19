@@ -140,8 +140,8 @@ export async function codexClientOptions(
 /// file tools are. Codex defers connector tools, so a model reaches them only
 /// through tool search, or code mode's tool list, by name. Each task carries
 /// it, because a thread outlives a change to the list.
-export function codexFilesNote(home: string, folders: readonly string[]): string {
-  const note = readableFoldersNote(home, folders);
+export function codexFilesNote(home: string, folders: readonly string[], sessions: string | null = null): string {
+  const note = readableFoldersNote(home, folders, REALPATH, sessions);
   if (honouredFolders(home, folders, REALPATH).length === 0) return note;
   return `${note} Read, Grep and Glob are the tools of Advisor's MCP server \`${FILES_SERVER}\` ` +
     `(\`mcp__${FILES_SERVER}__Read\`, \`mcp__${FILES_SERVER}__Grep\`, \`mcp__${FILES_SERVER}__Glob\`): ` +
@@ -321,7 +321,7 @@ export class CodexAgentSession implements Agent {
         // turn drops the thread, so the next task starts one.
         if (this.firstTurn && task.recap) log(`${this.opts.name}: new thread, recap ${task.recap.length} chars`);
         const files = this.opts.readableFolders
-          ? `${codexFilesNote(this.opts.home ?? homedir(), this.opts.readableFolders())}\n\n`
+          ? `${codexFilesNote(this.opts.home ?? homedir(), this.opts.readableFolders(), this.opts.pastSessions?.() ?? null)}\n\n`
           : "";
         const input = this.firstTurn
           ? `${this.opts.systemPrompt}\n\n${files}${task.recap ?? ""}${task.task}`

@@ -330,18 +330,19 @@ async function sidecarTools(prompt: string, allowMcpActions: boolean): Promise<O
 
 /// Ask the built sidecar one question for each step, in turn, and return what
 /// each could use. Before each question, config.json lists the step's readable
-/// folders, as an edit in the Files tab would leave it.
+/// folders, as an edit in the Files tab would leave it, and the step's other
+/// settings.
 async function sidecarTurns(
-  steps: { prompt: string; readable: string[] }[],
+  steps: { prompt: string; readable: string[]; settings?: Record<string, unknown> }[],
   allowMcpActions: boolean
 ): Promise<Offered[]> {
   const advisor = path.join(home, "Library", "Application Support", "Advisor");
   fs.mkdirSync(advisor, { recursive: true });
-  const listing = (readable: string[]): void => fs.writeFileSync(
+  const listing = (readable: string[], settings: Record<string, unknown> = {}): void => fs.writeFileSync(
     path.join(advisor, "config.json"),
-    JSON.stringify({ provider: "codex", allowMcpActions, readableFolders: readable })
+    JSON.stringify({ provider: "codex", allowMcpActions, readableFolders: readable, ...settings })
   );
-  listing(steps[0]?.readable ?? []);
+  listing(steps[0]?.readable ?? [], steps[0]?.settings);
   const sidecar = spawn(process.execPath, [fileURLToPath(new URL("./main.js", import.meta.url))], {
     env: { PATH: process.env.PATH ?? "", TMPDIR: os.tmpdir(), HOME: home, FAKE_API_KEY: "sk-test" },
   });
@@ -355,7 +356,7 @@ async function sidecarTurns(
   const used: Offered[] = [];
   try {
     for (const [i, step] of steps.entries()) {
-      listing(step.readable);
+      listing(step.readable, step.settings);
       // The questions go one at a time, so the next finished card is this one.
       const finished = new Promise<{ state: string; body: string }>((resolve) => (card = resolve));
       sidecar.stdin.write(JSON.stringify({ type: "query", id: `q${i}`, text: `PROMPT:${step.prompt}` }) + "\n");
@@ -490,6 +491,19 @@ test("#codex-files the sidecar's Codex card reads a note through Advisor's Read 
   assertFileReads(listed, "listed");
   assert.match(removed.files?.[0] ?? "", /Access denied/, JSON.stringify(removed.files));
   assert.ok(!(removed.files?.[0] ?? "").includes(NOTE), JSON.stringify(removed.files));
+});
+
+// The session folder reaches the Codex profile and Advisor's file tools through
+// the same list as the readable folders (issue #154). Here the session folder
+// is the notes folder.
+test("#past-sessions the sidecar's Codex card reads a past session while the toggle is on, and not once it is off", { ...darwin, timeout: 90_000 }, async () => {
+  const [on, off] = await sidecarTurns([
+    { prompt: "filesPastSessionsOn", readable: [connectorsDir], settings: { readPastSessions: true, sessionDir: notesDir } },
+    { prompt: "filesPastSessionsOff", readable: [connectorsDir], settings: { readPastSessions: false, sessionDir: notesDir } },
+  ], false);
+  assertFileReads(on, "on");
+  assert.match(off.files?.[0] ?? "", /Access denied/, JSON.stringify(off.files));
+  assert.ok(!(off.files?.[0] ?? "").includes(NOTE), JSON.stringify(off.files));
 });
 
 /// What no setting removes, each inert here: code mode's `exec` runs JavaScript

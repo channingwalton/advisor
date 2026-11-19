@@ -143,6 +143,10 @@ export interface AgentSessionOptions {
   /// Codex backend writes its profile and the tools' folder list from
   /// config.json before each turn (`refreshCodexSandbox`).
   readableFolders?: () => readonly string[];
+  /// The session folder while the agents may read past sessions, else null
+  /// (issue #154). Read at each task, for the note only: the folder reaches
+  /// the policy through `readableFolders`.
+  pastSessions?: () => string | null;
 }
 
 /// The SDK entry point. Aliased so it can be injected (default: the real
@@ -360,7 +364,7 @@ export class AgentSession implements Agent {
     // A session that reads local files starts each task with the folders that
     // it can read now (`readableFoldersNote`): a warm session outlives a
     // change to the list, so its system prompt cannot hold it.
-    const note = this.opts.readableFolders ? `${readableFoldersNote(this.policy.home, this.readableNow())}\n\n` : "";
+    const note = this.opts.readableFolders ? `${readableFoldersNote(this.policy.home, this.readableNow(), REALPATH, this.opts.pastSessions?.() ?? null)}\n\n` : "";
     this.input!.push({
       type: "user",
       message: { role: "user", content: note + (cold && recap ? recap + task : task) },

@@ -74,7 +74,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Logging.** All app and sidecar diagnostics go through `FileLog` (`Log.swift`) to `~/Library/Logs/Advisor/advisor.log` — the standard macOS user logs folder, so the file shows up under Console.app → Log Reports and survives a packaged run (where stderr goes nowhere). The app is the *sole* writer: its own lines arrive via `appLog.write`, the sidecar's stderr is captured by `SidecarManager` and funnelled in via `appLog.appendSidecar` (lines reassembled across chunk boundaries, each wall-clock-timestamped). One serial queue → no write contention and a single chronological timeline that interleaves app and `[sidecar +Xs]` lines. Mirrored to stderr too for dev runs. Rotates by size (5 MB), keeping one previous file (`advisor.log.1`). A watchdog (`MainThreadWatchdog.swift`), started in `applicationDidFinishLaunching`, pings the main queue each second from its own queue; when a ping goes unanswered for 5 s it logs the stall and runs `/usr/bin/sample` on the app into `hang-<n>-<UTC time>.txt` beside the log. It measures from the unanswered ping, not from the last answer, so a late tick under App Nap is not a stall, and the logged length counts from the ping, not from the start of the stall. A stall of about 7 s or more is caught: its first ping goes out up to 1 s after it starts, and a ping tick that fires late moves the report one tick later. App Nap can delay ticks more. If `sample` fails, the log gives its exit status or the launch error, and the file can be missing or incomplete. After a sample is saved, it keeps the newest five by `n`, because the clock can go back. The recording window's close guard logs each window's first responder. Both came from a hang on close (2026-10-31) that left no trace in the log and that could not be reproduced.
 
-**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, `sessionDir`, saved contexts and tags never reach the sidecar; `logTranscriptText` does, for the sidecar's utterance line). Tabs: Agent (provider, model, effort, authentication, connector actions), Files (the folders that Claude agents may read), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
+**Preferences.** `~/Library/Application Support/Advisor/config.json`, mirrored by `Preferences.swift` and `sidecar/src/config.ts` (App-only fields such as `sttLocale`, `authMode`, saved contexts and tags never reach the sidecar; `logTranscriptText` does, for the sidecar's utterance line, and `sessionDir` does, for `readPastSessions`). Tabs: Agent (provider, model, effort, authentication, connector actions), Files (the folders that the agents may read, and whether they may read past sessions), Triggers, Transcription, Contexts, Tags, General (appearance, session folder, transcript text in the log).
 
 ### TS sidecar
 
@@ -95,7 +95,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Agent backends** (`agent.ts`, `codex.ts`, `providers.ts`). One `Agent` interface (`run` / `reset` / `interrupt`) behind a provider registry; one provider and model serve every lane. `AgentSession` is a long-lived Claude Agent SDK session fed by streaming input, with `includePartialMessages` so text reaches a card delta by delta, loading the user's own Claude configuration (`settingSources: ["user"]` — where personal context such as notes locations belongs), `maxTurns` 40, 180 s per task. `CodexAgentSession` wraps `@openai/codex-sdk` (measured far slower for cards — see the 2026-06-13 sections).
 
-**Sandbox.** Claude: one policy, `toolDecision` (`toolPolicy.ts`) — web, `ToolSearch`, connector reads/searches, and reads by absolute or `~` path inside the folders that the user lists as readable, outside the credential denylist; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. On macOS the Claude CLI and its stdio connectors also run under a Seatbelt profile built from the readable folders (`claudeSandbox.ts`). Codex: a Seatbelt profile built from the readable folders and the same denylist, the CLI running under `sandbox-exec` (`codexSandbox.ts`); connectors all or none, by the same preference (`codexClientOptions`); local files through Advisor's own read-only Read, Grep and Glob (`localFiles.ts`), which apply `toolDecision`. Both profiles share their read rules (`seatbelt.ts`). See *Agent sandboxing*, *Readable folders*, *The Claude CLI runs under a Seatbelt profile*, *Codex runs under a Seatbelt profile*, *Codex reads local files through Advisor's file tools* and *Codex connectors follow the actions toggle*.
+**Sandbox.** Claude: one policy, `toolDecision` (`toolPolicy.ts`) — web, `ToolSearch`, connector reads/searches, and reads by absolute or `~` path inside the folders that the user lists as readable, outside the credential denylist; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. On macOS the Claude CLI and its stdio connectors also run under a Seatbelt profile built from the readable folders (`claudeSandbox.ts`). Codex: a Seatbelt profile built from the readable folders and the same denylist, the CLI running under `sandbox-exec` (`codexSandbox.ts`); connectors all or none, by the same preference (`codexClientOptions`); local files through Advisor's own read-only Read, Grep and Glob (`localFiles.ts`), which apply `toolDecision`. Both profiles share their read rules (`seatbelt.ts`). With `readPastSessions` on, the session folder is one more readable folder (*Past sessions in cards*). See *Agent sandboxing*, *Readable folders*, *The Claude CLI runs under a Seatbelt profile*, *Codex runs under a Seatbelt profile*, *Codex reads local files through Advisor's file tools* and *Codex connectors follow the actions toggle*.
 
 ## IPC contract (NDJSON, one object per line)
 
@@ -1320,7 +1320,8 @@ clears the staged tags, or empty tags overwrite the saved note. In search, a
 
 ## Choosable transcript folder (2026-06-20, issue #16)
 
-The `sessionDir` preference (App-side only; `""` is the default folder) sets
+The `sessionDir` preference (`""` is the default folder; App-side only until
+issue #154, see *Past sessions in cards*) sets
 where notes are saved. `SessionArchive.directory` reads it at each access, and
 `SessionWriter` resolves it at each `start()`, so a change applies with no
 relaunch. Reason: the config file is small, and a fresh read is simpler than a
@@ -3765,6 +3766,75 @@ Verified by tests with fake captures (`RecorderCaptureRecoveryTests`,
 `CaptureRecoveryTests`). Not verified in the running app: the fault was not
 reproduced, and no headset or USB microphone was connected or removed during a
 session.
+
+## Past sessions in cards (2026-11-18, issue #154)
+
+A Preferences toggle, **Agents can read past sessions** (`readPastSessions`,
+off by default), adds the session folder to the readable folders. A card agent
+then searches the earlier transcripts when the conversation refers to one.
+
+- **One seam.** `loadReadableFolders` adds the folder to the list. The Claude
+  policy, the Claude CLI's Seatbelt profile, the Codex profile and Advisor's
+  own file tools all take that list, so each layer applies the readable-folder
+  rules to the session folder with no new code. The list is read from
+  `config.json` at each call, so when the user turns the toggle off, Claude's
+  file tools refuse the folder at once. The Seatbelt profiles take the change,
+  on or off, as for a change to the folder list (*Readable folders*): Codex at
+  its next turn, and the Claude CLI when it is idle. Until then, a running
+  Claude CLI is not told of a folder that its profile refuses
+  (`readableNow`). The sandbox boundary does not change: only the user's
+  choice adds a folder.
+- **The sidecar reads `sessionDir`.** It was App-side only. The sidecar
+  resolves it by the app's rule (`sessionFolder`, from
+  `SessionArchive.directory(for:)`): spaces and tabs trimmed, a leading `~`,
+  and the default for a path that is not absolute. One case differs: for
+  `~name/…` the app writes to that user's home folder, or to the default
+  folder when no such user exists. The sidecar cannot tell which, so it adds
+  no folder rather than one that can differ from the app's. Preferences
+  always writes an absolute path, so only a hand edit gives this case. The
+  default folder, `~/Library/Application Support/Advisor/sessions`, holds no
+  denied path and is in none, so it is used.
+  A session folder outside the home folder is not used, as for any readable
+  folder.
+- **The note says what the folder holds** (`readableFoldersNote`, with the
+  folder from `loadPastSessionsFolder`). Without it the agent sees one more
+  folder name and has no reason to search it. The note gives the file names
+  (`yyyy-MM-dd-HHmmss.md`), so Glob can find a session by date.
+- **The toggle is a setting of the window's copy**, saved by `saveChanges`,
+  not a raw edit as the folder list is. A write that fails shows the window's
+  "not saved" notice, so the toggle cannot look off while the file holds it on
+  with no notice.
+- **The whole session folder is readable**, not only the session notes. The
+  folder can be any folder that the user chose in General, such as
+  `~/Documents`. So the toggle's caption names the folder and says that the
+  agents can read every file in it, and the caption of the session folder in
+  General says that the toggle makes it readable. A filter on file names
+  would need new rules in the policy, in both Seatbelt profiles and in
+  Advisor's own file tools, for a folder that Advisor itself fills.
+- The live note is in the folder too, so an agent can read the current
+  session. That is harmless, and the note says so.
+
+Residual: an earlier transcript is untrusted input. It holds other people's
+speech and text from the web that earlier cards quoted, and the note tells
+the agent to search it. So an instruction that someone says in one meeting
+can reach the cards of each later session, where before it ended with its
+own session. This is a larger risk than a folder of the user's own notes.
+With **Allow connector actions** on, such an instruction could ask for a
+connector write. The toggle is off by default, and its caption names the
+folder.
+
+Rejected: the earlier sessions of a folder, or sessions that the user picks,
+in the session prompt. Transcripts are long, and the classifier and each card
+would pay for them in each turn. A search on demand costs nothing until a
+card needs it. The MCP server over past sessions (below) stays a later option.
+
+`sandbox.sdk.test.ts` (Claude) and `codex.sdk.test.ts` (Codex) check against
+the real CLIs that a past note is read while the toggle is on and refused
+once it is off. One card with a real Claude model (2026-11-18, through the
+built sidecar and the real `config.json`): with the toggle on, "What did I
+talk about in my most recent earlier Advisor session?" took one Glob of the
+session folder, one Read and 11.5 s. With it off, the card searched for 60 s
+and said that it could not read the sessions.
 
 ## Revisit as it grows
 
