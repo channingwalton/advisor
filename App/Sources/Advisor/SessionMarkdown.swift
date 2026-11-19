@@ -51,9 +51,11 @@ enum SessionMarkdown {
         var md = "---\n"
         // An optional user-given label, taking precedence over `context` as the
         // session's title in the browser. Collapsed to one line like `context`.
+        // Free text is a YAML double-quoted string, so a colon or `#` in it does
+        // not break a YAML reader such as Obsidian.
         let nm = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !nm.isEmpty {
-            md += "name: \(nm.replacingOccurrences(of: "\n", with: " "))\n"
+            md += "name: \(FrontmatterYAML.quoted(nm.replacingOccurrences(of: "\n", with: " ")))\n"
         }
         if let started { md += "started: \(iso.string(from: started))\n" }
         if let ended { md += "ended: \(iso.string(from: ended))\n" }
@@ -61,12 +63,12 @@ enum SessionMarkdown {
         // frontmatter scalar — used as the session's title in the browser.
         let ctx = context.trimmingCharacters(in: .whitespacesAndNewlines)
         if !ctx.isEmpty {
-            md += "context: \(ctx.replacingOccurrences(of: "\n", with: " "))\n"
+            md += "context: \(FrontmatterYAML.quoted(ctx.replacingOccurrences(of: "\n", with: " ")))\n"
         }
-        // The session's tags, comma-separated on one line — `SessionArchive`
+        // The session's tags, a YAML flow list on one line — `SessionArchive`
         // owns the canonical formatting so the live note and a browser edit
         // produce identical lines.
-        let tagLine = SessionArchive.tagsLine(tags)
+        let tagLine = SessionArchive.tagsFrontmatter(tags)
         if !tagLine.isEmpty { md += "tags: \(tagLine)\n" }
         md += "---\n\n"
         // A summary, when one has been produced, leads the note in its own

@@ -81,10 +81,17 @@ import Foundation
     #expect(SessionArchive.frontmatter(out)["started"] == "2026-06-18T17:00:00Z")
 }
 
+@Test func settingNameQuotesAValueThatHasAColon() {
+    let note = "---\nname: Old\n---\n\n# Transcript\n"
+    let out = SessionArchive.settingName("Q3: board review", in: note)
+    #expect(out.contains("name: \"Q3: board review\"\n"))
+    #expect(SessionArchive.frontmatter(out)["name"] == "Q3: board review")
+}
+
 @Test func settingNameAddsFrontmatterWhenAbsent() {
     let note = "# Transcript\n\n- 17:00 hi\n"
     let out = SessionArchive.settingName("Fresh", in: note)
-    #expect(out.hasPrefix("---\nname: Fresh\n---\n\n"))
+    #expect(out.hasPrefix("---\nname: \"Fresh\"\n---\n\n"))
     #expect(SessionArchive.strippingFrontmatter(out) == note) // body untouched
 }
 
@@ -483,13 +490,13 @@ private func symlinkedArchive() throws -> (top: URL, viaParent: URL, viaLeaf: UR
     defer { try? FileManager.default.removeItem(at: top) }
     let live = sessions.appendingPathComponent("Work/2026-06-18-170000.md")
     let other = sessions.appendingPathComponent("2026-06-18-090000.md")
-    func tags(_ url: URL) throws -> String? {
-        SessionArchive.frontmatter(try String(contentsOf: url, encoding: .utf8))["tags"]
+    func tags(_ url: URL) throws -> [String] {
+        SessionArchive.noteTags(try String(contentsOf: url, encoding: .utf8))
     }
 
     #expect(SessionArchive.renameTag(from: "work", to: "Project X", in: sessions, excluding: live) == 1)
-    #expect(try tags(live) == "work")
-    #expect(try tags(other) == "Project X")
+    #expect(try tags(live) == ["work"])
+    #expect(try tags(other) == ["Project X"])
 
     let dest = top.appendingPathComponent("moved", isDirectory: true)
     #expect(SessionArchive.move(from: sessions, to: dest, excluding: live) == (moved: 1, skipped: 0))

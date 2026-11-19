@@ -257,7 +257,7 @@ private func makeWriterDir() -> URL {
     }
 
     let note = try String(contentsOf: SessionArchive.list(in: dir)[0].url, encoding: .utf8)
-    #expect(note.contains("name: Q3 board review"))
+    #expect(note.contains("name: \"Q3 board review\""))
 
     writer.end()
     writer.releaseNote()

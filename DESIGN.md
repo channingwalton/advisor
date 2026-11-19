@@ -1300,8 +1300,9 @@ coloured only in Preferences. The Tags chip on the recording toolbar and on the
 session detail only picks from the library. Reason: creation and colour belong
 in one place.
 
-A note stores its tags by name in frontmatter (`tags: a, b, c`, formatted by
-`SessionArchive.tagsLine`), and the colour comes from the library at render
+A note stores its tags by name in frontmatter (`tags: ["a", "b", "c"]` since
+2026-11-19, formatted by `SessionArchive.tagsFrontmatter`; see *The
+frontmatter is valid YAML*), and the colour comes from the library at render
 time. Consequences:
 
 - A delete in Preferences rewrites no note: rows show only tags that the
@@ -3901,6 +3902,47 @@ A folder can hold folders, to any depth. A folder is a relative path, such as
   `FolderTree` holds the tree rules as pure functions: which folders show
   (collapse and search), the counts, which include subfolders, and the
   children for the nested **Move to Folder** menu.
+
+## The frontmatter is valid YAML (2026-11-19)
+
+A user moved the session folder into an Obsidian vault, and Obsidian parses
+the frontmatter of a note as YAML. Advisor wrote each value as plain text, so
+some notes were not valid YAML:
+
+- `context: Meeting: plan` fails: a colon followed by a space starts a mapping.
+- `context: Review #155` loses ` #155`: a space followed by `#` starts a
+  comment.
+- A value that starts with `"`, `[`, `- ` or a similar character fails.
+- `tags: a, b` is one string, not the list that Obsidian's `tags` property
+  expects.
+
+Now `name` and `context` are YAML double-quoted strings, and `tags` is a flow
+list of double-quoted strings on one line (`FrontmatterYAML`). The reader
+decodes a quoted value, and it also reads the plain values and the
+comma-separated tags of older notes. The live note is written again in full,
+so it changes to the new form. A saved note changes only the line of the key
+that Advisor edits (`settingLine`): an older saved note keeps an invalid
+`context:` line until something writes that line again.
+
+- **Advisor writes a flow list, and reads a block list too.** When Obsidian
+  edits a property, it writes the whole frontmatter again, with `tags` as a
+  block list (`tags:` and then one `  - item` line for each tag). The reader
+  accepts that form, and `settingLine` removes a key together with the lines
+  under it, so a later edit leaves no orphan items. Obsidian's writer uses
+  `lineWidth: 0`, so it does not fold a long value onto more lines. A line
+  under a list item that is not an item continues that item, so a later edit
+  does not delete it.
+- **An older value that looks like YAML now reads as YAML.** An older plain
+  value that is wholly in quotes (`name: "Fireside"`) now reads without its
+  quotes, an older single tag such as `[draft]` reads as a list, and an older
+  tag line that is wholly in quotes (`tags: "q3, planning"`) loses its quotes
+  before it is split at the commas. The old
+  writer gave no mark that would tell the two forms apart, and such values are
+  rare, so we accept this.
+- **Spaces stay in tag names.** Obsidian does not accept a space in a tag,
+  so in Obsidian a tag such as `Client A` is not a usable tag. The user chose
+  to keep spaces.
+- **A folder's `.tags` file stays comma-separated.** No YAML reader sees it.
 
 ## Revisit as it grows
 

@@ -257,18 +257,30 @@ enum SessionArchive {
 
     /// Parses the leading `---` … `---` frontmatter into `key: value` pairs
     /// (the format `SessionMarkdown.inline` writes: `started`, `ended`,
-    /// `context`). Empty when there's no frontmatter block.
+    /// `context`). A quoted value is decoded (`FrontmatterYAML.scalar`). A
+    /// list (a flow list, or a block list as Obsidian writes it) is returned as
+    /// a flow list, for `frontmatterTags`. Empty when there's
+    /// no frontmatter block.
     static func frontmatter(_ markdown: String) -> [String: String] {
         guard markdown.hasPrefix("---\n") else { return [:] }
         let afterOpen = markdown.index(markdown.startIndex, offsetBy: 4)
         guard let close = markdown.range(of: "\n---\n", range: afterOpen..<markdown.endIndex)
         else { return [:] }
         var out: [String: String] = [:]
-        for line in markdown[afterOpen..<close.lowerBound].split(separator: "\n") {
+        let lines = markdown[afterOpen..<close.lowerBound].split(separator: "\n").map(String.init)
+        for group in FrontmatterYAML.entries(lines) {
+            let line = group[0]
             guard let colon = line.firstIndex(of: ":") else { continue }
             let key = line[..<colon].trimmingCharacters(in: .whitespaces)
             let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-            if !key.isEmpty { out[key] = value }
+            guard !key.isEmpty else { continue }
+            // A key with no value and `- item` lines under it is a block list,
+            // as Obsidian writes `tags`. It reads as a flow list.
+            if value.isEmpty, let items = FrontmatterYAML.blockList(Array(group.dropFirst())) {
+                out[key] = FrontmatterYAML.flowList(items)
+            } else {
+                out[key] = FrontmatterYAML.scalar(value)
+            }
         }
         return out
     }
@@ -283,12 +295,19 @@ enum SessionArchive {
     }
 
     /// `markdown` with a single scalar frontmatter `key:` set to `value` (collapsed
-    /// to one line). An empty/blank `value` removes the key. Existing frontmatter
-    /// keys and the body are preserved; a note without frontmatter gains one. Pure,
-    /// for testability. The shared core behind `settingName`/`settingTags`.
+    /// to one line, written as a YAML double-quoted string). An empty/blank
+    /// `value` removes the key. Pure, for testability. Backs `settingName`.
     static func settingScalar(_ key: String, _ value: String, in markdown: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\n", with: " ")
+        return settingLine(key, trimmed.isEmpty ? "" : FrontmatterYAML.quoted(trimmed), in: markdown)
+    }
+
+    /// `markdown` with the frontmatter `key:` line set to `key: yaml`, where
+    /// `yaml` is already valid YAML. An empty `yaml` removes the key. Existing
+    /// frontmatter keys and the body are preserved; a note without frontmatter
+    /// gains one. The shared core behind `settingScalar`/`settingTags`.
+    private static func settingLine(_ key: String, _ yaml: String, in markdown: String) -> String {
         guard markdown.hasPrefix("---\n"),
             let close = markdown.range(
                 of: "\n---\n",
@@ -296,14 +315,17 @@ enum SessionArchive {
         else {
             // No frontmatter: prepend one carrying just this key (nothing to do
             // when clearing a key that was never set).
-            return trimmed.isEmpty ? markdown : "---\n\(key): \(trimmed)\n---\n\n" + markdown
+            return yaml.isEmpty ? markdown : "---\n\(key): \(yaml)\n---\n\n" + markdown
         }
         let open = markdown.index(markdown.startIndex, offsetBy: 4)
-        var lines = markdown[open..<close.lowerBound]
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map(String.init)
-            .filter { !$0.hasPrefix("\(key):") }
-        if !trimmed.isEmpty { lines.append("\(key): \(trimmed)") }
+        // Drop the key's line and the lines under it (a block list).
+        var lines = FrontmatterYAML.entries(
+            markdown[open..<close.lowerBound]
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map(String.init))
+            .filter { !$0[0].hasPrefix("\(key):") }
+            .flatMap { $0 }
+        if !yaml.isEmpty { lines.append("\(key): \(yaml)") }
         return "---\n" + lines.joined(separator: "\n") + markdown[close.lowerBound...]
     }
 
@@ -321,12 +343,26 @@ enum SessionArchive {
         rewrite(file) { settingName(name, in: $0) }
     }
 
-    /// Parse a `tags:` frontmatter value (comma-separated) into names: trimmed,
-    /// empties dropped, order preserved. The inverse of `tagsLine`.
+    /// Parse a comma-separated tags value (a folder's `.tags` file, or the
+    /// `tags:` frontmatter of an older note) into names: trimmed, empties
+    /// dropped, order preserved. The inverse of `tagsLine`.
     static func parseTags(_ value: String) -> [String] {
         value.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+
+    /// The tags in a note's `tags:` frontmatter value: a YAML flow list
+    /// (`["a", "b"]`, as `tagsFrontmatter` writes it) or the comma-separated
+    /// form of older notes. Trimmed, empties dropped, order preserved.
+    static func frontmatterTags(_ value: String) -> [String] {
+        guard let items = FrontmatterYAML.list(value) else { return parseTags(value) }
+        return items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// The tags in the frontmatter of the note `markdown`.
+    static func noteTags(_ markdown: String) -> [String] {
+        frontmatterTags(frontmatter(markdown)["tags"] ?? "")
     }
 
     /// The canonical form of a single tag name: trimmed, with the `tags:` line
@@ -339,11 +375,9 @@ enum SessionArchive {
             .replacingOccurrences(of: "\n", with: " ")
     }
 
-    /// The canonical `tags:` frontmatter value for `tags`: each name normalised,
-    /// empties dropped, and case-insensitive duplicates removed (first occurrence
-    /// wins, order kept). "" when there are no usable tags. The single source of
-    /// truth for the tag line, shared by `settingTags` and `SessionMarkdown.inline`.
-    static func tagsLine(_ tags: [String]) -> String {
+    /// The canonical list of `tags`: each name normalised, empties dropped, and
+    /// case-insensitive duplicates removed (first occurrence wins, order kept).
+    static func canonicalTags(_ tags: [String]) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
         for tag in tags {
@@ -351,14 +385,29 @@ enum SessionArchive {
             guard !name.isEmpty, seen.insert(name.lowercased()).inserted else { continue }
             out.append(name)
         }
-        return out.joined(separator: ", ")
+        return out
+    }
+
+    /// The canonical comma-separated line for `tags` (`canonicalTags`), as a
+    /// folder's `.tags` file holds it. "" when there are no usable tags.
+    static func tagsLine(_ tags: [String]) -> String {
+        canonicalTags(tags).joined(separator: ", ")
+    }
+
+    /// The canonical `tags:` frontmatter value for `tags`: `canonicalTags` as a
+    /// YAML flow list, `["a", "b"]`. "" when there are no usable tags. The single
+    /// source of truth for a note's tag line, shared by `settingTags` and
+    /// `SessionMarkdown.inline`.
+    static func tagsFrontmatter(_ tags: [String]) -> String {
+        let names = canonicalTags(tags)
+        return names.isEmpty ? "" : FrontmatterYAML.flowList(names)
     }
 
     /// `markdown` with its `tags:` frontmatter set to `tags`. An empty list removes
     /// the key. Used to tag a *saved* session — the live note is tagged through
     /// `SessionWriter` instead, to avoid the two-writer clobber.
     static func settingTags(_ tags: [String], in markdown: String) -> String {
-        settingScalar("tags", tagsLine(tags), in: markdown)
+        settingLine("tags", tagsFrontmatter(tags), in: markdown)
     }
 
     /// Set (or clear) the `tags:` frontmatter of `file` on disk. Returns false if
@@ -375,7 +424,7 @@ enum SessionArchive {
     /// propagates a tag's new name across every note already tagged with it.
     static func renamingTag(from old: String, to new: String, in markdown: String) -> String {
         let oldTrim = old.trimmingCharacters(in: .whitespaces)
-        let tags = parseTags(frontmatter(markdown)["tags"] ?? "")
+        let tags = noteTags(markdown)
         guard tags.contains(where: { $0.caseInsensitiveCompare(oldTrim) == .orderedSame })
         else { return markdown }
         let renamed = tags.map {

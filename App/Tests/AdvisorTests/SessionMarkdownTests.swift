@@ -147,7 +147,7 @@ private func makeCard(
         utterances: [], cards: [], started: Date(timeIntervalSince1970: 0), ended: nil,
         context: "ctx", name: "Board review\nextra")
     // The optional name collapses to one frontmatter scalar, like context.
-    #expect(md.contains("name: Board review extra\n"))
+    #expect(md.contains("name: \"Board review extra\"\n"))
 }
 
 @Test func omitsAbsentName() {

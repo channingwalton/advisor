@@ -28,7 +28,8 @@ struct SessionDetail: Equatable {
     /// The research context (`context:` frontmatter), or "". Kept distinct from
     /// `title` so search still matches it even when a `name` overrides the title.
     let context: String
-    /// The session's tag names (`tags:` frontmatter, comma-separated), in order,
+    /// The session's tag names (`tags:` frontmatter, a YAML list, or the
+    /// comma-separated form of older notes; see `frontmatterTags`), in order,
     /// or empty. Colours are resolved against the tag library at render time, so
     /// these are just the names (issue #15).
     let tags: [String]
@@ -62,7 +63,7 @@ struct SessionDetail: Equatable {
         let iso = ISO8601DateFormatter()
         let name = fm["name"]?.trimmingCharacters(in: .whitespaces) ?? ""
         let context = fm["context"]?.trimmingCharacters(in: .whitespaces) ?? ""
-        let tags = SessionArchive.parseTags(fm["tags"] ?? "")
+        let tags = SessionArchive.frontmatterTags(fm["tags"] ?? "")
         let timed = TranscriptDoc.timedBlocks(from: SessionArchive.strippingFrontmatter(contents))
         let blocks = timed.map(\.block)
 

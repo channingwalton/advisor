@@ -125,7 +125,16 @@ context: x
         utterances: [], cards: [], started: Date(timeIntervalSince1970: 0), ended: nil,
         context: "Q3 board review\nsecond line")
     // Multi-line context collapses to one frontmatter scalar.
-    #expect(md.contains("context: Q3 board review second line\n"))
+    #expect(md.contains("context: \"Q3 board review second line\"\n"))
+}
+
+@Test func inlineQuotesAContextThatIsNotPlainYAML() {
+    let md = SessionMarkdown.inline(
+        utterances: [], cards: [], started: Date(timeIntervalSince1970: 0), ended: nil,
+        context: "Meeting: review #155 \"draft\"")
+    #expect(md.contains(#"context: "Meeting: review #155 \"draft\""\#n"#))
+    #expect(SessionDetail.parse(contents: md, fallbackTitle: "x").context
+        == "Meeting: review #155 \"draft\"")
 }
 
 @Test func cardCountIsPluralised() {

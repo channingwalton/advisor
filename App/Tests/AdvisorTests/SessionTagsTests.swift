@@ -25,7 +25,8 @@ import Testing
     let note = "---\nname: Talk\nstarted: 2026-06-18T17:00:00Z\ncontext: Effects\n---\n\n"
         + "# Transcript\n\n- 17:00:00 hi\n"
     let out = SessionArchive.settingTags(["work", "urgent"], in: note)
-    #expect(SessionArchive.frontmatter(out)["tags"] == "work, urgent")
+    #expect(out.contains("tags: [\"work\", \"urgent\"]\n"))     // a YAML list
+    #expect(SessionArchive.noteTags(out) == ["work", "urgent"])
     #expect(SessionArchive.frontmatter(out)["name"] == "Talk")      // other keys kept
     #expect(SessionArchive.frontmatter(out)["context"] == "Effects")
     #expect(out.contains("- 17:00:00 hi"))                          // body kept
@@ -34,7 +35,7 @@ import Testing
 @Test func settingTagsReplacesExisting() {
     let note = "---\ntags: old\nstarted: 2026-06-18T17:00:00Z\n---\n\n# Transcript\n"
     let out = SessionArchive.settingTags(["new"], in: note)
-    #expect(SessionArchive.frontmatter(out)["tags"] == "new")
+    #expect(SessionArchive.noteTags(out) == ["new"])
     #expect(!out.contains("tags: old"))
 }
 
@@ -48,7 +49,7 @@ import Testing
 @Test func settingTagsAddsFrontmatterWhenAbsent() {
     let note = "# Transcript\n\n- 17:00 hi\n"
     let out = SessionArchive.settingTags(["work"], in: note)
-    #expect(out.hasPrefix("---\ntags: work\n---\n\n"))
+    #expect(out.hasPrefix("---\ntags: [\"work\"]\n---\n\n"))
     #expect(SessionArchive.strippingFrontmatter(out) == note)       // body untouched
 }
 
@@ -56,6 +57,58 @@ import Testing
     let note = "---\nstarted: 2026-06-18T17:00:00Z\ntags: work, urgent\n---\n\n# Transcript\n\n- 17:00:00 hi"
     let d = SessionDetail.parse(contents: note, fallbackTitle: "x")
     #expect(d.tags == ["work", "urgent"])
+}
+
+@Test func sessionDetailParsesTagsWrittenAsAYAMLList() {
+    let note = "---\ntags: [\"work\", \"Client A\"]\n---\n\n# Transcript\n\n- 17:00:00 hi"
+    #expect(SessionDetail.parse(contents: note, fallbackTitle: "x").tags == ["work", "Client A"])
+}
+
+// Obsidian writes the whole frontmatter again when it edits a property, with
+// `tags` as a block list.
+let obsidianNote = """
+    ---
+    started: 2026-06-18T17:00:00Z
+    tags:
+      - work
+      - Client A
+    name: Talk
+    ---
+
+    # Transcript
+
+    """
+
+@Test func noteTagsReadsABlockListThatObsidianWrites() {
+    #expect(SessionArchive.noteTags(obsidianNote) == ["work", "Client A"])
+    #expect(SessionArchive.noteTags("---\ntags:\n- work\n---\n") == ["work"])
+    #expect(SessionArchive.frontmatter(obsidianNote)["name"] == "Talk")
+    #expect(SessionDetail.parse(contents: obsidianNote, fallbackTitle: "x").tags == ["work", "Client A"])
+}
+
+@Test func settingTagsReplacesABlockList() {
+    let out = SessionArchive.settingTags(["urgent"], in: obsidianNote)
+    #expect(SessionArchive.noteTags(out) == ["urgent"])
+    #expect(!out.contains("- work"))
+    #expect(!out.contains("- Client A"))
+    #expect(SessionArchive.frontmatter(out)["started"] == "2026-06-18T17:00:00Z")
+    #expect(SessionArchive.frontmatter(out)["name"] == "Talk")
+}
+
+@Test func settingTagsReplacesABlockListThatHasABlankLine() {
+    let note = "---\nstarted: X\ntags:\n  - a\n\n  - b\n---\n\n# Transcript\n"
+    #expect(SessionArchive.noteTags(note) == ["a", "b"])
+    let out = SessionArchive.settingTags(["c"], in: note)
+    #expect(out.hasPrefix("---\nstarted: X\ntags: [\"c\"]\n---\n"))
+}
+
+@Test func noteTagsReadsAnOlderLineOfBracketedTags() {
+    #expect(SessionArchive.noteTags("---\ntags: [WIP], [Done]\n---\n") == ["[WIP]", "[Done]"])
+}
+
+@Test func renamingTagWorksOnABlockList() {
+    let out = SessionArchive.renamingTag(from: "work", to: "Project X", in: obsidianNote)
+    #expect(SessionArchive.noteTags(out) == ["Project X", "Client A"])
 }
 
 @Test func sessionDetailHasNoTagsWhenAbsent() {
@@ -67,7 +120,7 @@ import Testing
     let md = SessionMarkdown.inline(
         utterances: [], cards: [], started: Date(timeIntervalSince1970: 0), ended: nil,
         tags: ["work", "work", "urgent"])
-    #expect(md.contains("tags: work, urgent\n"))   // deduped
+    #expect(md.contains("tags: [\"work\", \"urgent\"]\n"))   // deduped, a YAML list
 }
 
 @Test func inlineOmitsTagsLineWhenEmpty() {
@@ -79,7 +132,7 @@ import Testing
 @Test func renamingTagReplacesMatchingNameCaseInsensitively() {
     let note = "---\nstarted: 2026-06-18T17:00:00Z\ntags: work, urgent\n---\n\n# Transcript\n"
     let out = SessionArchive.renamingTag(from: "WORK", to: "Project X", in: note)
-    #expect(SessionArchive.parseTags(SessionArchive.frontmatter(out)["tags"]!) == ["Project X", "urgent"])
+    #expect(SessionArchive.noteTags(out) == ["Project X", "urgent"])
 }
 
 @Test func renamingTagLeavesNoteWithoutTheTagUnchanged() {
@@ -91,7 +144,7 @@ import Testing
     let note = "---\ntags: work, urgent\nstarted: 2026-06-18T17:00:00Z\n---\n\n# Transcript\n"
     // Renaming "work" → "urgent" de-dups to a single tag.
     let out = SessionArchive.renamingTag(from: "work", to: "urgent", in: note)
-    #expect(SessionArchive.parseTags(SessionArchive.frontmatter(out)["tags"]!) == ["urgent"])
+    #expect(SessionArchive.noteTags(out) == ["urgent"])
 }
 
 @Test func renameTagAcrossNotesRewritesOnlyAffectedAndSkipsExcluded() throws {
@@ -111,8 +164,7 @@ import Testing
     #expect(changed == 1) // only `tagged`; `other` lacks it, `live` is skipped
 
     func tags(_ url: URL) -> [String] {
-        SessionArchive.parseTags(SessionArchive.frontmatter(
-            (try? String(contentsOf: url, encoding: .utf8)) ?? "")["tags"] ?? "")
+        SessionArchive.noteTags((try? String(contentsOf: url, encoding: .utf8)) ?? "")
     }
     #expect(tags(tagged) == ["Project X"])
     #expect(tags(other) == ["misc"])
