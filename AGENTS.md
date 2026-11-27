@@ -122,11 +122,12 @@ change in the running app, or report it as unverified.
     folders and the CLI's transcripts and logs.
   - Codex has no per-call hook, so its boundary is a Seatbelt profile
     (`sidecar/src/codexSandbox.ts`) built from the readable folders and the
-    same `deniedPaths()` list. Keep its own `sandboxMode: "read-only"`: it
-    cannot apply inside the profile, so each Codex shell command fails closed
-    (#118). A Codex card reads files through Advisor's own MCP server
-    (`sidecar/src/localFiles.ts`), which applies `toolDecision` to each call
-    under that profile.
+    same `deniedPaths()` list. Each Codex session has the shell off
+    (`codexClientOptions`, #119). Keep its own `sandboxMode: "read-only"` as
+    the second layer: it cannot apply inside the profile, so a shell command
+    fails closed (#118). A Codex card reads files through Advisor's own MCP
+    server (`sidecar/src/localFiles.ts`), which applies `toolDecision` to each
+    call under that profile.
   - Both profiles take their read rules and temp folders from
     `sidecar/src/seatbelt.ts`.
 - User preferences are in `~/Library/Application Support/Advisor/config.json`,

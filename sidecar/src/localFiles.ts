@@ -4,8 +4,9 @@ import { absolutePath, braceAlternatives, toolDecision, type SandboxPolicy } fro
 
 /// Advisor's own file tools for Codex card lanes (#120): Read, Grep and Glob,
 /// read-only, with the names and inputs of Claude's tools. Codex has no
-/// per-call hook, and its own shell cannot run under Advisor's profile (#118),
-/// so a Codex card reads local files only through these tools. Each call goes
+/// per-call hook, and its shell is off (#119; under Advisor's profile it could
+/// not run a command anyway, #118), so a Codex card reads local files only
+/// through these tools. Each call goes
 /// through Claude's policy (`toolDecision`) before it opens a file, so a Codex
 /// card reads what a Claude card reads. The connector process also runs under
 /// the Codex Seatbelt profile (codexSandbox.ts), which refuses the rest of the

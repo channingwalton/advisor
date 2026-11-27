@@ -250,6 +250,9 @@ test("#codex-files each task of a Codex card lane starts with its readable folde
     const note = codexFilesNote(home, [notes]);
     assert.ok(note.includes(JSON.stringify(notes)), note);
     assert.match(note, /mcp__advisor__Read/);
+    // A Codex session has no shell (#119), so the note names none.
+    assert.match(note, /read every file through them/);
+    assert.doesNotMatch(note, /shell/i);
     const first = session.run("task1", undefined, 60_000, "RECAP ");
     await setImmediate();
     assert.equal(calls[0].input, `sp\n\n${note}\n\nRECAP task1`);
@@ -584,11 +587,14 @@ function servers(names: string[]) {
   return { calls, list };
 }
 const NO_CONNECTORS = { apps: false, plugins: false };
+/// The shell, off for each session (#119).
+const NO_SHELL = { shell_tool: false, unified_exec: false };
 
 test("#codex-connectors a card lane allowed connector actions keeps the user's connectors", async () => {
   const { calls, list } = servers(["fff"]);
   assert.deepEqual(await codexClientOptions({ ...base, allowMcpActions: true }, {}, "/w/codex", list), {
     codexPathOverride: "/w/codex",
+    config: { features: NO_SHELL },
   });
   assert.deepEqual(calls, []);
 });
@@ -600,7 +606,7 @@ test("#codex-connectors a card lane without connector actions disables each serv
     assert.deepEqual(o, {
       codexPathOverride: "/w/codex",
       config: {
-        features: NO_CONNECTORS,
+        features: { ...NO_CONNECTORS, ...NO_SHELL },
         mcp_servers: { fff: { enabled: false }, "openai-docs": { enabled: false } },
       },
     });
@@ -609,10 +615,10 @@ test("#codex-connectors a card lane without connector actions disables each serv
   }
 });
 
-test("#codex-connectors with no servers configured only apps and plugins are switched off", async () => {
+test("#codex-connectors with no servers configured only apps, plugins and the shell are switched off", async () => {
   assert.deepEqual(await codexClientOptions(base, {}, "/w/codex", servers([]).list), {
     codexPathOverride: "/w/codex",
-    config: { features: NO_CONNECTORS },
+    config: { features: { ...NO_CONNECTORS, ...NO_SHELL } },
   });
 });
 
@@ -629,9 +635,12 @@ const lane = { ...base, readableFolders: () => [] };
 
 test("#codex-files a card lane gets Advisor's file tools, with connector actions on and off", async () => {
   const on = await codexClientOptions({ ...lane, allowMcpActions: true }, {}, "/w/codex", servers(["fff"]).list, FILES);
-  assert.deepEqual(on, { codexPathOverride: "/w/codex", config: { mcp_servers: { advisor: FILES } } });
+  assert.deepEqual(on, { codexPathOverride: "/w/codex", config: { features: NO_SHELL, mcp_servers: { advisor: FILES } } });
   const off = await codexClientOptions(lane, {}, "/w/codex", servers(["fff"]).list, FILES);
-  assert.deepEqual(off.config, { features: NO_CONNECTORS, mcp_servers: { fff: { enabled: false }, advisor: FILES } });
+  assert.deepEqual(off.config, {
+    features: { ...NO_CONNECTORS, ...NO_SHELL },
+    mcp_servers: { fff: { enabled: false }, advisor: FILES },
+  });
 });
 
 test("#codex-files the classifier, and a session that reads no files, get no file tools", async () => {
@@ -639,7 +648,22 @@ test("#codex-files the classifier, and a session that reads no files, get no fil
   assert.equal(JSON.stringify(classifier).includes("advisor"), false, JSON.stringify(classifier));
   assert.deepEqual(await codexClientOptions({ ...base, allowMcpActions: true }, {}, "/w/codex", servers([]).list, FILES), {
     codexPathOverride: "/w/codex",
+    config: { features: NO_SHELL },
   });
+});
+
+test("#codex-shell each Codex session turns the shell off, with connector actions on and off", async () => {
+  // Under Advisor's profile no shell command runs (#118), and a card lane
+  // reads files through Advisor's own tools (#120). So the shell is off on
+  // purpose, not only through the fault of the nested profile.
+  for (const allowMcpActions of [true, false]) {
+    for (const [opts, files] of [[lane, FILES], [base, undefined]] as const) {
+      const o = await codexClientOptions({ ...opts, allowMcpActions }, {}, "/w/codex", servers(["fff"]).list, files);
+      const features = (o.config as { features?: Record<string, boolean> } | undefined)?.features ?? {};
+      const label = `actions ${allowMcpActions}, file tools ${files !== undefined}`;
+      assert.deepEqual({ shell_tool: features.shell_tool, unified_exec: features.unified_exec }, NO_SHELL, label);
+    }
+  }
 });
 
 test("#codex-files a Codex MCP server of the user's with the file tools' name fails the session", async () => {

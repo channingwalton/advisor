@@ -42,14 +42,16 @@ export function codexWorkingDirectory(opts: AgentSessionOptions): string {
 /// codexSandbox.ts — which denies the same paths as the Claude backend's
 /// `canUseTool` and confines writes, for the CLI and every process it spawns.
 ///
-/// Under that profile, "read-only" also keeps the shell closed: the CLI applies
-/// its own Seatbelt profile to each command, macOS refuses it, and no command
-/// runs (#118). "danger-full-access" makes the shell work, but the profile then
-/// cannot stop a command that sends the `~/.codex` login out or starts the CLI
-/// with every connector on. See DESIGN.md, *Codex shell stays closed*.
+/// The shell is off for each session (`codexClientOptions`, #119). Under the
+/// profile, "read-only" also keeps it closed if a release offers it again: the
+/// CLI applies its own Seatbelt profile to each command, macOS refuses it, and
+/// no command runs (#118). "danger-full-access" makes the shell work, but the
+/// profile then cannot stop a command that sends the `~/.codex` login out or
+/// starts the CLI with every connector on. See DESIGN.md, *Codex shell stays
+/// closed*.
 ///
-/// Connectors and `noTools` are handled by `codexClientOptions`; here an empty
-/// `allowedTools` turns web search and network off.
+/// The shell, connectors and `noTools` are handled by `codexClientOptions`;
+/// here an empty `allowedTools` turns web search and network off.
 export function codexThreadOptions(opts: AgentSessionOptions): ThreadOptions {
   const web = opts.allowedTools.some((t) => t.startsWith("Web"));
   return {
@@ -86,13 +88,19 @@ export const FILES_SERVER = "advisor";
 /// it, so `mcp_servers = {}` would leave every server in place, and
 /// `codex exec --ignore-user-config` would drop the user's model with them —
 /// Preferences offers no Codex model of its own. With `allowMcpActions`,
-/// everything is allowed, as on Claude.
+/// every connector is allowed, as on Claude.
 ///
-/// `noTools` (the classifier) also switches off the shell, goals, image
-/// generation, sleep and sub-agents. What no setting removes stays offered, and
-/// which of it depends on the model (for example `request_user_input`,
-/// `view_image`, `apply_patch`, the MCP resource tools, and code mode's `exec`);
-/// each is inert here — see codex.sdk.test.ts.
+/// Shell: off for each session (`shell_tool`, `unified_exec`; issue #119).
+/// Under Advisor's profile the CLI cannot apply its own sandbox to a command,
+/// so no command runs (#118), and a card lane reads files through Advisor's
+/// own tools (#120). With the shell off, that boundary does not depend on the
+/// fault of the nested profile.
+///
+/// `noTools` (the classifier) also switches off goals, image generation, sleep
+/// and sub-agents. What no setting removes stays offered, and which of it
+/// depends on the model (for example `request_user_input`, `view_image`,
+/// `apply_patch`, the MCP resource tools, and code mode's `exec`); each is
+/// inert here — see codex.sdk.test.ts.
 export async function codexClientOptions(
   opts: AgentSessionOptions,
   env: NodeJS.ProcessEnv,
@@ -103,21 +111,19 @@ export async function codexClientOptions(
   const client = codexConstructorOptions(env, codexPath);
   const actions = opts.allowMcpActions === true && !opts.noTools;
   const ownFiles = opts.readableFolders !== undefined && !opts.noTools ? files : undefined;
-  if (actions && !ownFiles) return client;
-  const config: NonNullable<CodexOptions["config"]> = {};
-  if (!actions) {
-    const features: Record<string, boolean> = { apps: false, plugins: false };
-    config.features = features;
-    if (opts.noTools) {
-      Object.assign(features, {
-        shell_tool: false, unified_exec: false, goals: false, image_generation: false, sleep_tool: false,
-        multi_agent: false, multi_agent_v2: false,
-      });
-      // A model's catalogue entry can turn sub-agents on (`multi_agent_version`),
-      // whatever the features say. Only `[agents] enabled = false` overrides it.
-      config.agents = { enabled: false };
-    }
+  const features: Record<string, boolean> = { shell_tool: false, unified_exec: false };
+  const config: NonNullable<CodexOptions["config"]> = { features };
+  if (!actions) Object.assign(features, { apps: false, plugins: false });
+  if (opts.noTools) {
+    Object.assign(features, {
+      goals: false, image_generation: false, sleep_tool: false, multi_agent: false, multi_agent_v2: false,
+    });
+    // A model's catalogue entry can turn sub-agents on (`multi_agent_version`),
+    // whatever the features say. Only `[agents] enabled = false` overrides it.
+    config.agents = { enabled: false };
   }
+  // No server to disable, and no name to check against the file tools.
+  if (actions && !ownFiles) return { ...client, config };
   const servers = await listServers(codexPath, codexWorkingDirectory(opts));
   if (ownFiles && servers.includes(FILES_SERVER)) {
     throw new Error(`a Codex MCP server is named "${FILES_SERVER}", the name of Advisor's file tools: rename it`);
@@ -145,7 +151,7 @@ export function codexFilesNote(home: string, folders: readonly string[], session
   if (honouredFolders(home, folders, REALPATH).length === 0) return note;
   return `${note} Read, Grep and Glob are the tools of Advisor's MCP server \`${FILES_SERVER}\` ` +
     `(\`mcp__${FILES_SERVER}__Read\`, \`mcp__${FILES_SERVER}__Grep\`, \`mcp__${FILES_SERVER}__Glob\`): ` +
-    "when they are not in your tool list, find them with tool search. The shell cannot read files here.";
+    "when they are not in your tool list, find them with tool search, and read every file through them.";
 }
 
 /// The MCP servers the user's Codex config defines, by name: ~/.codex/config.toml

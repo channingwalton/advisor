@@ -386,8 +386,9 @@ ChatGPT apps), and with it on, it gets all of them. A connector that reads its
 own files in your home folder starts only when that folder is a readable
 folder.
 
-Codex cards cannot run shell commands. Codex can try one, but the Codex CLI
-cannot start its own sandbox inside the profile, so the command fails. A Codex
+Codex cards cannot run shell commands: Advisor gives Codex no shell tool. If a
+Codex release offered one again, its commands would still fail, because the
+Codex CLI cannot start its own sandbox inside the profile. A Codex
 card reads your local notes through Advisor's own file tools instead: Read,
 Grep and Glob, which apply the Claude policy to each call, under the profile.
 It has them with **Allow connector actions** on or off. Grep and Glob do not

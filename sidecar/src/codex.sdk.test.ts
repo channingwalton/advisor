@@ -37,8 +37,12 @@ import { classifierOptions } from "./trigger.js";
 //
 // A prompt whose name starts with `shell` probes the shell instead: the fake
 // model runs `SHELL_COMMAND` through `exec_command`, from code mode's `exec` or
-// directly, and the next request carries what the command printed. Under
-// Advisor's profile no command runs (#118).
+// directly, and the next request carries what the command printed. A card lane
+// is offered no shell (#119), so code mode's call fails and a classic model has
+// no tool to call. Under Advisor's profile no command would run anyway (#118).
+//
+// A prompt whose name starts with `spawn` starts a sub-agent with the prompt
+// `child…`, which probes as above, and waits for it.
 //
 // A prompt whose name starts with `files` asks Advisor's own Read (#120) for
 // each of `FILE_TARGETS`: from code mode's `exec`, or, on a classic model,
@@ -141,13 +145,17 @@ const message = (text: string) => ({
 /// command instead. The probe's output arrives in the next request, and the
 /// turn then ends.
 function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: Tool[] }): void {
-  // The last prompt: a resumed thread sends its earlier turns too.
-  const prompt = [...JSON.stringify(body.input).matchAll(/PROMPT:(\w+)/g)].at(-1)?.[1];
+  // The last prompt: a resumed thread sends its earlier turns too. A spawner's
+  // later requests carry its call, which names the child's prompt.
+  const prompts = [...JSON.stringify(body.input).matchAll(/PROMPT:(\w+)/g)].map((m) => m[1]);
+  const spawner = (body.input ?? []).some((i) => i.call_id === "spawn");
+  const prompt = spawner ? prompts.filter((p) => p.startsWith("spawn")).at(-1) : prompts.at(-1);
   const done = message('{"triggers":[]}');
   if (!prompt) return respond(res, done);
   // The last probe output: a resumed thread sends its earlier turns' too.
   const result = (body.input ?? []).filter((i) => i.type?.endsWith("_output") && i.call_id === PROBE).at(-1);
   const entry = offered.get(prompt);
+  if (prompt.startsWith("spawn")) return answerSpawn(res, body, prompt, entry);
   if (entry && prompt.startsWith("files")) return answerFiles(res, body, entry);
   if (result && entry && prompt.startsWith("shell")) {
     entry.shell = outputText(result.output);
@@ -188,6 +196,29 @@ function answer(res: http.ServerResponse, body: { input?: InputItem[]; tools?: T
     return respond(res, { type: "function_call", id: "fc_probe", call_id: PROBE, name: "read_mcp_resource", arguments: args, status: "completed" });
   }
   respond(res, done);
+}
+
+/// The `spawn` probe, one step for each request: start a sub-agent with no
+/// history and the prompt `child…`, wait for it to finish, then end the turn.
+function answerSpawn(
+  res: http.ServerResponse, body: { input?: InputItem[]; tools?: Tool[] }, prompt: string, entry?: Offered
+): void {
+  const output = (id: string) => (body.input ?? []).some((i) => i.call_id === id && i.type?.endsWith("_output"));
+  if (!entry) {
+    offered.set(prompt, { tools: requestTools(body) });
+    const args = { task_name: "probe_child", message: `PROMPT:child${prompt.slice("spawn".length)}`, fork_turns: "none" };
+    return respond(res, {
+      type: "function_call", id: "fc_spawn", call_id: "spawn", namespace: "collaboration", name: "spawn_agent",
+      arguments: JSON.stringify(args), status: "completed",
+    });
+  }
+  if (output("spawn") && !output("wait")) {
+    return respond(res, {
+      type: "function_call", id: "fc_wait", call_id: "wait", namespace: "collaboration", name: "wait_agent",
+      arguments: JSON.stringify({ timeout_ms: 30_000 }), status: "completed",
+    });
+  }
+  respond(res, message("done"));
 }
 
 /// The `files` probe, one step for each request: code mode reads every file
@@ -286,11 +317,13 @@ after(() => {
 });
 
 /// Run one turn with `opts` and return what it could use. The profile lets the
-/// CLI read `readable` in the synthetic home.
+/// CLI read `readable` in the synthetic home. `reopenShell` turns the shell on
+/// again, as a CLI release that ignored the setting would.
 async function offeredTools(
   prompt: string,
   given: AgentSessionOptions,
-  readable: string[] = [connectorsDir]
+  readable: string[] = [connectorsDir],
+  reopenShell = false
 ): Promise<Offered> {
   const opts = { ...given, home };
   const cwd = codexWorkingDirectory(opts);
@@ -309,6 +342,7 @@ async function offeredTools(
   const client = await codexClientOptions(
     opts, {}, wrapper, (cli, cwd) => codexConfigServers(cli, cwd, env), filesServer(sandbox, home)
   );
+  if (reopenShell) Object.assign(client.config?.features as object, { shell_tool: true, unified_exec: true });
   const s = new CodexAgentSession(opts, (threadOptions) => new Codex({ ...client, env }).startThread(threadOptions));
   try {
     const r = await s.run(`PROMPT:${prompt}`, undefined, 60_000);
@@ -391,15 +425,25 @@ const connectors = (o: Offered): string[] => [
 
 const show = (o: Offered): string => `tools: ${o.tools.join(", ")}; stub read: ${o.stub}`;
 
-test("#codex-connectors a card lane allowed connector actions is offered the stub connector and the shell", darwin, async () => {
+/// The names that CLI 0.166.0 holds for a shell tool.
+const SHELL_TOOLS = ["exec_command", "write_stdin", "shell", "shell_command", "local_shell"];
+const shellTools = (o: Offered): string[] => o.tools.filter((t) => SHELL_TOOLS.includes(t));
+
+/// Whether the probe saw the tools that a lane reaches: in code mode the
+/// tools inside `exec` (Advisor's Read is one), else those of the request.
+const listedTools = (o: Offered): boolean =>
+  o.tools.includes(o.tools.includes("exec") ? "mcp__advisor__Read" : "tool_search");
+
+test("#codex-connectors a card lane allowed connector actions is offered the stub connector, and no shell", darwin, async () => {
   // The control: without it, the absences below could mean the stub never loaded.
   const o = await offeredTools("actions", cardLaneOptions(mergeConfig({ allowMcpActions: true, model: CODE_MODE_MODEL }), "research0"));
   assert.ok(o.tools.includes("mcp__stub__lookup"), show(o));
-  assert.ok(o.tools.includes("exec_command"), show(o));
   assert.ok(reachesStub(o), show(o));
+  assert.deepEqual(shellTools(o), [], show(o));
   // A classic model is offered MCP tools through tool_search, and the resource tools directly.
   const classic = await offeredTools("actionsClassic", cardLaneOptions(mergeConfig({ allowMcpActions: true, model: CLASSIC_MODEL }), "research0"));
   assert.ok(reachesStub(classic), show(classic));
+  assert.deepEqual(shellTools(classic), [], show(classic));
 });
 
 // The cost of the read allowlist: a connector that reads its own files in the
@@ -432,23 +476,62 @@ test("#codex-connectors a card lane without connector actions is offered no conn
   for (const [i, model] of MODELS.entries()) {
     const o = await offeredTools(`card${i}`, cardLaneOptions(mergeConfig({ model }), "research0"));
     assert.deepEqual(userConnectors(o), [], `${model}: ${show(o)}`);
-    // It is still offered the shell, though no command runs under the profile (#118).
-    assert.ok(o.tools.includes("exec_command"), `${model}: ${show(o)}`);
+    // The control: without it, no shell tool below could mean an empty list.
+    assert.ok(listedTools(o), `${model}: ${show(o)}`);
+    assert.deepEqual(shellTools(o), [], `${model}: ${show(o)}`);
   }
 });
 
-test("#codex-shell a card lane's shell command fails closed under the Seatbelt profile", darwin, async () => {
-  // The CLI's read-only mode cannot apply its own profile inside Advisor's, so
-  // no command runs: not the read of an ordinary note, nor of a denied key.
-  // A command that runs fails this test: read DESIGN.md (*Codex shell stays
+test("#codex-shell a card lane is offered no shell, so no shell command runs", { ...darwin, timeout: 120_000 }, async () => {
+  // The shell is off on purpose (#119). Under the profile, the CLI's read-only
+  // mode would also stop a command (#118). A command that runs, or a shell
+  // tool that is offered, fails this test: read DESIGN.md (*Codex shell stays
   // closed*) before you accept it.
   for (const [i, model] of MODELS.entries()) {
-    const o = await offeredTools(`shell${i}`, cardLaneOptions(mergeConfig({ model }), "research0"));
+    for (const allowMcpActions of [false, true]) {
+      const lane = cardLaneOptions(mergeConfig({ model, allowMcpActions }), "research0");
+      const o = await offeredTools(`shell${i}${allowMcpActions ? "on" : "off"}`, lane);
+      const shell = o.shell ?? "";
+      const shown = `${model}, connector actions ${allowMcpActions}: ${show(o)}; shell printed ${JSON.stringify(o.shell)}`;
+      assert.deepEqual(shellTools(o), [], shown);
+      // Code mode's `exec` runs and finds no shell tool to call; a classic
+      // model has no call to make.
+      if (o.tools.includes("exec")) {
+        assert.match(shell, /exec_command is not a function/, shown);
+      } else {
+        // The control: without it, no shell tool could mean an empty list.
+        assert.ok(listedTools(o), shown);
+        assert.equal(o.shell, undefined, shown);
+      }
+      assert.ok(!shell.includes(NOTE) && !shell.includes(KEY), shown);
+    }
+  }
+});
+
+test("#codex-shell a shell that a CLI release offers again still runs no command under the Seatbelt profile", darwin, async () => {
+  // The second layer (#118): the CLI's read-only mode cannot apply its own
+  // profile inside Advisor's, so no command runs: not the read of an ordinary
+  // note, nor of a denied key. A command that runs fails this test: read
+  // DESIGN.md (*Codex shell stays closed*) before you accept it.
+  for (const [i, model] of MODELS.entries()) {
+    const o = await offeredTools(`shellReopened${i}`, cardLaneOptions(mergeConfig({ model }), "research0"), [connectorsDir], true);
     const shown = `${model}: shell printed ${JSON.stringify(o.shell)}`;
     assert.ok(o.shell !== undefined, shown);
     assert.match(o.shell, /sandbox_apply: Operation not permitted/, shown);
-    assert.ok(!o.shell.includes(NOTE), shown);
-    assert.ok(!o.shell.includes(KEY), shown);
+    assert.ok(!o.shell.includes(NOTE) && !o.shell.includes(KEY), shown);
+  }
+});
+
+test("#codex-shell a card lane's sub-agent is offered no shell either, with connector actions on and off", { ...darwin, timeout: 150_000 }, async () => {
+  // A sub-agent model (see `#classifier-no-tools` below) can start a
+  // sub-agent, which the CLI says has the same tools as its parent.
+  for (const allowMcpActions of [false, true]) {
+    const name = allowMcpActions ? "on" : "off";
+    await offeredTools(`spawn${name}`, cardLaneOptions(mergeConfig({ model: CODE_MODE_MODEL, allowMcpActions }), "research0"));
+    const child = offered.get(`child${name}`);
+    assert.ok(child, `connector actions ${name}: the sub-agent never called the model`);
+    assert.ok(listedTools(child), `connector actions ${name}: ${show(child)}`);
+    assert.deepEqual(shellTools(child), [], `connector actions ${name}: ${show(child)}`);
   }
 });
 
@@ -457,6 +540,11 @@ test("#codex-connectors the sidecar's own Codex lanes follow the connector-actio
   assert.ok(allowed.tools.includes("mcp__stub__lookup"), show(allowed));
   const o = await sidecarTools("sidecar", false);
   assert.deepEqual(userConnectors(o), [], show(o));
+  // The shell is off for the sidecar's own lanes too (#119).
+  for (const lane of [allowed, o]) {
+    assert.ok(listedTools(lane), show(lane));
+    assert.deepEqual(shellTools(lane), [], show(lane));
+  }
 });
 
 /// Advisor's Read gave the note, and refused the key and Codex's config: the

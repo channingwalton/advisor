@@ -95,7 +95,7 @@ Detail and rationale live in the dated sections below; this is the map.
 
 **Agent backends** (`agent.ts`, `codex.ts`, `providers.ts`). One `Agent` interface (`run` / `reset` / `interrupt`) behind a provider registry; one provider and model serve every lane. `AgentSession` is a long-lived Claude Agent SDK session fed by streaming input, with `includePartialMessages` so text reaches a card delta by delta, loading the user's own Claude configuration (`settingSources: ["user"]` — where personal context such as notes locations belongs), `maxTurns` 40, 180 s per task. `CodexAgentSession` wraps `@openai/codex-sdk` (measured far slower for cards — see the 2026-06-13 sections).
 
-**Sandbox.** Claude: one policy, `toolDecision` (`toolPolicy.ts`) — web, `ToolSearch`, connector reads/searches, and reads by absolute or `~` path inside the folders that the user lists as readable, outside the credential denylist; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. On macOS the Claude CLI and its stdio connectors also run under a Seatbelt profile built from the readable folders (`claudeSandbox.ts`). Codex: a Seatbelt profile built from the readable folders and the same denylist, the CLI running under `sandbox-exec` (`codexSandbox.ts`); connectors all or none, by the same preference (`codexClientOptions`); local files through Advisor's own read-only Read, Grep and Glob (`localFiles.ts`), which apply `toolDecision`. Both profiles share their read rules (`seatbelt.ts`). With `readPastSessions` on, the session folder is one more readable folder (*Past sessions in cards*). See *Agent sandboxing*, *Readable folders*, *The Claude CLI runs under a Seatbelt profile*, *Codex runs under a Seatbelt profile*, *Codex reads local files through Advisor's file tools* and *Codex connectors follow the actions toggle*.
+**Sandbox.** Claude: one policy, `toolDecision` (`toolPolicy.ts`) — web, `ToolSearch`, connector reads/searches, and reads by absolute or `~` path inside the folders that the user lists as readable, outside the credential denylist; connector actions only with the preference on, unknown connector tools denied. Enforced by the `sandboxGate` PreToolUse hook and repeated in `canUseTool`. On macOS the Claude CLI and its stdio connectors also run under a Seatbelt profile built from the readable folders (`claudeSandbox.ts`). Codex: a Seatbelt profile built from the readable folders and the same denylist, the CLI running under `sandbox-exec` (`codexSandbox.ts`); connectors all or none, by the same preference, and no shell (`codexClientOptions`); local files through Advisor's own read-only Read, Grep and Glob (`localFiles.ts`), which apply `toolDecision`. Both profiles share their read rules (`seatbelt.ts`). With `readPastSessions` on, the session folder is one more readable folder (*Past sessions in cards*). See *Agent sandboxing*, *Readable folders*, *The Claude CLI runs under a Seatbelt profile*, *Codex runs under a Seatbelt profile*, *Codex reads local files through Advisor's file tools* and *Codex connectors follow the actions toggle*.
 
 ## IPC contract (NDJSON, one object per line)
 
@@ -1830,7 +1830,8 @@ because processes write to `/dev/null`, `/dev/fd/*` and pseudo-terminals. Unix
 permissions keep the disks root-only, so the worst case is text in one of the
 user's terminal windows. (Since 2026-11-02, no
 shell command runs under the profile, because the CLI's `read-only` mode
-cannot apply inside it: see *Codex shell stays closed*.)
+cannot apply inside it: see *Codex shell stays closed*. Since 2026-11-27, no
+Codex session is offered a shell: see *The Codex shell is off on purpose*.)
 
 Reason: the `sandboxMode: "read-only"` of Codex limits writes, not reads. Its
 documentation says that the agent "can inspect files". No CLI or SDK option
@@ -1932,7 +1933,8 @@ Seatbelt profile too. `codexClientOptions` adds it with `--config` overrides
 `readableFolders` (the card lanes), with "Allow connector actions" on and off.
 The classifier does not get it. Each task of a card lane starts with the
 readable folders and the tool names (`codexFilesNote`), as each Claude task
-does. The shell stays closed (*Codex shell stays closed*).
+does. The shell stays closed (*Codex shell stays closed*), and since
+2026-11-27 it is off (*The Codex shell is off on purpose*).
 
 Reason: since #118 a Codex card read no local note. Only a connector could,
 and only with connector actions on. The alternative in the issue, shell
@@ -2332,7 +2334,8 @@ the user's config is disabled by name (`mcp_servers.<name>.enabled=false`). The
 classifier also loses the shell (`shell_tool`, `unified_exec`), goals, image
 generation and sub-agents (`multi_agent`). (Since 2026-11-14 a card lane also
 gets Advisor's own file tools, with the toggle on or off: *Codex reads local
-files through Advisor's file tools*.)
+files through Advisor's file tools*. Since 2026-11-27 every session loses the
+shell: *The Codex shell is off on purpose*.)
 
 Reason: Codex has no per-call hook, so it cannot allow reads and refuse
 actions as `mcpPermission` does on Claude. Before, every Codex lane, the
@@ -2482,7 +2485,8 @@ a denied file an allowed name, and a case variant (`HOOKS.JSON`) matches on a
 case-insensitive volume. `auth.json` stays writable for the OAuth refresh.
 Codex's own `read-only` mode stays, but Advisor does not rely on it for these
 writes. (Since 2026-11-02, Advisor relies on it to keep the shell closed: see
-*Codex shell stays closed*.) Rejected: an allowlist of the state that the CLI
+*Codex shell stays closed*. Since 2026-11-27 it is the second layer: *The
+Codex shell is off on purpose*.) Rejected: an allowlist of the state that the CLI
 writes. That set is large and changes with releases, so an allowlist breaks the
 backend at the first unexpected write.
 Residuals: a symlink inside a denied folder is not followed; a resumed thread's
@@ -3064,6 +3068,8 @@ command of a Codex card runs under Advisor's Seatbelt profile (issue #118). The
 user guide now says that Codex cards cannot run shell commands, and so cannot
 read local notes. `codex.sdk.test.ts` (`#codex-shell`) asserts that a command
 fails with `sandbox_apply: Operation not permitted` and prints nothing it read.
+(Since 2026-11-27 the shell is also off, and the test turns it on again to
+check this layer: *The Codex shell is off on purpose*.)
 
 The fault: in `read-only` mode the CLI runs each shell command under
 `sandbox-exec` with its own profile, and under Advisor's profile
@@ -3112,7 +3118,8 @@ Follow-ups:
 
 - #119: turn the shell off on purpose for card lanes (`features.shell_tool`
   and `features.unified_exec` off, as for the classifier). Today the shell is
-  closed only because the nested profile fails.
+  closed only because the nested profile fails. Done 2026-11-27: *The Codex
+  shell is off on purpose*.
 - #120: an Advisor MCP server with read-only file tools (read, grep, glob)
   that applies `deniedPaths()` and `toolDecision`, with the shell still
   closed. Its alternative: shell commands under the CLI's own sandbox, with
@@ -3943,6 +3950,71 @@ that Advisor edits (`settingLine`): an older saved note keeps an invalid
   so in Obsidian a tag such as `Client A` is not a usable tag. The user chose
   to keep spaces.
 - **A folder's `.tags` file stays comma-separated.** No YAML reader sees it.
+
+## The Codex shell is off on purpose (2026-11-27, issue #119)
+
+Decision: each Codex session has `features.shell_tool` and
+`features.unified_exec` off (`codexClientOptions`), with connector actions on
+and off. Before, only the classifier had them off. A card lane was offered
+`exec_command`, and no command ran only because the CLI cannot apply its own
+profile inside Advisor's (*Codex shell stays closed*). `sandboxMode:
+"read-only"` stays as the second layer: if a CLI release offers a shell again,
+its commands still fail.
+
+Reason: a fault of macOS kept the shell closed, not a setting. Three changes
+would open it: a CLI release that detects the outer sandbox, a release that
+runs a command without its own sandbox when `sandbox_apply` fails, or a macOS
+that allows a nested profile. And since #120 a card lane reads files through
+Advisor's own Read, Grep and Glob, so the shell has no use. On 2026-11-02 a
+real card used one tool round trip on an `rg` through the shell, which failed
+(the comment of that date on #119).
+
+Rejected: the issue's change to the research prompt, which was to stop a Codex
+card from checking local notes first. Since #120 a Codex card can read them.
+
+Verified against CLI 0.166.0 (`codex.sdk.test.ts`, `#codex-shell` and
+`#codex-connectors`):
+
+- A card lane, on a code-mode model and on a classic model, with connector
+  actions on and off, is offered none of `exec_command`, `write_stdin`,
+  `shell`, `shell_command` and `local_shell`. This holds for the tools of the
+  request and for the tools inside code mode's `exec`, where a call of
+  `tools.exec_command` fails as "not a function".
+- A sub-agent that a card lane starts (`spawn_agent`, on a code-mode model) is
+  offered no shell either, with connector actions on and off. The CLI's
+  description of `spawn_agent` says that a sub-agent has the same tools as its
+  parent.
+- The sidecar's own Codex lanes, through the built `main.js`, are offered no
+  shell, with connector actions on and off.
+- With the two features left on for card lanes, four of these tests fail, and
+  the sub-agent is offered `exec_command`.
+- With the shell turned on again in the test, as a CLI release could do, a
+  command fails with `sandbox_apply: Operation not permitted` and prints
+  nothing that it read.
+- Advisor's file tools still read a note and refuse `~/.ssh` and Codex's
+  config (`#codex-files`).
+- One real card on 2026-11-27, through the built sidecar on a ChatGPT login
+  (model `gpt-6-astra`, code mode). The question asked for the version in a
+  file in a readable folder. The model first filtered `ALL_TOOLS` for an
+  Advisor read tool or `exec_command` and got only `mcp__advisor__Read`. It
+  then read the file through that tool, and the card was done in 21 s with
+  the correct version. The Codex record of the thread holds no shell call and
+  no `sandbox_apply`.
+
+Residuals:
+
+- The CLI's own base instructions still name `exec_command` (for example
+  "await tools.exec_command(...)"), so a model can spend one call on a look
+  for it, as the real card did. Advisor does not change those instructions.
+  The real card also had the task note of that time, which said "The shell
+  cannot read files here." The note (`codexFilesNote`) now names no shell and
+  tells the model to read every file through Advisor's tools. No real card
+  ran with the new note.
+- The test knows the shell tools of CLI 0.166.0 by name. A release that adds a
+  shell tool with a new name, or a feature that gives one, passes the test
+  until the name is added. The second layer still stops its commands.
+- CI runs the sidecar on Linux, so it skips these tests. Run `npm test` on a
+  Mac after each Codex CLI upgrade.
 
 ## Revisit as it grows
 
