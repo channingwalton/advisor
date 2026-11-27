@@ -4134,7 +4134,9 @@ Accepted limits:
 - An editor that saves an old copy after an in-app change still undoes it.
   See *Open a session in the default app*.
 - A session folder changed in Preferences is watched from the next reload of
-  the list.
+  the list. (Superseded 2026-11-27: the change reloads the list, and the
+  reload moves the watch; see *A session folder change reloads the Sessions
+  browser*.)
 - Each reload reads every note on the main thread, as before (see *Nested
   session folders*). An editor that saves every few seconds reloads the list
   as often.
@@ -4146,6 +4148,8 @@ Accepted limits:
 - A change of folder while the view shows can leave the old folder's notes
   in the list until the next reload, because the `advisorConfigChanged`
   handler does not reload the list. This was so before the watch.
+  (Superseded 2026-11-27, issue #159: see *A session folder change reloads
+  the Sessions browser*.)
 
 Verified: `SessionFolderWatchTests` cover the rules with set flags, and three
 tests use the real file system. A note written by a child process is
@@ -4165,6 +4169,81 @@ first line by a rename save (`sed -i`), and another note's name by a write in
 place. One reload followed, and both rows, the detail title and the changed
 transcript line showed the new text, with the selection kept. An `xattr` on
 both notes gave no reload in 6 s, and a later content edit did.
+
+## A session folder change reloads the Sessions browser (2026-11-27, issue #159)
+
+Decision: when `advisorConfigChanged` gives a config that names a session
+folder other than the folder of the list, the Sessions browser reloads the
+list from the new folder, and the reload moves the folder watch there.
+Before, the handler refreshed the tag library, the saved contexts, the
+triggers and the folder tags, but not the list. So after a change in
+Preferences, the list showed the old folder until something else reloaded
+it, and the watch stayed on the old folder.
+
+- **The folder of the last reload is the reference** (`ListedFolder`). Each
+  reload records the folder that it lists (`list`), and the handler asks
+  whether its config names another folder (`changes(to:)`). Both resolve the
+  folder as `SessionArchive.directory` does
+  (`SessionArchive.resolvedDirectory(for:)`). So the same folder by another
+  path (a symlink, a trailing `/`) is not a change, and a Preferences edit
+  that keeps the folder does not read every note again. Such an edit
+  refreshes what it refreshed before.
+- **The reload uses the handler's config.** `reload(_:)` takes a config. It
+  lists and watches the folder that the config names, and reads the folder
+  contexts and tags from it. Before, it read `config.json` again for the
+  folder (`SessionArchive.directory`), and again for each folder's context
+  and tags.
+- **Each read keeps its rule.** The handler keeps `loadIfUsable()`, so a file
+  that cannot be used leaves the browser as it is. A reload on appearance
+  and on `advisorSessionsChanged` keeps the lenient `load()` (issue #137).
+  The in-app actions and the writer use `SessionArchive.directory`, which
+  reads `load()`, so the list shows the folder that they use. Rejected: the
+  handler's rule for every reload, with the last folder kept for a file that
+  cannot be used. The list could then show a folder other than the one that
+  a rename, a filing or a new recording uses. For a usable file, the two
+  reads give the same config.
+- **The selection stays while its note is in the new list.** After **Move**,
+  the selected note has a new URL, so the reload selects the first session,
+  as after a folder rename outside the app.
+
+Accepted limits:
+
+- For a `config.json` that is not a JSON object, a reload on
+  `advisorSessionsChanged` lists the default folder with an empty tag
+  library, as before. The writer then uses the default folder too.
+- A recording that continues across the change writes to the old folder, and
+  the browser does not show that note. See *Choosable transcript folder*.
+- For a file that cannot be used, a config change leaves the list as it is,
+  as before (`loadIfUsable`). Preferences cannot change the folder then, but
+  a hand edit can, and **Reload** posts the change. Until the next reload (an
+  in-app action, a change on disk, or the next time the window shows), the
+  list can show a folder other than the one that `load()` gives to the
+  in-app actions.
+- The view state stays across the change: the search text, and the set of
+  collapsed folders, which is keyed by folder path. So a folder of the new
+  session folder that has the path of a folder collapsed in the old one
+  shows collapsed.
+
+Verified: `aConfigNamesItsSessionFolderResolved` and
+`aConfigChangeReloadsTheListOnlyForAnotherFolder` cover the comparison. A
+symlink and a trailing `/` give the same folder, another folder does not,
+and a config before any reload counts as a change. With the comparison
+inverted, the second test failed.
+In the running dev build, with a scratch home folder (`CFFIXED_USER_HOME`), a
+temporary probe changed the folder as the Preferences window does (a save of
+`sessionDir`, then `advisorConfigChanged`). It wrote notes from a child
+process, logged each reload, and drew the Sessions window to a PNG after each
+step. The drawn list, selection and detail agreed with the log:
+
+1. A change to a second folder (**Leave Them**) listed only that folder's
+   note, and selected it.
+2. A config change that kept the folder did not reload the list.
+3. A write in the old folder did not reload the list. A write in the new
+   folder did.
+4. A **Move** (`SessionArchive.move`) to a third folder, and the change to
+   it, listed the moved notes at their new paths, and selected the first.
+5. A write in the folder that the notes left did not reload the list. A
+   write in the third folder did.
 
 ## Revisit as it grows
 

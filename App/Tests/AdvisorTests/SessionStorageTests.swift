@@ -45,6 +45,62 @@ import Foundation
     #expect(SessionArchive.directory(for: "./notes") == SessionArchive.defaultDirectory)
 }
 
+// MARK: - the folder that a config names (issue #159)
+
+/// The Sessions browser reloads its list when the folder that a changed
+/// config names is not the folder that it lists. The same folder by another
+/// path (a symlink, a trailing `/`) is the same folder, so a Preferences change
+/// that keeps the folder does not read every note again. Another folder is not.
+@Test func aConfigNamesItsSessionFolderResolved() throws {
+    let fm = FileManager.default
+    let top = fm.temporaryDirectory.appendingPathComponent("advisor-config-folder-\(UUID().uuidString)")
+    defer { try? fm.removeItem(at: top) }
+    let real = top.appendingPathComponent("real")
+    try fm.createDirectory(at: real, withIntermediateDirectories: true)
+    try fm.createDirectory(at: top.appendingPathComponent("other"), withIntermediateDirectories: true)
+    try fm.createSymbolicLink(at: top.appendingPathComponent("link"), withDestinationURL: real)
+    func folder(_ sessionDir: String) -> URL {
+        var config = AdvisorConfig()
+        config.sessionDir = sessionDir
+        return SessionArchive.resolvedDirectory(for: config)
+    }
+
+    let listed = SessionArchive.resolvedFolder(real)
+    #expect(folder(real.path) == listed)
+    #expect(folder(top.appendingPathComponent("link").path) == listed)
+    #expect(folder(real.path + "/") == listed)
+    #expect(folder(top.appendingPathComponent("other").path) != listed)
+    #expect(SessionArchive.resolvedDirectory(for: AdvisorConfig())
+        == SessionArchive.resolvedFolder(SessionArchive.defaultDirectory))
+}
+
+/// A config change reloads the list when the config names a folder other
+/// than the one that the last reload listed, and before any reload.
+@Test func aConfigChangeReloadsTheListOnlyForAnotherFolder() throws {
+    let fm = FileManager.default
+    let top = fm.temporaryDirectory.appendingPathComponent("advisor-listed-folder-\(UUID().uuidString)")
+    defer { try? fm.removeItem(at: top) }
+    for name in ["a", "b"] {
+        try fm.createDirectory(at: top.appendingPathComponent(name), withIntermediateDirectories: true)
+    }
+    try fm.createSymbolicLink(at: top.appendingPathComponent("link"), withDestinationURL: top.appendingPathComponent("a"))
+    func config(_ name: String) -> AdvisorConfig {
+        var config = AdvisorConfig()
+        config.sessionDir = top.appendingPathComponent(name).path
+        return config
+    }
+
+    var listed = ListedFolder()
+    #expect(listed.changes(to: config("a")))
+    #expect(listed.list(config("a")) == SessionArchive.resolvedFolder(top.appendingPathComponent("a")))
+    #expect(!listed.changes(to: config("a")))
+    #expect(!listed.changes(to: config("link")))
+    #expect(listed.changes(to: config("b")))
+    #expect(listed.list(config("b")) == SessionArchive.resolvedFolder(top.appendingPathComponent("b")))
+    #expect(listed.changes(to: config("a")))
+    #expect(!listed.changes(to: config("b")))
+}
+
 // MARK: - move (relocating transcripts)
 
 /// A throwaway directory holding the given session files, removed on teardown.

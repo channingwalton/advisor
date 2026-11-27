@@ -12,6 +12,27 @@ struct SessionFile: Identifiable, Hashable {
     var folder: String?
 }
 
+/// The session folder that the Sessions browser lists (issue #159). A config
+/// change that names another folder reloads the list. The same folder by
+/// another path, through a symlink, is the same folder, so a Preferences edit
+/// that keeps the folder does not read every note again.
+struct ListedFolder {
+    private(set) var url: URL?
+
+    /// Record the folder that a reload with `config` lists, and give it.
+    mutating func list(_ config: AdvisorConfig) -> URL {
+        let folder = SessionArchive.resolvedDirectory(for: config)
+        url = folder
+        return folder
+    }
+
+    /// True when `config` names a folder other than the listed folder, or
+    /// when nothing is listed yet.
+    func changes(to config: AdvisorConfig) -> Bool {
+        SessionArchive.resolvedDirectory(for: config) != url
+    }
+}
+
 /// Reads back the session notes `SessionWriter` saves, for browsing past
 /// transcripts. Owns the on-disk location and filename convention (the live
 /// writer delegates to it), so the format lives in one place.
@@ -43,7 +64,15 @@ enum SessionArchive {
     /// (`resolvedFolder`), so a URL built from it, such as the writer's note or
     /// a note filed into a folder, equals the URL that `list` gives for that
     /// note (issue #114).
-    static var directory: URL { resolvedFolder(directory(for: AdvisorConfig.load().sessionDir)) }
+    static var directory: URL { resolvedDirectory(for: AdvisorConfig.load()) }
+
+    /// The session folder that `config` names, resolved as `directory`
+    /// resolves it. The Sessions browser compares it with the folder that it
+    /// lists, so the same folder by another path is the same folder (issue
+    /// #159).
+    static func resolvedDirectory(for config: AdvisorConfig) -> URL {
+        resolvedFolder(directory(for: config.sessionDir))
+    }
 
     /// `url` as `contentsOfDirectory` names a folder: every symlink resolved by
     /// `realpath`, so `/var` reads as `/private/var` (issue #114).

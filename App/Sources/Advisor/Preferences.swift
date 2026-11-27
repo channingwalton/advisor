@@ -1339,8 +1339,9 @@ private struct GeneralSettingsView: View {
     /// unchanged. The same folder by another path, through a symlink, has
     /// nothing to move, so the path switches with no prompt (issue #114).
     /// Writing `sessionDir` fires the parent form's `onChange` →
-    /// `PreferencesFile.commit`, which posts `advisorConfigChanged` after a
-    /// save; the Sessions browser reloads on it.
+    /// `PreferencesFile.commit`, and the window posts `advisorConfigChanged`
+    /// after a save. On it, the Sessions browser lists the new folder and
+    /// moves its watch there (issue #159).
     private func chooseSessionFolder() {
         let panel = NSOpenPanel()
         panel.title = "Choose Session Folder"

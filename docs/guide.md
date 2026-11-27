@@ -148,7 +148,8 @@ Each session is a markdown note in
 `~/Library/Application Support/Advisor/sessions/`, with the cards in place in
 the conversation, as the window shows them. A summary is the exception: it
 leads the note in its own `# Summary` section. You can choose another folder in
-Preferences, which offers to move the existing notes.
+Preferences, which offers to move the existing notes. The Sessions browser then
+lists the sessions in the new folder.
 
 ## Sessions browser
 

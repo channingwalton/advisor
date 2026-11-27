@@ -82,6 +82,8 @@ struct SessionsView: View {
     /// #133). It runs while the view shows, and each reload points it at the
     /// current folder.
     @State private var folderWatch: SessionFolderWatch?
+    /// The session folder that the last `reload` listed (issue #159).
+    @State private var listedFolder = ListedFolder()
 
     var body: some View {
         // Native NavigationSplitView: on macOS 26 (Tahoe) the sidebar column
@@ -122,6 +124,12 @@ struct SessionsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .advisorConfigChanged)) { _ in
             // A file that cannot be used leaves the browser as it is.
             guard let config = AdvisorConfig.loadIfUsable() else { return }
+            // A session folder changed in Preferences lists the new folder,
+            // and the reload moves the watch there (issue #159).
+            if listedFolder.changes(to: config) {
+                reload(config)
+                return
+            }
             let library = config.tags
             tagLibrary = library
             savedContexts = config.contexts
@@ -695,18 +703,21 @@ struct SessionsView: View {
 
     // MARK: data
 
-    private func reload() {
-        let config = AdvisorConfig.load()
+    /// Read the list from the folder that `config` names, and point the watch
+    /// at it. The default is the lenient `load()` (issue #137), which also
+    /// gives `SessionArchive.directory`: the in-app actions and the writer use
+    /// that folder, so the list shows it.
+    private func reload(_ config: AdvisorConfig = AdvisorConfig.load()) {
         tagLibrary = config.tags
         savedContexts = config.contexts
         triggers = config.triggers
-        let directory = SessionArchive.directory
+        let directory = listedFolder.list(config)
         folderWatch?.watch(directory)
         let scan = SessionArchive.scan(directory)
         folders = scan.folders
-        folderContexts = folders.reduce(into: [:]) { $0[$1] = SessionArchive.folderContext($1) }
+        folderContexts = folders.reduce(into: [:]) { $0[$1] = SessionArchive.folderContext($1, root: directory) }
         folderTags = folders.reduce(into: [:]) {
-            $0[$1] = SessionArchive.folderTags($1).filter {
+            $0[$1] = SessionArchive.folderTags($1, root: directory).filter {
                 TagLibrary.named($0, in: tagLibrary) != nil
             }
         }
