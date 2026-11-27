@@ -13,8 +13,10 @@ export interface AdvisorConfig {
   /// Which trigger kinds are enabled.
   triggers: { question: boolean; context: boolean; factcheck: boolean };
   /// Allow MCP connector tools that take actions (send/create/update/...).
-  /// Read/search connector tools are always allowed. (Claude only — Codex MCP
-  /// servers come from ~/.codex/config.toml and are not gated here.)
+  /// Claude: read/search connector tools are always allowed, and actions only
+  /// with this on (`mcpPermission`). Codex has no per-call hook, so a Codex
+  /// session gets all the user's connectors with this on and none with it off
+  /// (`codexClientOptions`). Advisor's own file tools are not affected.
   allowMcpActions: boolean;
   /// Agent backend shared by every lane (classifier, research, query).
   provider: Provider;
