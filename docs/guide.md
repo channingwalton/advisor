@@ -335,7 +335,11 @@ On **Claude**, a tool policy limits each research agent call:
 - Web search and fetch are allowed.
 - Your MCP connectors (Slack, Jira, …) can read and search. Other connector
   tools, and tools that the policy does not recognise, need **Allow connector
-  actions**.
+  actions**. With it on, the agents may use every connector tool that starts,
+  also one that controls apps and browsers or runs code, if your Claude
+  configuration has such a connector. With it off, such a connector can still
+  read through each tool whose name the policy takes as a read: a browser
+  connector, for example, could read the pages that are open in your browser.
 - Files can be read, but not changed, only inside your readable folders. Add
   and remove them in Preferences → **Files**. There are none by default, so the
   agents read no local file until you add a folder. **Agents can read past
@@ -382,7 +386,9 @@ applies to Codex from its next turn. This is coarser than the Claude policy:
 Codex can read its own `~/.codex` login, and it cannot allow connector reads
 and refuse actions. So with **Allow connector actions** off it gets none of
 your connectors (no MCP servers or plugins from `~/.codex/config.toml`, and no
-ChatGPT apps), and with it on, it gets all of them. A connector that reads its
+ChatGPT apps), and with it on, it gets all of them. All of them includes a
+plugin or server that controls apps and browsers or runs code, such as a
+computer-use plugin or a Node REPL server. A connector that reads its
 own files in your home folder starts only when that folder is a readable
 folder.
 

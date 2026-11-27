@@ -2335,7 +2335,9 @@ classifier also loses the shell (`shell_tool`, `unified_exec`), goals, image
 generation and sub-agents (`multi_agent`). (Since 2026-11-14 a card lane also
 gets Advisor's own file tools, with the toggle on or off: *Codex reads local
 files through Advisor's file tools*. Since 2026-11-27 every session loses the
-shell: *The Codex shell is off on purpose*.)
+shell: *The Codex shell is off on purpose*. "All connectors" includes ones that
+control apps and browsers or run code: *Connector actions include connectors
+that control the Mac*.)
 
 Reason: Codex has no per-call hook, so it cannot allow reads and refuse
 actions as `mcpPermission` does on Claude. Before, every Codex lane, the
@@ -4015,6 +4017,56 @@ Residuals:
   until the name is added. The second layer still stops its commands.
 - CI runs the sidecar on Linux, so it skips these tests. Run `npm test` on a
   Mac after each Codex CLI upgrade.
+
+## Connector actions include connectors that control the Mac (2026-11-27)
+
+Decision: **Allow connector actions** keeps its meaning on both backends. With
+it on, an agent may use every connector that the user configured, also a
+connector or plugin that controls apps and browsers or runs code. Advisor does
+not block such a connector by name or by kind. The Preferences caption and the
+user guide (*Safety*) now say so.
+
+Reason: the user chooses the connectors in their own Claude and Codex
+configuration, and the toggle is their consent to actions. A block by name
+would hold only the names that are known today.
+
+Found: in the real-card check of #119, a Codex card lane with the toggle on
+was offered `mcp__cua_repl` (`js`, `js_reset`) from the plugin
+`unified-computer-use@openai-bundled`. The description of `js` says: "Control
+native apps or browsers on the user’s computer by reading or operating UI." A
+probe on 2026-11-27 used the user's own configurations and local fake model
+servers, so no model call left the Mac:
+
+- Codex, toggle on: the card lane also had `mcp__node_repl`, from an MCP
+  server of the user. Its description says that it runs JavaScript and imports
+  packages such as `playwright`. It also had 315 ChatGPT app tools
+  (`mcp__codex_apps`). With `computer_use`, `browser_use`,
+  `browser_use_external`, `browser_use_full_cdp_access`, `in_app_browser` and
+  `in_app_local_automation` off, no tool went away. `features.plugins=false`
+  removed `mcp__cua_repl` and `request_plugin_install` only. An override by
+  name (`plugins.<name>.enabled=false`) removed `mcp__cua_repl` only, so the
+  SDK's bare dotted path works for a name with `@` and `-`.
+- Claude, toggle on: of the user's connectors, only `fff` was offered. The
+  `codex` MCP server did not appear, and nor did Claude in Chrome. The probe
+  used an API key, so the claude.ai connectors did not load.
+- Toggle off: `mcpPermission` allows a browser connector's `get_page_text`,
+  `read_page` and `find`, and refuses its `navigate`, `javascript_tool` and
+  `computer` (checked with those names).
+
+Rejected:
+
+- Plugins off for each Codex session, and a short list of blocked names on
+  both backends (`node_repl`, `computer-use`, `claude-in-chrome`).
+- A list in Preferences of the connectors that cards may use.
+
+Residuals:
+
+- With the toggle on, a prompt injection in a page that a card reads can ask
+  the model to use such a connector. Whether `mcp__cua_repl` or
+  `mcp__node_repl` works under the Seatbelt profile and the macOS permissions
+  was not tested.
+- With the toggle off, a Claude card can read the open pages of a browser
+  connector through its read tools.
 
 ## Revisit as it grows
 

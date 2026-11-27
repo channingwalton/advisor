@@ -1058,7 +1058,7 @@ private struct AgentSettingsView: View {
                 Stepper("Parallel agents: \(agentLanes)", value: $agentLanes, in: 1...8)
                 Toggle("Allow connector actions", isOn: $allowMcpActions)
                     .disabled(locked)
-                Text("Off: connectors (Slack, Jira, …) are read/search only; Codex, which can't tell the two apart, gets no connectors. On: agents may also send, create, and update — use with care.")
+                Text("Off: connectors (Slack, Jira, …) are read/search only; Codex, which can't tell the two apart, gets no connectors. On: agents may use every connector you have set up, to send, create and update too — including one that controls apps and browsers or runs code, such as a computer-use plugin. Use with care.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
