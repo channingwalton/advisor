@@ -78,6 +78,10 @@ struct SessionsView: View {
     /// the pointer is over the Folders label, which reveals its +.
     @State private var hoveredFolder: String?
     @State private var hoveringFoldersBar = false
+    /// Reloads the list when another app changes the session folder (issue
+    /// #133). It runs while the view shows, and each reload points it at the
+    /// current folder.
+    @State private var folderWatch: SessionFolderWatch?
 
     var body: some View {
         // Native NavigationSplitView: on macOS 26 (Tahoe) the sidebar column
@@ -96,7 +100,20 @@ struct SessionsView: View {
         })
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 860, minHeight: 560)
-        .onAppear(perform: reload)
+        .onAppear {
+            // The closures capture nothing from the view: the watch, held in
+            // the view's state, must not keep the view alive.
+            if folderWatch == nil {
+                folderWatch = SessionFolderWatch(ignoring: { TranscriptWindowContext.shared.liveFileURL }) { _ in
+                    NotificationCenter.default.post(name: .advisorSessionsChanged, object: nil)
+                }
+            }
+            reload()
+        }
+        .onDisappear {
+            folderWatch?.stop()
+            folderWatch = nil
+        }
         .onReceive(NotificationCenter.default.publisher(for: .advisorSessionsChanged)) { _ in
             reload()
         }
@@ -683,7 +700,9 @@ struct SessionsView: View {
         tagLibrary = config.tags
         savedContexts = config.contexts
         triggers = config.triggers
-        let scan = SessionArchive.scan()
+        let directory = SessionArchive.directory
+        folderWatch?.watch(directory)
+        let scan = SessionArchive.scan(directory)
         folders = scan.folders
         folderContexts = folders.reduce(into: [:]) { $0[$1] = SessionArchive.folderContext($1) }
         folderTags = folders.reduce(into: [:]) {

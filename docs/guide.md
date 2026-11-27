@@ -168,6 +168,11 @@ title (its name, else the context that you typed before Listen, else the
 date), a gist, the duration, the card count and a coloured dot for each tag
 (hover for the names).
 
+When another app changes a session's note, for example an editor that you
+opened with **Open in Default App**, the list and the detail show the change
+in about a second. The selection stays. The live session shows the
+transcript as it was when the list last updated.
+
 ### Folders
 
 Folders show as collapsible sections above the sessions. To add one, hover the

@@ -1134,6 +1134,8 @@ lists notes by their `yyyy-MM-dd-HHmmss.md` name). (Changed 2026-06-19: see
   carries the sidecar and the owned file across scenes.
 
 Residual: the list refreshes when it opens and on `.advisorSessionsChanged`.
+(Changed 2026-11-27: also on a change by another app. See *The Sessions
+browser reloads a note that changes on disk*.)
 
 Commit: `d235d06`.
 
@@ -3476,7 +3478,8 @@ the live note. Accepted limits, as for a note opened from Finder:
   the save can put the note back at its old path.
 - The browser does not watch the file. An edit made in the other app shows only
   after the next reload of the list, and until then the detail shows the old
-  text.
+  text. (Changed 2026-11-27: see *The Sessions browser reloads a note that
+  changes on disk*.)
 
 Rejected: the app's name in the label, which needs a lookup that stays current
 when the user changes the default app, and an "Open With" submenu. Both are
@@ -4067,6 +4070,101 @@ Residuals:
   was not tested.
 - With the toggle off, a Claude card can read the open pages of a browser
   connector through its read tools.
+
+## The Sessions browser reloads a note that changes on disk (2026-11-27, issue #133)
+
+Decision: while the Sessions browser shows, an FSEvents stream
+(`SessionFolderWatch`) watches the session folder at every depth. A change
+from another app reloads the list, so the row and the detail show an edit
+made in the default app (#127) or in Finder. Before, the list reloaded only
+when it appeared and on `advisorSessionsChanged`.
+
+- **The app's own writes are ignored** (`kFSEventStreamCreateFlagIgnoreSelf`).
+  In-app actions post `advisorSessionsChanged`, as before. The live writer's
+  rewrites, 2 s to 10 s apart during a recording, do not reload the whole
+  archive, so the live note in the list stays as it was at the last reload,
+  as before.
+- **The live note is ignored** (`ignoring`, from `liveFileURL`). The writer
+  rewrites it from memory, so another app's change to it does not last. Also,
+  an FSEvents event can carry the flags of earlier changes to its path: a
+  probe saw a child's `xattr` arrive as `Renamed, Modified, Xattr` just after
+  a write by the probe itself. So a sync client's attribute change on the
+  live note could look like a rewrite and reload the list at each upload.
+- **Only a change that the browser can show counts**
+  (`SessionFolderWatch.reports`): a change of content or name (created,
+  removed, renamed, modified) of the session folder itself, a folder, a note,
+  or a folder's `.context.md` or `.tags` (`SessionArchive.affectsBrowser`).
+  An attribute change alone (an extended attribute that macOS sets when
+  another app opens a note, a time stamp, the owner) does not reload the
+  list, and nor do Finder's `.DS_Store`, an editor's swap and temporary
+  files, and paths in a dot-directory. A change that FSEvents cannot itemise
+  (dropped events, a moved session folder) reloads it.
+- **A latency of 0.5 s** puts a run of saves into one reload.
+- **A batch posts `advisorSessionsChanged`**, so a change from another app
+  reloads the list by the same path as an in-app change. The watch's
+  closures capture nothing from the view, because the watch is held in the
+  view's state and a captured view would keep both alive.
+- **Each reload points the watch at the current folder.** The stream runs
+  while the view shows, and stops when the view goes. A batch from the old
+  folder can move the watch, so the watch reports a batch on the next turn
+  of the main queue, not inside the stream's callback: FSEvents does not say
+  that a stream can stop inside its own callback. (Without the deferral, a
+  test that stops it there passed three times under Guard Malloc, which
+  unmaps freed memory. That is evidence, not a guarantee.) So a batch that
+  FSEvents gave just before a stop can still reload the list once.
+- **The selection and the scroll position stay.** `reload` keeps the
+  selection while its note exists, and the rows and the detail keep their
+  identity, the note's URL.
+
+Rejected:
+
+- A reload when the app becomes active. It misses an edit made while Advisor
+  stays visible beside the editor.
+- `NSFilePresenter`. It sees only coordinated writes, and most Markdown editors
+  do not coordinate.
+- A `DispatchSource` for each file or folder. An atomic save replaces the
+  file, and each subfolder needs a source of its own.
+- A reload of only the changed notes. Changes from another app are rare, and
+  a full reload already runs after each in-app action.
+
+Accepted limits:
+
+- A note renamed or moved outside the app loses the selection: the reload
+  selects the first session, as before.
+- An editor that saves an old copy after an in-app change still undoes it.
+  See *Open a session in the default app*.
+- A session folder changed in Preferences is watched from the next reload of
+  the list.
+- Each reload reads every note on the main thread, as before (see *Nested
+  session folders*). An editor that saves every few seconds reloads the list
+  as often.
+- Because of the flags that FSEvents carries over, an attribute change soon
+  after an in-app write to the same note can still reload the list once.
+- A save inside a package in the session folder (an app, or a document that
+  is a folder) reloads the list, although the list shows no package. The
+  path alone does not show which folder is a package.
+- A change of folder while the view shows can leave the old folder's notes
+  in the list until the next reload, because the `advisorConfigChanged`
+  handler does not reload the list. This was so before the watch.
+
+Verified: `SessionFolderWatchTests` cover the rules with set flags, and three
+tests use the real file system. A note written by a child process is
+reported; an earlier write by the test process, the live note and a
+`.DS_Store` are not (`req_sessions_reload_on_disk`). After a change of
+folder, the old folder is not reported. A batch that moves the watch to a
+new folder is followed by reports from the new folder. With `IgnoreSelf`, the live-note
+check, the content-change check or the path filter removed, a test failed.
+A real-file-system test for an attribute change was dropped: its result
+depended on the flags that FSEvents carried over.
+
+Verified in the running dev build, with a scratch home folder
+(`CFFIXED_USER_HOME`) and two notes. A temporary probe drew the Sessions
+window to a PNG after each `advisorSessionsChanged`, because the agent's
+permissions refused `screencapture`. A shell changed one note's name and
+first line by a rename save (`sed -i`), and another note's name by a write in
+place. One reload followed, and both rows, the detail title and the changed
+transcript line showed the new text, with the selection kept. An `xattr` on
+both notes gave no reload in 6 s, and a later content edit did.
 
 ## Revisit as it grows
 

@@ -132,6 +132,22 @@ enum SessionArchive {
         return (notes, folders)
     }
 
+    /// True when a change at `path` can change what the Sessions browser shows
+    /// (issue #133): the session folder `root` itself, a folder in it, a note,
+    /// or a folder's `.context.md` or `.tags`. A change inside a dot-directory,
+    /// to another file (Finder's `.DS_Store`, an editor's swap or temporary
+    /// file) or outside `root` is not, as `walk` lists none of them. Both
+    /// paths are absolute and resolved, as an FSEvents stream gives them.
+    static func affectsBrowser(path: String, isDirectory: Bool, root: String) -> Bool {
+        let base = root.hasSuffix("/") ? String(root.dropLast()) : root
+        if path == base { return true }
+        guard path.hasPrefix(base + "/") else { return false }
+        let names = path.dropFirst(base.count + 1).split(separator: "/")
+        guard let name = names.last, !names.dropLast().contains(where: { $0.hasPrefix(".") }) else { return false }
+        if isDirectory { return !name.hasPrefix(".") }
+        return date(from: String(name)) != nil || name == folderContextName || name == folderTagsName
+    }
+
     /// `list` and `folders` from one walk, for a caller that needs both, such as
     /// the Sessions browser's reload.
     static func scan(_ directory: URL = SessionArchive.directory) -> (notes: [SessionFile], folders: [String]) {
@@ -584,8 +600,11 @@ enum SessionArchive {
     /// and not a session-date name, so `list`/`folders` ignore it (a file, not a
     /// directory), and it travels with the directory on `renameFolder`.
     static func folderContextURL(_ folder: String, root: URL = SessionArchive.directory) -> URL? {
-        folderURL(folder, root: root)?.appendingPathComponent(".context.md")
+        folderURL(folder, root: root)?.appendingPathComponent(folderContextName)
     }
+
+    /// The name of the file in `folderContextURL`.
+    static let folderContextName = ".context.md"
 
     /// A folder's saved context (issue #36), or "" when none is set or the name is
     /// unusable. Surrounding whitespace is trimmed so it round-trips the editor text.
@@ -624,8 +643,11 @@ enum SessionArchive {
     /// `<root>/<folder>/.tags`. It travels with the directory on rename and is
     /// ignored by session listing.
     static func folderTagsURL(_ folder: String, root: URL = SessionArchive.directory) -> URL? {
-        folderURL(folder, root: root)?.appendingPathComponent(".tags")
+        folderURL(folder, root: root)?.appendingPathComponent(folderTagsName)
     }
+
+    /// The name of the file in `folderTagsURL`.
+    static let folderTagsName = ".tags"
 
     /// A folder's default session tags (issue #76), or an empty list when unset.
     /// Uses the same canonical comma-separated representation as note frontmatter.
